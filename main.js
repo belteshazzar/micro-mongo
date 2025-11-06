@@ -1088,3 +1088,6 @@ export function DB(options) {
 
 }; // MongoLocalDB.DB
 
+// Export BPlusTree utility class
+export {BPlusTree} from './BPlusTree.js';
+
