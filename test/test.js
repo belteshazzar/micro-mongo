@@ -1172,5 +1172,122 @@ describe("DB", function() {
 				if (arr.length!=4) throw "should be 4 elements in results array";
 			});
 		});
+
+		describe("Indexes", function() {
+			
+			it('should create a single-field index', function() {
+				var indexName = db[collectionName].createIndex({ age: 1 });
+				expect(indexName).to.equal('age_1');
+				var indexes = db[collectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].name).to.equal('age_1');
+				expect(indexes[0].key).to.deep.equal({ age: 1 });
+			});
+
+			it('should create a named index', function() {
+				var indexName = db[collectionName].createIndex({ legs: 1 }, { name: 'legs_index' });
+				expect(indexName).to.equal('legs_index');
+				var indexes = db[collectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].name).to.equal('legs_index');
+			});
+
+			it('should create multiple indexes', function() {
+				db[collectionName].createIndex({ age: 1 });
+				db[collectionName].createIndex({ legs: -1 });
+				var indexes = db[collectionName].getIndexes();
+				expect(indexes.length).to.equal(2);
+			});
+
+			it('should not create duplicate index', function() {
+				db[collectionName].createIndex({ age: 1 });
+				db[collectionName].createIndex({ age: 1 });
+				var indexes = db[collectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+			});
+
+			it('should use index for simple equality query', function() {
+				// Create index on age field
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Query using indexed field
+				var results = db[collectionName].find({ age: 54 }).toArray();
+				expect(results.length).to.equal(2);
+				
+				// Verify we got the right documents
+				results.forEach(function(doc) {
+					expect(doc.age).to.equal(54);
+				});
+			});
+
+			it('should still work with non-indexed queries', function() {
+				// Create index on age field
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Query using non-indexed field
+				var results = db[collectionName].find({ legs: 5 }).toArray();
+				expect(results.length).to.equal(1);
+				expect(results[0].legs).to.equal(5);
+			});
+
+			it('should maintain index on insert', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Insert a new document
+				db[collectionName].insertOne({ age: 25, legs: 2 });
+				
+				// Query should find the new document
+				var results = db[collectionName].find({ age: 25 }).toArray();
+				expect(results.length).to.equal(1);
+				expect(results[0].age).to.equal(25);
+			});
+
+			it('should maintain index on delete', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Delete documents with age 54
+				var deleteResult = db[collectionName].deleteMany({ age: 54 });
+				expect(deleteResult.deletedCount).to.equal(2);
+				
+				// Query should not find deleted documents
+				var results = db[collectionName].find({ age: 54 }).toArray();
+				expect(results.length).to.equal(0);
+			});
+
+			it('should handle complex queries with index', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Complex query with indexed and non-indexed fields
+				var results = db[collectionName].find({ age: 4, legs: 5 }).toArray();
+				expect(results.length).to.equal(1);
+				expect(results[0].age).to.equal(4);
+				expect(results[0].legs).to.equal(5);
+			});
+
+			it('should handle queries with operators on indexed fields', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Query with operators falls back to full scan
+				var results = db[collectionName].find({ age: { $gt: 50 } }).toArray();
+				expect(results.length).to.equal(2);
+			});
+
+			it('should create compound index', function() {
+				var indexName = db[collectionName].createIndex({ age: 1, legs: 1 });
+				expect(indexName).to.equal('age_1_legs_1');
+				
+				var indexes = db[collectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].key).to.deep.equal({ age: 1, legs: 1 });
+			});
+
+			it('should handle empty result set with index', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Query for non-existent value
+				var results = db[collectionName].find({ age: 999 }).toArray();
+				expect(results.length).to.equal(0);
+			});
+		});
 	});
 });
