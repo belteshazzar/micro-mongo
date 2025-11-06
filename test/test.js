@@ -1206,6 +1206,25 @@ describe("DB", function() {
 				expect(indexes.length).to.equal(1);
 			});
 
+			it('should throw error when creating index with conflicting name', function() {
+				db[collectionName].createIndex({ age: 1 }, { name: 'my_index' });
+				try {
+					db[collectionName].createIndex({ legs: 1 }, { name: 'my_index' });
+					throw new Error('Should have thrown an error');
+				} catch(e) {
+					expect(e.code).to.equal(85);
+				}
+			});
+
+			it('should throw error when keys is an array', function() {
+				try {
+					db[collectionName].createIndex([{ age: 1 }]);
+					throw new Error('Should have thrown an error');
+				} catch(e) {
+					expect(e.code).to.equal(2);
+				}
+			});
+
 			it('should use index for simple equality query', function() {
 				// Create index on age field
 				db[collectionName].createIndex({ age: 1 });

@@ -999,7 +999,7 @@ export function DB(options) {
 				// keys: { fieldName: 1 } for ascending, { fieldName: -1 } for descending
 				// options: { name: "indexName", unique: true, ... }
 				
-				if (!keys || typeof keys !== 'object') {
+				if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
 					throw { $err: "createIndex requires a key specification object", code: 2 };
 				}
 
@@ -1007,7 +1007,17 @@ export function DB(options) {
 				
 				// Check if index already exists
 				if (indexes[indexName]) {
-					// In MongoDB, this would return without error
+					// MongoDB checks for key specification conflicts
+					var existingIndex = indexes[indexName];
+					var existingKeys = JSON.stringify(existingIndex.keys);
+					var newKeys = JSON.stringify(keys);
+					if (existingKeys !== newKeys) {
+						throw { 
+							$err: "Index with name " + indexName + " already exists with different key specification", 
+							code: 85 
+						};
+					}
+					// Same index, return without error
 					return indexName;
 				}
 
