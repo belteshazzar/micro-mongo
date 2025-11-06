@@ -33191,6 +33191,19 @@ var index = {
 };
 
 /**
+ * MicroMongoDB.copy (Private Function)
+ */
+function copy(o) {
+   var out, v, key;
+   out = Array.isArray(o) ? [] : {};
+   for (key in o) {
+       v = o[key];
+       out[key] = (typeof v === "object") ? copy(v) : v;
+   }
+   return out;
+}
+
+/**
  * MicroMongoDB.getProp (Private Function)
  */
 function getProp(obj,name) {
@@ -33374,6 +33387,52 @@ function DB(options) {
 							if (getProp(doc,key)==undefined ||  !geoWithin(getProp(doc,key),operand)) return false;
 						} else if (operator=="$not") {
 							if (opMatches(doc,key,operand)) return false;
+						} else if (operator=="$all") {
+							var fieldValue = getProp(doc,key);
+							if (fieldValue==undefined || !isArray(fieldValue)) return false;
+							for (var j=0; j<operand.length; j++) {
+								if (!isIn(operand[j], fieldValue)) return false;
+							}
+						} else if (operator=="$elemMatch") {
+							var fieldValue = getProp(doc,key);
+							if (fieldValue==undefined || !isArray(fieldValue)) return false;
+							var found = false;
+							for (var j=0; j<fieldValue.length; j++) {
+								var element = fieldValue[j];
+								// Check if element matches the query
+								if (typeof element === 'object' && !isArray(element)) {
+									// For objects, use matches
+									if (matches(element, operand)) {
+										found = true;
+										break;
+									}
+								} else {
+									// For primitive values, check operators directly
+									var matchesPrimitive = true;
+									var opKeys = Object.keys(operand);
+									for (var k=0; k<opKeys.length; k++) {
+										var op = opKeys[k];
+										var opValue = operand[op];
+										if (op == "$gte" && !(element >= opValue)) matchesPrimitive = false;
+										else if (op == "$gt" && !(element > opValue)) matchesPrimitive = false;
+										else if (op == "$lte" && !(element <= opValue)) matchesPrimitive = false;
+										else if (op == "$lt" && !(element < opValue)) matchesPrimitive = false;
+										else if (op == "$eq" && !(element == opValue)) matchesPrimitive = false;
+										else if (op == "$ne" && !(element != opValue)) matchesPrimitive = false;
+										else if (op == "$in" && !isIn(element, opValue)) matchesPrimitive = false;
+										else if (op == "$nin" && isIn(element, opValue)) matchesPrimitive = false;
+									}
+									if (matchesPrimitive) {
+										found = true;
+										break;
+									}
+								}
+							}
+							if (!found) return false;
+						} else if (operator=="$size") {
+							var fieldValue = getProp(doc,key);
+							if (fieldValue==undefined || !isArray(fieldValue)) return false;
+							if (fieldValue.length != operand) return false;
 						} else {
 							throw { $err : "Can't canonicalize query: BadValue unknown operator: " + operator, code : 17287 };
 						}
@@ -33442,6 +33501,35 @@ function DB(options) {
 		} catch (e) {
 			return false
 		}
+	}
+
+	/**
+	 * MicroMongoDB.DB.where
+	 * 
+	 * Private Function
+	 */
+	function where(doc,value) {
+		if (typeof value === 'function') {
+			return value.call(doc);
+		} else if (typeof value === 'string') {
+			// Evaluate the string as a function
+			try {
+				var fn = new Function('return ' + value);
+				return fn.call(doc);
+			} catch (e) {
+				return false;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * MicroMongoDB.DB.not
+	 * 
+	 * Private Function
+	 */
+	function not(doc,value) {
+		return !tlMatches(doc,value);
 	}
 
 	/**
@@ -33960,7 +34048,239 @@ function DB(options) {
 		 */
 		return {
 			isCollection : true, // TODO used by dropDatabase, ugly
-			aggregate : function() { throw "Not Implemented"; },
+			aggregate : function(pipeline) {
+				if (!pipeline || !isArray(pipeline)) {
+					throw { $err: "Pipeline must be an array", code: 17287 };
+				}
+				
+				// Start with all documents
+				var results = [];
+				var cursor = this.find({});
+				while (cursor.hasNext()) {
+					results.push(cursor.next());
+				}
+				
+				// Process each stage in the pipeline
+				for (var i = 0; i < pipeline.length; i++) {
+					var stage = pipeline[i];
+					var stageKeys = Object.keys(stage);
+					if (stageKeys.length !== 1) {
+						throw { $err: "Each pipeline stage must have exactly one key", code: 17287 };
+					}
+					var stageType = stageKeys[0];
+					var stageSpec = stage[stageType];
+					
+					if (stageType === "$match") {
+						// Filter documents based on query
+						var matched = [];
+						for (var j = 0; j < results.length; j++) {
+							if (matches(results[j], stageSpec)) {
+								matched.push(results[j]);
+							}
+						}
+						results = matched;
+					} else if (stageType === "$project") {
+						// Reshape documents
+						var projected = [];
+						for (var j = 0; j < results.length; j++) {
+							projected.push(applyProjection(stageSpec, results[j]));
+						}
+						results = projected;
+					} else if (stageType === "$sort") {
+						// Sort documents
+						var sortKeys = Object.keys(stageSpec);
+						results.sort(function(a, b) {
+							for (var k = 0; k < sortKeys.length; k++) {
+								var key = sortKeys[k];
+								if (a[key] === undefined && b[key] !== undefined) return -1 * stageSpec[key];
+								if (a[key] !== undefined && b[key] === undefined) return 1 * stageSpec[key];
+								if (a[key] < b[key]) return -1 * stageSpec[key];
+								if (a[key] > b[key]) return 1 * stageSpec[key];
+							}
+							return 0;
+						});
+					} else if (stageType === "$limit") {
+						// Limit number of documents
+						results = results.slice(0, stageSpec);
+					} else if (stageType === "$skip") {
+						// Skip documents
+						results = results.slice(stageSpec);
+					} else if (stageType === "$group") {
+						// Group documents
+						var groups = {};
+						var groupId = stageSpec._id;
+						
+						for (var j = 0; j < results.length; j++) {
+							var doc = results[j];
+							var key;
+							
+							// Compute group key
+							if (groupId === null || groupId === undefined) {
+								key = null;
+							} else if (typeof groupId === 'string' && groupId.charAt(0) === '$') {
+								// Field reference
+								key = getProp(doc, groupId.substring(1));
+							} else if (typeof groupId === 'object') {
+								// Computed key
+								key = JSON.stringify(groupId);
+							} else {
+								key = groupId;
+							}
+							
+							var keyStr = JSON.stringify(key);
+							
+							// Initialize group
+							if (!groups[keyStr]) {
+								groups[keyStr] = {
+									_id: key,
+									docs: [],
+									accumulators: {}
+								};
+							}
+							
+							groups[keyStr].docs.push(doc);
+						}
+						
+						// Apply accumulators
+						var grouped = [];
+						for (var groupKey in groups) {
+							var group = groups[groupKey];
+							var result = { _id: group._id };
+							
+							// Process each accumulator field
+							for (var field in stageSpec) {
+								if (field === '_id') continue;
+								
+								var accumulator = stageSpec[field];
+								var accKeys = Object.keys(accumulator);
+								if (accKeys.length !== 1) continue;
+								
+								var accType = accKeys[0];
+								var accExpr = accumulator[accType];
+								
+								if (accType === '$sum') {
+									var sum = 0;
+									for (var k = 0; k < group.docs.length; k++) {
+										if (typeof accExpr === 'number') {
+											sum += accExpr;
+										} else if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											var val = getProp(group.docs[k], accExpr.substring(1));
+											sum += val || 0;
+										}
+									}
+									result[field] = sum;
+								} else if (accType === '$avg') {
+									var sum = 0;
+									var count = 0;
+									for (var k = 0; k < group.docs.length; k++) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											var val = getProp(group.docs[k], accExpr.substring(1));
+											if (val !== undefined && val !== null) {
+												sum += val;
+												count++;
+											}
+										}
+									}
+									result[field] = count > 0 ? sum / count : 0;
+								} else if (accType === '$min') {
+									var min = undefined;
+									for (var k = 0; k < group.docs.length; k++) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											var val = getProp(group.docs[k], accExpr.substring(1));
+											if (val !== undefined && (min === undefined || val < min)) {
+												min = val;
+											}
+										}
+									}
+									result[field] = min;
+								} else if (accType === '$max') {
+									var max = undefined;
+									for (var k = 0; k < group.docs.length; k++) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											var val = getProp(group.docs[k], accExpr.substring(1));
+											if (val !== undefined && (max === undefined || val > max)) {
+												max = val;
+											}
+										}
+									}
+									result[field] = max;
+								} else if (accType === '$push') {
+									var arr = [];
+									for (var k = 0; k < group.docs.length; k++) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											var val = getProp(group.docs[k], accExpr.substring(1));
+											arr.push(val);
+										}
+									}
+									result[field] = arr;
+								} else if (accType === '$addToSet') {
+									var set = {};
+									for (var k = 0; k < group.docs.length; k++) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											var val = getProp(group.docs[k], accExpr.substring(1));
+											set[JSON.stringify(val)] = val;
+										}
+									}
+									var arr = [];
+									for (var valKey in set) {
+										arr.push(set[valKey]);
+									}
+									result[field] = arr;
+								} else if (accType === '$first') {
+									if (group.docs.length > 0) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											result[field] = getProp(group.docs[0], accExpr.substring(1));
+										}
+									}
+								} else if (accType === '$last') {
+									if (group.docs.length > 0) {
+										if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
+											result[field] = getProp(group.docs[group.docs.length - 1], accExpr.substring(1));
+										}
+									}
+								}
+							}
+							
+							grouped.push(result);
+						}
+						results = grouped;
+					} else if (stageType === "$count") {
+						// Count documents and return single document with count
+						results = [{ [stageSpec]: results.length }];
+					} else if (stageType === "$unwind") {
+						// Unwind array field
+						var unwound = [];
+						var fieldPath = stageSpec;
+						if (typeof fieldPath === 'string' && fieldPath.charAt(0) === '$') {
+							fieldPath = fieldPath.substring(1);
+						}
+						
+						for (var j = 0; j < results.length; j++) {
+							var doc = results[j];
+							var arr = getProp(doc, fieldPath);
+							
+							if (arr && isArray(arr)) {
+								for (var k = 0; k < arr.length; k++) {
+									var unwoundDoc = copy(doc);
+									// Set the unwound value
+									var parts = fieldPath.split('.');
+									var target = unwoundDoc;
+									for (var l = 0; l < parts.length - 1; l++) {
+										target = target[parts[l]];
+									}
+									target[parts[parts.length - 1]] = arr[k];
+									unwound.push(unwoundDoc);
+								}
+							}
+						}
+						results = unwound;
+					} else {
+						throw { $err: "Unsupported aggregation stage: " + stageType, code: 17287 };
+					}
+				}
+				
+				return results;
+			},
 			bulkWrite : function() { throw "Not Implemented"; },
 			count : function() {
 				return storage.size();
