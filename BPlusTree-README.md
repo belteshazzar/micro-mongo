@@ -38,6 +38,10 @@ tree.add(10, 'value for 10');
 tree.add(5, 'value for 5');
 tree.add(15, 'value for 15');
 tree.add(3, 'value for 3');
+
+// Adding a duplicate key updates the value
+tree.add(10, 'updated value for 10');
+console.log(tree.search(10)); // 'updated value for 10'
 ```
 
 ### Searching
@@ -96,7 +100,7 @@ tree.clear();
 
 ### Methods
 
-- `add(key, value)` - Inserts a key-value pair
+- `add(key, value)` - Inserts a key-value pair. If key exists, updates the value.
 - `search(key)` - Returns the value for a key, or undefined if not found
 - `delete(key)` - Deletes a key, returns true if deleted, false if not found
 - `rangeSearch(minKey, maxKey)` - Returns array of {key, value} objects in range

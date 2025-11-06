@@ -80,7 +80,8 @@ export class BPlusTree {
     }
 
     /**
-     * Inserts a key-value pair into the B+ tree
+     * Inserts a key-value pair into the B+ tree.
+     * If the key already exists, its value will be updated.
      * @param {*} key - The key to insert
      * @param {*} value - The value to associate with the key
      */
@@ -109,6 +110,14 @@ export class BPlusTree {
         let i = node.keys.length - 1;
 
         if (node.isLeaf) {
+            // Check if key already exists and update its value
+            for (let j = 0; j < node.keys.length; j++) {
+                if (node.keys[j] === key) {
+                    node.values[j] = value;
+                    return;
+                }
+            }
+
             // Insert into leaf node in sorted order
             node.keys.push(null);
             node.values.push(null);

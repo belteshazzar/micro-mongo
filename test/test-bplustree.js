@@ -90,11 +90,13 @@ describe('BPlusTree', function() {
             tree.add(10, 'ten');
             tree.add(10, 'TEN');
             
-            // The tree will contain both entries (B+ trees can have duplicates)
-            // or the second one based on implementation
+            // When a duplicate key is added, it should update the value
             const result = tree.search(10);
-            expect(result).to.not.be.undefined;
+            expect(result).to.equal('TEN');
+            // Size should still be 1 since we updated, not added
+            expect(tree.size()).to.equal(1);
         });
+
 
         it('should handle string keys', function() {
             tree.add('apple', 1);
