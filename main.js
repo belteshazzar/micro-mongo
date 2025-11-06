@@ -3,7 +3,7 @@ import {Txi} from 'txi'
 import * as de9im from 'de9im';
 
 /**
- * MongoLocalDB.copy (Private Function)
+ * MicroMongoDB.copy (Private Function)
  */
 function copy(o) {
    var out, v, key;
@@ -16,7 +16,7 @@ function copy(o) {
 }
 
 /**
- * MongoLocalDB.getProp (Private Function)
+ * MicroMongoDB.getProp (Private Function)
  */
 function getProp(obj,name) {
 	var path = name.split("\.");
@@ -29,7 +29,7 @@ function getProp(obj,name) {
 }
 
 /**
- * MongoLocalDB.LocalStorageStore
+ * MicroMongoDB.LocalStorageStore
  * 
  * Singleton
  */
@@ -56,10 +56,10 @@ export const LocalStorageStore = (function() {
 		}
 	};
 
-})(); // MongoLocalDB.LocalStorageStore
+})(); // MicroMongoDB.LocalStorageStore
 
 /**
- * MongoLocalDB.ObjectStore
+ * MicroMongoDB.ObjectStore
  * 
  * Public Constructor Function
  */
@@ -86,16 +86,16 @@ export const ObjectStore = function() {
 		size : function() {
 			return Object.keys(objs).length;
 		}
-	}; // MongoLocalDB.ObjectStore return
-}; // MongoLocalDB.ObjectStore
+	}; // MicroMongoDB.ObjectStore return
+}; // MicroMongoDB.ObjectStore
 
 /**
- * MongoLocalDB.DB (Public Constructor)
+ * MicroMongoDB.DB (Public Constructor)
  */
 export function DB(options) {
 
 	/**
-	 * MongoLocalDB.DB.log (Private Function)
+	 * MicroMongoDB.DB.log (Private Function)
 	 * 
 	 * @param {String} msg The message to display.
 	 */
@@ -105,7 +105,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.id (Private Function)
+	 * MicroMongoDB.DB.id (Private Function)
 	 */
 	function id() {
 		if (options && options.id) return options.id();
@@ -116,7 +116,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.toArray (Private Function)
+	 * MicroMongoDB.DB.toArray (Private Function)
 	 */
 	function toArray(obj) {
 		var arr = [];
@@ -131,7 +131,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.tlMatches
+	 * MicroMongoDB.DB.tlMatches
 	 * 
 	 * Private Function
 	 */
@@ -151,7 +151,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.opMatches
+	 * MicroMongoDB.DB.opMatches
 	 * 
 	 * Private Function
 	 */
@@ -209,10 +209,10 @@ export function DB(options) {
 				}
 			}
 		}
-	} // MongoLocalDB.DB.opMatches
+	} // MicroMongoDB.DB.opMatches
 
 	/**
-	 * MongoLocalDB.DB.text
+	 * MicroMongoDB.DB.text
 	 * 
 	 * Private Function
 	 */
@@ -257,7 +257,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.geoWithin
+	 * MicroMongoDB.DB.geoWithin
 	 * 
 	 * Private Function
 	 */
@@ -270,7 +270,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.and
+	 * MicroMongoDB.DB.and
 	 * 
 	 * Private Function
 	 */
@@ -284,7 +284,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.or
+	 * MicroMongoDB.DB.or
 	 * 
 	 * Private Function
 	 */
@@ -296,7 +296,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.nor
+	 * MicroMongoDB.DB.nor
 	 * 
 	 * Private Function
 	 */
@@ -308,7 +308,7 @@ export function DB(options) {
 	}
 	
 	/**
-	 * MongoLocalDB.DB.isArray
+	 * MicroMongoDB.DB.isArray
 	 * 
 	 * Private Function
 	 */
@@ -317,7 +317,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.matches
+	 * MicroMongoDB.DB.matches
 	 * 
 	 * Private Function
 	 */
@@ -328,7 +328,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.isIn
+	 * MicroMongoDB.DB.isIn
 	 * 
 	 * Private Function
 	 */
@@ -338,7 +338,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.arrayMatches
+	 * MicroMongoDB.DB.arrayMatches
 	 * 
 	 * Private Function
 	 */
@@ -361,7 +361,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.objectMatches
+	 * MicroMongoDB.DB.objectMatches
 	 * 
 	 * Private Function
 	 */
@@ -388,7 +388,7 @@ export function DB(options) {
 	}
 
 	/**
-	 * MongoLocalDB.DB.applyProjection
+	 * MicroMongoDB.DB.applyProjection
 	 * 
 	 * Private Function
 	 */
@@ -414,10 +414,10 @@ export function DB(options) {
 			}
 		}
 		return result;
-	} // MongoLocalDB.DB.applyProjection
+	} // MicroMongoDB.DB.applyProjection
 
 	/**
-	 * MongoLocalDB.DB.applyUpdates
+	 * MicroMongoDB.DB.applyUpdates
 	 * 
 	 * Private Function
 	 */
@@ -552,10 +552,10 @@ export function DB(options) {
 				throw "unknown update operator: " + key;
 			}
 		}
-	} // MongoLocalDB.DB.applyUpdates
+	} // MicroMongoDB.DB.applyUpdates
 
 	/**
-	 * MongoLocalDB.DB.createDocFromUpdate
+	 * MicroMongoDB.DB.createDocFromUpdate
 	 * 
 	 * Private Function
 	 */
@@ -581,18 +581,18 @@ export function DB(options) {
 			applyUpdates(updates,newDoc,true);
 		}
 		return newDoc;
-	} // MongoLocalDB.DB.createDocFromUpdate
+	} // MicroMongoDB.DB.createDocFromUpdate
 
 
 	/**
-	 * MongoLocalDB.DB.Collection
+	 * MicroMongoDB.DB.Collection
 	 * 
 	 * Private Constructor Function 
 	 */
 	function Collection(db,storage) {
 
 		/**
-		 * MongoLocalDB.DB.Collection.Cursor
+		 * MicroMongoDB.DB.Collection.Cursor
 		 * 
 		 * Private Constructor Function
 		 */
@@ -691,10 +691,10 @@ export function DB(options) {
 			};
 
 			this.next();
-		} // MongoLocalDB.DB.Collection.Cursor
+		} // MicroMongoDB.DB.Collection.Cursor
 
 		/**
-		 * MongoLocalDB.DB.Collection.SortedCursor
+		 * MicroMongoDB.DB.Collection.SortedCursor
 		 * 
 		 * Private Constructor Function
 		 */
@@ -776,10 +776,10 @@ export function DB(options) {
 				}
 				return results;
 			};
-		} // MongoLocalDB.DB.Collection.SortedCursor
+		} // MicroMongoDB.DB.Collection.SortedCursor
 
 		/**
-		 * MongoLocalDB.DB.Collection
+		 * MicroMongoDB.DB.Collection
 		 * 
 		 * Public Members
 		 */
@@ -1003,11 +1003,11 @@ export function DB(options) {
 				}
 			},
 			validate : function() { throw "Not Implemented"; }
-		}; // MongoLocalDB.DB.Collection return
-	}; // MongoLocalDB.DB.Collection
+		}; // MicroMongoDB.DB.Collection return
+	}; // MicroMongoDB.DB.Collection
 
 	/**
-	 * MongoLocalDB.DB
+	 * MicroMongoDB.DB
 	 * 
 	 * Public Members
 	 */
@@ -1084,7 +1084,7 @@ export function DB(options) {
 		version : function() { throw "Not Implemented"; },
 		upgradeCheck : function() { throw "Not Implemented"; },
 		upgradeCheckAllDBs : function() { throw "Not Implemented"; }
-	}; // MongoLocalDB.DB return
+	}; // MicroMongoDB.DB return
 
-}; // MongoLocalDB.DB
+}; // MicroMongoDB.DB
 

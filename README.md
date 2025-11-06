@@ -1,23 +1,22 @@
-
-# Mongo-Local-DB
+# Micro-Mongo
 
 A JavaScript implementation of the mongo query api for plain objects and HTML5 localStorage.
 
-There are two main use cases that Mongo-Local-DB targets:
+There are two main use cases that Micro-Mongo targets:
 - providing a mongo interface to localStorage in HTML5 web browsers
 - for use as an in memory mongo database that can be used in the browser or nodejs
 
-[![Build Status](https://travis-ci.org/belteshazzar/mongo-local-db.svg?branch=master)](https://travis-ci.org/belteshazzar/mongo-local-db) [![Coverage Status](https://coveralls.io/repos/github/belteshazzar/mongo-local-db/badge.svg?branch=master)](https://coveralls.io/github/belteshazzar/mongo-local-db?branch=master)
+[![Build Status](https://travis-ci.org/belteshazzar/micro-mongo.svg?branch=master)](https://travis-ci.org/belteshazzar/micro-mongo) [![Coverage Status](https://coveralls.io/repos/github/belteshazzar/micro-mongo/badge.svg?branch=master)](https://coveralls.io/github/belteshazzar/micro-mongo?branch=master)
 
 ## In Node.js
 
 ### Installation
 
-  `npm install mongo-local-db`
+  `npm install micro-mongo`
 
 ### Usage
 
-    var mongo = require('mongo-local-db');
+    var mongo = require('micro-mongo');
     var db = new mongo.DB()
     db.createCollection("sample")
     db.sample.insert({ age: 4,	legs: 0	});
@@ -33,20 +32,20 @@ There are two main use cases that Mongo-Local-DB targets:
 
 ## In the Browser
 
-For an example of Mongo-Local-DB in the browser check out: http://belteshazzar.github.io/mongo-local-db/index.html
+For an example of Micro-Mongo in the browser check out: http://belteshazzar.github.io/micro-mongo/index.html
 
 ### Usage
 
-Download from here: https://raw.githubusercontent.com/belteshazzar/mongo-local-db/master/mongo-local-db.js
+Download from here: https://raw.githubusercontent.com/belteshazzar/micro-mongo/master/micro-mongo.js
 
 Include in your web page:
 
-    <script src="mongo-local-db.js"></script>
+    <script src="micro-mongo.js"></script>
     
 Query localStorage or other collections (note that in the browser the localStorage collection is automatically created and because it is backed by HTML5 localStorage it will persist across multiple sessions):
 
     <script>
-       var db = new MongoLocal.DB()
+       var db = new MicroMongo.DB()
        db.localStorage.insert({ age: 4,	legs: 0	});
        var cur = db.localStorage.find();
        alert(JSON.stringify(cur.toArray()));
