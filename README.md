@@ -27,6 +27,38 @@ There are two main use cases that Mongo-Local-DB targets:
     var cur = db.sample.find({ $and: [{ age : 54},{ legs: 2 }] })
     cur.next()
 
+### Using Indexes
+
+Indexes can significantly improve query performance for large collections:
+
+    var mongo = require('mongo-local-db');
+    var db = new mongo.DB()
+    db.createCollection("users")
+    
+    // Insert some data
+    db.users.insertMany([
+        { name: "Alice", age: 30, city: "NYC" },
+        { name: "Bob", age: 25, city: "LA" },
+        { name: "Charlie", age: 30, city: "SF" }
+    ]);
+    
+    // Create an index on the age field
+    db.users.createIndex({ age: 1 })
+    
+    // Create a named index on city
+    db.users.createIndex({ city: 1 }, { name: "city_index" })
+    
+    // Create a compound index
+    db.users.createIndex({ age: 1, city: 1 })
+    
+    // List all indexes
+    var indexes = db.users.getIndexes()
+    
+    // Queries will automatically use indexes when possible
+    var results = db.users.find({ age: 30 }).toArray()
+
+The query planner automatically uses indexes for simple equality queries. For complex queries, it combines index lookups with full collection scans to ensure complete and correct results.
+
 ### Tests
 
   `npm test`
@@ -114,7 +146,7 @@ The following table summarises the API implementation status.
 | db.collection.bulkWrite            | no          | 
 | db.collection.count                | yes         |
 | db.collection.copyTo               | yes         |
-| db.collection.createIndex          | no          | 
+| db.collection.createIndex          | yes         | 
 | db.collection.dataSize             | no          | 
 | db.collection.deleteOne            | yes         |
 | db.collection.deleteMany           | yes         |
@@ -130,7 +162,7 @@ The following table summarises the API implementation status.
 | db.collection.findOneAndDelete     | yes         |
 | db.collection.findOneAndReplace    | yes         |
 | db.collection.findOneAndUpdate     | yes         |
-| db.collection.getIndexes           | no          |  
+| db.collection.getIndexes           | yes         |
 | db.collection.getShardDistribution | N/A         | 
 | db.collection.getShardVersion      | N/A         | 
 | db.collection.group                | no          | 
