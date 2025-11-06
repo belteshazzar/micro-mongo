@@ -117,7 +117,7 @@ class RTreeNode {
 		let minLng = Infinity, maxLng = -Infinity;
 
 		for (const child of this.children) {
-			const bbox = this.isLeaf ? child.bbox : child.bbox;
+			const bbox = child.bbox;
 			minLat = Math.min(minLat, bbox.minLat);
 			maxLat = Math.max(maxLat, bbox.maxLat);
 			minLng = Math.min(minLng, bbox.minLng);
@@ -136,6 +136,7 @@ export class RTree {
 		this.maxEntries = maxEntries;
 		this.minEntries = Math.max(2, Math.ceil(maxEntries / 2));
 		this.root = new RTreeNode(true);
+		this._size = 0; // Track size for O(1) queries
 	}
 
 	/**
@@ -155,6 +156,7 @@ export class RTree {
 
 		const entry = { bbox, lat, lng, data };
 		this._insert(entry, this.root, 1);
+		this._size++;
 	}
 
 	/**
@@ -223,8 +225,8 @@ export class RTree {
 
 		for (let i = 0; i < children.length; i++) {
 			for (let j = i + 1; j < children.length; j++) {
-				const bbox1 = isLeaf ? children[i].bbox : children[i].bbox;
-				const bbox2 = isLeaf ? children[j].bbox : children[j].bbox;
+				const bbox1 = children[i].bbox;
+				const bbox2 = children[j].bbox;
 				const combinedBox = union(bbox1, bbox2);
 				const waste = area(combinedBox) - area(bbox1) - area(bbox2);
 				
@@ -248,7 +250,7 @@ export class RTree {
 			if (i === seed1Idx || i === seed2Idx) continue;
 
 			const child = children[i];
-			const bbox = isLeaf ? child.bbox : child.bbox;
+			const bbox = child.bbox;
 			
 			const enl1 = node1.children.length === 0 ? Infinity : enlargement(node1.bbox || bbox, bbox);
 			const enl2 = node2.children.length === 0 ? Infinity : enlargement(node2.bbox || bbox, bbox);
@@ -367,6 +369,10 @@ export class RTree {
 
 		const removed = this._remove(bbox, data, this.root, null, -1);
 		
+		if (removed) {
+			this._size--;
+		}
+		
 		// If root has only one child after removal, make that child the new root
 		if (this.root.children.length === 1 && !this.root.isLeaf) {
 			this.root = this.root.children[0];
@@ -459,7 +465,7 @@ export class RTree {
 	 * @returns {number} Number of entries
 	 */
 	size() {
-		return this.getAll().length;
+		return this._size;
 	}
 
 	/**
@@ -467,6 +473,7 @@ export class RTree {
 	 */
 	clear() {
 		this.root = new RTreeNode(true);
+		this._size = 0;
 	}
 }
 
