@@ -1288,6 +1288,49 @@ describe("DB", function() {
 				var results = db[collectionName].find({ age: 999 }).toArray();
 				expect(results.length).to.equal(0);
 			});
+
+			it('should maintain index on update', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Update a document's age
+				db[collectionName].updateOne({ age: 54 }, { $set: { age: 55 } });
+				
+				// Old value should not be found
+				var oldResults = db[collectionName].find({ age: 54 }).toArray();
+				expect(oldResults.length).to.equal(1); // Only one doc with age 54 left
+				
+				// New value should be found
+				var newResults = db[collectionName].find({ age: 55 }).toArray();
+				expect(newResults.length).to.equal(1);
+				expect(newResults[0].age).to.equal(55);
+			});
+
+			it('should maintain index on replaceOne', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Replace a document
+				db[collectionName].replaceOne({ age: 16 }, { age: 17, legs: 4 });
+				
+				// Old value should not be found
+				var oldResults = db[collectionName].find({ age: 16 }).toArray();
+				expect(oldResults.length).to.equal(0);
+				
+				// New value should be found
+				var newResults = db[collectionName].find({ age: 17 }).toArray();
+				expect(newResults.length).to.equal(1);
+				expect(newResults[0].legs).to.equal(4);
+			});
+
+			it('should maintain index on remove', function() {
+				db[collectionName].createIndex({ age: 1 });
+				
+				// Remove one document
+				db[collectionName].remove({ age: 4 }, true);
+				
+				// Should have one less document with age 4
+				var results = db[collectionName].find({ age: 4 }).toArray();
+				expect(results.length).to.equal(1);
+			});
 		});
 	});
 });

@@ -1156,13 +1156,16 @@ export function DB(options) {
 					if (options && options.upsert) {
 						replacement._id = id();
 						storage.set(replacement._id,replacement);
+						updateIndexesOnInsert(replacement);
 						result.upsertedId = replacement._id;
 					}
 				} else {
 					result.modifiedCount = 1;
 					var doc = c.next();
+					updateIndexesOnDelete(doc);
 					replacement._id = doc._id;
 					storage.set(doc._id,replacement);
+					updateIndexesOnInsert(replacement);
 				}
 				return result;
 			},
@@ -1171,10 +1174,13 @@ export function DB(options) {
 				if (!c.hasNext()) return;
 				if (options===true || (options && options.justOne)) {
 					var doc = c.next();
+					updateIndexesOnDelete(doc);
 					storage.remove(doc._id);
 				} else {
 					while (c.hasNext()) {
-						storage.remove(c.next()._id);
+						var doc = c.next();
+						updateIndexesOnDelete(doc);
+						storage.remove(doc._id);
 					}
 				}
 			},
@@ -1190,18 +1196,23 @@ export function DB(options) {
 					if (options && options.multi) {
 						while (c.hasNext()) {
 							var doc = c.next();
+							updateIndexesOnDelete(doc);
 							applyUpdates(updates,doc);
 							storage.set(doc._id,doc);
+							updateIndexesOnInsert(doc);
 						}
 					} else {
 						var doc = c.next();
+						updateIndexesOnDelete(doc);
 						applyUpdates(updates,doc);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				} else {
 					if (options && options.upsert) {
 						var doc = createDocFromUpdate(query,updates);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				}
 			},
@@ -1209,12 +1220,15 @@ export function DB(options) {
 				var c = this.find(query);
 				if (c.hasNext()) {
 					var doc = c.next();
+					updateIndexesOnDelete(doc);
 					applyUpdates(updates,doc);
 					storage.set(doc._id,doc);
+					updateIndexesOnInsert(doc);
 				} else {
 					if (options && options.upsert) {
 						var doc = createDocFromUpdate(query,updates);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				}
 			},
@@ -1223,13 +1237,16 @@ export function DB(options) {
 				if (c.hasNext()) {
 					while (c.hasNext()) {
 						var doc = c.next();
+						updateIndexesOnDelete(doc);
 						applyUpdates(updates,doc);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				} else {
 					if (options && options.upsert) {
 						var doc = createDocFromUpdate(query,updates);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				}
 			},
