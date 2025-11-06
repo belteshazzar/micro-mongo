@@ -651,17 +651,20 @@ export function DB(options) {
 			if (keyFields.length === 1) {
 				var field = keyFields[0];
 				var value = getProp(doc, field);
-				return value !== undefined ? String(value) : null;
+				if (value === undefined) return null;
+				// Preserve type information in the key
+				return JSON.stringify({ t: typeof value, v: value });
 			}
 			
-			// For compound index, concatenate values
+			// For compound index, concatenate values with type preservation
 			var keyParts = [];
 			for (var i = 0; i < keyFields.length; i++) {
 				var value = getProp(doc, keyFields[i]);
 				if (value === undefined) return null;
-				keyParts.push(String(value));
+				keyParts.push(JSON.stringify(value));
 			}
-			return keyParts.join('|');
+			// Use a separator that won't appear in JSON
+			return keyParts.join('\x00');
 		}
 
 		/**
@@ -724,16 +727,18 @@ export function DB(options) {
 					var indexFields = Object.keys(index.keys);
 					
 					// Check if query matches index (simple case: single field equality)
+					// Note: Compound indexes are created but only single-field equality queries use them
 					if (indexFields.length === 1) {
 						var field = indexFields[0];
 						if (queryKeys.indexOf(field) > -1) {
 							var queryValue = query[field];
-							// Only use index for simple equality queries
+							// Only use index for simple equality queries (not operators)
 							if (typeof queryValue === 'string' || typeof queryValue === 'number' || typeof queryValue === 'boolean') {
+								// Generate the same key format as extractIndexKey
 								return {
 									useIndex: true,
 									indexName: indexName,
-									indexKey: String(queryValue),
+									indexKey: JSON.stringify({ t: typeof queryValue, v: queryValue }),
 									field: field
 								};
 							}
@@ -777,7 +782,7 @@ export function DB(options) {
 
 			function findNext() {
 				// First, try to get documents from index
-				if (indexDocIds !== null && indexPos < indexDocIds.length) {
+				while (indexDocIds !== null && indexPos < indexDocIds.length) {
 					var docId = indexDocIds[indexPos++];
 					var doc = storage.getStore()[docId];
 					if (doc && matches(doc, query)) {
@@ -785,11 +790,7 @@ export function DB(options) {
 						next = doc;
 						return;
 					}
-					// If doc doesn't match (shouldn't happen with good index), try next
-					if (indexPos < indexDocIds.length) {
-						findNext();
-						return;
-					}
+					// If doc doesn't match (shouldn't happen with good index), continue to next
 				}
 
 				// Then fall back to full scan for remaining documents
