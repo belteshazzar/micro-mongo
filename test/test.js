@@ -493,6 +493,137 @@ describe("DB", function() {
 		});
 		
 		/************************************************************************
+		 * Test $all operator - matches arrays that contain all elements
+		 */
+		it('should find with $all operator', function() {
+			db[collectionName].insert({ tags: ["javascript", "mongodb", "database"] });
+			db[collectionName].insert({ tags: ["javascript", "nodejs"] });
+			db[collectionName].insert({ tags: ["mongodb", "database"] });
+			
+			var docs = testFind({ tags: { $all: ["javascript", "mongodb"] }});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].tags).to.include("javascript");
+			expect(docs[0].tags).to.include("mongodb");
+			expect(docs[0].tags).to.include("database");
+		});
+
+		it('should not find with $all when not all elements present', function() {
+			db[collectionName].insert({ tags: ["javascript", "nodejs"] });
+			
+			var docs = testFind({ tags: { $all: ["javascript", "mongodb", "python"] }});
+			expect(docs.length).to.equal(0);
+		});
+
+		/************************************************************************
+		 * Test $elemMatch operator
+		 */
+		it('should find with $elemMatch operator', function() {
+			db[collectionName].insert({ 
+				results: [
+					{ score: 80, subject: "math" },
+					{ score: 90, subject: "english" }
+				]
+			});
+			db[collectionName].insert({ 
+				results: [
+					{ score: 70, subject: "math" },
+					{ score: 60, subject: "english" }
+				]
+			});
+			
+			var docs = testFind({ results: { $elemMatch: { score: { $gte: 80 }, subject: "math" }}});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].results[0].score).to.equal(80);
+		});
+
+		it('should find with $elemMatch on simple array', function() {
+			db[collectionName].insert({ scores: [85, 90, 75] });
+			db[collectionName].insert({ scores: [60, 70, 65] });
+			
+			var docs = testFind({ scores: { $elemMatch: { $gte: 80, $lte: 90 }}});
+			expect(docs.length).to.equal(1);
+		});
+
+		/************************************************************************
+		 * Test $size operator
+		 */
+		it('should find with $size operator', function() {
+			db[collectionName].insert({ items: ["a", "b", "c"] });
+			db[collectionName].insert({ items: ["x", "y"] });
+			db[collectionName].insert({ items: ["1"] });
+			
+			var docs = testFind({ items: { $size: 3 }});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].items.length).to.equal(3);
+		});
+
+		it('should find with $size 0 for empty arrays', function() {
+			db[collectionName].insert({ items: [] });
+			db[collectionName].insert({ items: ["a"] });
+			
+			var docs = testFind({ items: { $size: 0 }});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].items.length).to.equal(0);
+		});
+
+		/************************************************************************
+		 * Test $where operator with function
+		 */
+		it('should find with $where operator using function', function() {
+			db[collectionName].insert({ price: 100, quantity: 5 });
+			db[collectionName].insert({ price: 50, quantity: 10 });
+			db[collectionName].insert({ price: 200, quantity: 2 });
+			
+			var docs = testFind({ $where: function() { return this.price * this.quantity > 400; }});
+			expect(docs.length).to.equal(2);
+		});
+
+		it('should find with $where operator using string', function() {
+			db[collectionName].insert({ value: 100 });
+			db[collectionName].insert({ value: 50 });
+			
+			var docs = testFind({ $where: "this.value > 75" });
+			expect(docs.length).to.equal(1);
+			expect(docs[0].value).to.equal(100);
+		});
+
+		/************************************************************************
+		 * Test complex query combinations
+		 */
+		it('should combine $all with other operators', function() {
+			db[collectionName].insert({ tags: ["a", "b", "c"], priority: 1 });
+			db[collectionName].insert({ tags: ["a", "b"], priority: 2 });
+			db[collectionName].insert({ tags: ["a", "b", "c"], priority: 3 });
+			
+			var docs = testFind({ 
+				$and: [
+					{ tags: { $all: ["a", "b"] }},
+					{ priority: { $gte: 2 }}
+				]
+			});
+			expect(docs.length).to.equal(2);
+		});
+
+		it('should combine $elemMatch with $or', function() {
+			db[collectionName].insert({ 
+				scores: [{ value: 90 }, { value: 80 }],
+				status: "active"
+			});
+			db[collectionName].insert({ 
+				scores: [{ value: 70 }, { value: 60 }],
+				status: "inactive"
+			});
+			
+			var docs = testFind({ 
+				$or: [
+					{ scores: { $elemMatch: { value: { $gte: 85 }}}},
+					{ status: "inactive" }
+				]
+			});
+			expect(docs.length).to.equal(2);
+		});
+		
+		/************************************************************************
 		 * 
 		 */
 		it('should testFindDocument01', function() {

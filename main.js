@@ -199,6 +199,52 @@ export function DB(options) {
 							if (getProp(doc,key)==undefined ||  !geoWithin(getProp(doc,key),operand)) return false;
 						} else if (operator=="$not") {
 							if (opMatches(doc,key,operand)) return false;
+						} else if (operator=="$all") {
+							var fieldValue = getProp(doc,key);
+							if (fieldValue==undefined || !isArray(fieldValue)) return false;
+							for (var j=0; j<operand.length; j++) {
+								if (!isIn(operand[j], fieldValue)) return false;
+							}
+						} else if (operator=="$elemMatch") {
+							var fieldValue = getProp(doc,key);
+							if (fieldValue==undefined || !isArray(fieldValue)) return false;
+							var found = false;
+							for (var j=0; j<fieldValue.length; j++) {
+								var element = fieldValue[j];
+								// Check if element matches the query
+								if (typeof element === 'object' && !isArray(element)) {
+									// For objects, use matches
+									if (matches(element, operand)) {
+										found = true;
+										break;
+									}
+								} else {
+									// For primitive values, check operators directly
+									var matchesPrimitive = true;
+									var opKeys = Object.keys(operand);
+									for (var k=0; k<opKeys.length; k++) {
+										var op = opKeys[k];
+										var opValue = operand[op];
+										if (op == "$gte" && !(element >= opValue)) matchesPrimitive = false;
+										else if (op == "$gt" && !(element > opValue)) matchesPrimitive = false;
+										else if (op == "$lte" && !(element <= opValue)) matchesPrimitive = false;
+										else if (op == "$lt" && !(element < opValue)) matchesPrimitive = false;
+										else if (op == "$eq" && !(element == opValue)) matchesPrimitive = false;
+										else if (op == "$ne" && !(element != opValue)) matchesPrimitive = false;
+										else if (op == "$in" && !isIn(element, opValue)) matchesPrimitive = false;
+										else if (op == "$nin" && isIn(element, opValue)) matchesPrimitive = false;
+									}
+									if (matchesPrimitive) {
+										found = true;
+										break;
+									}
+								}
+							}
+							if (!found) return false;
+						} else if (operator=="$size") {
+							var fieldValue = getProp(doc,key);
+							if (fieldValue==undefined || !isArray(fieldValue)) return false;
+							if (fieldValue.length != operand) return false;
 						} else {
 							throw { $err : "Can't canonicalize query: BadValue unknown operator: " + operator, code : 17287 };
 						}
@@ -267,6 +313,35 @@ export function DB(options) {
 		} catch (e) {
 			return false
 		}
+	}
+
+	/**
+	 * MicroMongoDB.DB.where
+	 * 
+	 * Private Function
+	 */
+	function where(doc,value) {
+		if (typeof value === 'function') {
+			return value.call(doc);
+		} else if (typeof value === 'string') {
+			// Evaluate the string as a function
+			try {
+				var fn = new Function('return ' + value);
+				return fn.call(doc);
+			} catch (e) {
+				return false;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * MicroMongoDB.DB.not
+	 * 
+	 * Private Function
+	 */
+	function not(doc,value) {
+		return !tlMatches(doc,value);
 	}
 
 	/**
