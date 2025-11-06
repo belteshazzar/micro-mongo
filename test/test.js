@@ -1300,7 +1300,7 @@ describe("DB", function() {
 						{ $match: { category: { $exists: true }}},
 						{ $group: { 
 							_id: "$category", 
-							totalRevenue: { $sum: 1 },
+							count: { $sum: 1 },
 							avgPrice: { $avg: "$price" }
 						}},
 						{ $sort: { avgPrice: -1 }},

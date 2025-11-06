@@ -319,10 +319,18 @@ export function DB(options) {
 	 * MicroMongoDB.DB.where
 	 * 
 	 * Private Function
+	 * 
+	 * SECURITY NOTE: This uses Function constructor which can execute arbitrary code.
+	 * This is acceptable for a local/in-memory database but should NOT be used
+	 * in environments where untrusted user input is processed.
 	 */
 	function where(doc,value) {
 		if (typeof value === 'function') {
-			return value.call(doc);
+			try {
+				return value.call(doc);
+			} catch (e) {
+				return false;
+			}
 		} else if (typeof value === 'string') {
 			// Evaluate the string as a function
 			try {
@@ -1071,19 +1079,23 @@ export function DB(options) {
 							var doc = results[j];
 							var arr = getProp(doc, fieldPath);
 							
-							if (arr && isArray(arr)) {
+							if (arr && isArray(arr) && arr.length > 0) {
 								for (var k = 0; k < arr.length; k++) {
 									var unwoundDoc = copy(doc);
 									// Set the unwound value
 									var parts = fieldPath.split('.');
 									var target = unwoundDoc;
 									for (var l = 0; l < parts.length - 1; l++) {
+										if (!target[parts[l]]) {
+											target[parts[l]] = {};
+										}
 										target = target[parts[l]];
 									}
 									target[parts[parts.length - 1]] = arr[k];
 									unwound.push(unwoundDoc);
 								}
 							}
+							// MongoDB's default behavior: skip documents where field is missing, null, empty array, or not an array
 						}
 						results = unwound;
 					} else {
