@@ -674,6 +674,165 @@ export function DB(options) {
 	 */
 	function Collection(db,storage) {
 
+		// Index storage - map of index name to index structure
+		var indexes = {};
+
+		/**
+		 * MongoLocalDB.DB.Collection.generateIndexName
+		 * 
+		 * Private Function to generate index name from keys
+		 */
+		function generateIndexName(keys) {
+			var parts = [];
+			for (var field in keys) {
+				if (keys.hasOwnProperty(field)) {
+					parts.push(field + '_' + keys[field]);
+				}
+			}
+			return parts.join('_');
+		}
+
+		/**
+		 * MongoLocalDB.DB.Collection.buildIndex
+		 * 
+		 * Private Function to build/rebuild an index
+		 */
+		function buildIndex(indexName, keys) {
+			var index = {
+				keys: keys,
+				data: {} // Map of key value to array of document _ids
+			};
+
+			// Build index by scanning all documents
+			for (var i = 0; i < storage.size(); i++) {
+				var doc = storage.get(i);
+				if (doc) {
+					var indexKey = extractIndexKey(doc, keys);
+					if (indexKey !== null) {
+						if (!index.data[indexKey]) {
+							index.data[indexKey] = [];
+						}
+						index.data[indexKey].push(doc._id);
+					}
+				}
+			}
+
+			indexes[indexName] = index;
+			return index;
+		}
+
+		/**
+		 * MongoLocalDB.DB.Collection.extractIndexKey
+		 * 
+		 * Private Function to extract index key value from a document
+		 */
+		function extractIndexKey(doc, keys) {
+			var keyFields = Object.keys(keys);
+			if (keyFields.length === 0) return null;
+			
+			// For simple single-field index
+			if (keyFields.length === 1) {
+				var field = keyFields[0];
+				var value = getProp(doc, field);
+				if (value === undefined) return null;
+				// Preserve type information in the key
+				return JSON.stringify({ t: typeof value, v: value });
+			}
+			
+			// For compound index, concatenate values with type preservation
+			var keyParts = [];
+			for (var i = 0; i < keyFields.length; i++) {
+				var value = getProp(doc, keyFields[i]);
+				if (value === undefined) return null;
+				keyParts.push(JSON.stringify(value));
+			}
+			// Use a separator that won't appear in JSON
+			return keyParts.join('\x00');
+		}
+
+		/**
+		 * MongoLocalDB.DB.Collection.updateIndexesOnInsert
+		 * 
+		 * Private Function to update indexes when a document is inserted
+		 */
+		function updateIndexesOnInsert(doc) {
+			for (var indexName in indexes) {
+				if (indexes.hasOwnProperty(indexName)) {
+					var index = indexes[indexName];
+					var indexKey = extractIndexKey(doc, index.keys);
+					if (indexKey !== null) {
+						if (!index.data[indexKey]) {
+							index.data[indexKey] = [];
+						}
+						index.data[indexKey].push(doc._id);
+					}
+				}
+			}
+		}
+
+		/**
+		 * MongoLocalDB.DB.Collection.updateIndexesOnDelete
+		 * 
+		 * Private Function to update indexes when a document is deleted
+		 */
+		function updateIndexesOnDelete(doc) {
+			for (var indexName in indexes) {
+				if (indexes.hasOwnProperty(indexName)) {
+					var index = indexes[indexName];
+					var indexKey = extractIndexKey(doc, index.keys);
+					if (indexKey !== null && index.data[indexKey]) {
+						var arr = index.data[indexKey];
+						var idx = arr.indexOf(doc._id);
+						if (idx > -1) {
+							arr.splice(idx, 1);
+						}
+						if (arr.length === 0) {
+							delete index.data[indexKey];
+						}
+					}
+				}
+			}
+		}
+
+		/**
+		 * MongoLocalDB.DB.Collection.planQuery
+		 * 
+		 * Private Function to analyze query and determine if an index can be used
+		 * Returns { useIndex: boolean, indexName: string, indexKey: string } or null
+		 */
+		function planQuery(query) {
+			// Simple query planner - look for equality queries on indexed fields
+			var queryKeys = Object.keys(query);
+			
+			for (var indexName in indexes) {
+				if (indexes.hasOwnProperty(indexName)) {
+					var index = indexes[indexName];
+					var indexFields = Object.keys(index.keys);
+					
+					// Check if query matches index (simple case: single field equality)
+					// Note: Compound indexes are created but only single-field equality queries use them
+					if (indexFields.length === 1) {
+						var field = indexFields[0];
+						if (queryKeys.indexOf(field) > -1) {
+							var queryValue = query[field];
+							// Only use index for simple equality queries (not operators)
+							if (typeof queryValue === 'string' || typeof queryValue === 'number' || typeof queryValue === 'boolean') {
+								// Generate the same key format as extractIndexKey
+								return {
+									useIndex: true,
+									indexName: indexName,
+									indexKey: JSON.stringify({ t: typeof queryValue, v: queryValue }),
+									field: field
+								};
+							}
+						}
+					}
+				}
+			}
+			
+			return null;
+		}
+
 		/**
 		 * MicroMongoDB.DB.Collection.Cursor
 		 * 
@@ -688,10 +847,42 @@ export function DB(options) {
 			// !null == next
 			var next = false;
 
+			// Query planning - check if we can use an index
+			var queryPlan = planQuery(query);
+			var indexDocIds = null;
+			var indexPos = 0;
+			var fullScanDocIds = {}; // Track which docs we've seen to avoid duplicates
+
+			// If using index, get the document IDs from the index
+			if (queryPlan && queryPlan.useIndex) {
+				var index = indexes[queryPlan.indexName];
+				if (index && index.data[queryPlan.indexKey]) {
+					indexDocIds = index.data[queryPlan.indexKey].slice(); // copy array
+				} else {
+					indexDocIds = [];
+				}
+			}
+
 			function findNext() {
+				// First, try to get documents from index
+				while (indexDocIds !== null && indexPos < indexDocIds.length) {
+					var docId = indexDocIds[indexPos++];
+					var doc = storage.getStore()[docId];
+					if (doc && matches(doc, query)) {
+						fullScanDocIds[doc._id] = true;
+						next = doc;
+						return;
+					}
+					// If doc doesn't match (shouldn't happen with good index), continue to next
+				}
+
+				// Then fall back to full scan for remaining documents
+				// This handles complex queries where index only partially matches
 				while (pos<collection.count() && (max==0 || pos<max)) {
 					var cur = storage.get(pos++);
-					if (matches(cur,query)) {
+					// Skip docs we already returned from index
+					if (cur && !fullScanDocIds[cur._id] && matches(cur,query)) {
+						fullScanDocIds[cur._id] = true;
 						next = cur;
 						return;
 					}
@@ -1122,11 +1313,43 @@ export function DB(options) {
 				}
 				return numCopied;
 			},
-			createIndex : function() { throw "Not Implemented"; },
+			createIndex : function(keys, options) {
+				// MongoDB-compliant createIndex
+				// keys: { fieldName: 1 } for ascending, { fieldName: -1 } for descending
+				// options: { name: "indexName", unique: true, ... }
+				
+				if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
+					throw { $err: "createIndex requires a key specification object", code: 2 };
+				}
+
+				var indexName = (options && options.name) ? options.name : generateIndexName(keys);
+				
+				// Check if index already exists
+				if (indexes[indexName]) {
+					// MongoDB checks for key specification conflicts
+					var existingIndex = indexes[indexName];
+					var existingKeys = JSON.stringify(existingIndex.keys);
+					var newKeys = JSON.stringify(keys);
+					if (existingKeys !== newKeys) {
+						throw { 
+							$err: "Index with name " + indexName + " already exists with different key specification", 
+							code: 85 
+						};
+					}
+					// Same index, return without error
+					return indexName;
+				}
+
+				// Build the index
+				buildIndex(indexName, keys);
+
+				return indexName;
+			},
 			dataSize : function() { throw "Not Implemented"; },
 			deleteOne : function(query) {
 				var doc = this.findOne(query);
 				if (doc) {
+					updateIndexesOnDelete(doc);
 					storage.remove(doc._id);
 					return { deletedCount : 1 };
 				} else {
@@ -1136,11 +1359,15 @@ export function DB(options) {
 			deleteMany : function(query) {
 				var c = this.find(query);
 				var ids = [];
+				var docs = [];
 				while (c.hasNext()) {
-					ids.push(c.next()._id);
+					var doc = c.next();
+					ids.push(doc._id);
+					docs.push(doc);
 				}
 				var deletedCount = ids.length;
 				for (var i=0 ; i<ids.length ; i++) {
+					updateIndexesOnDelete(docs[i]);
 					storage.remove(ids[i]);
 				}
 				return { deletedCount : deletedCount };
@@ -1207,7 +1434,21 @@ export function DB(options) {
 				if (options && options.projection) return applyProjection(options.projection,doc);
 				else return doc;
 			},
-			getIndexes : function() { throw "Not Implemented"; },
+			getIndexes : function() {
+				// Return array of index specifications
+				var result = [];
+				for (var indexName in indexes) {
+					if (indexes.hasOwnProperty(indexName)) {
+						var index = indexes[indexName];
+						result.push({
+							name: indexName,
+							key: index.keys,
+							v: 2 // index version (MongoDB compatibility)
+						});
+					}
+				}
+				return result;
+			},
 			getShardDistribution : function() { throw "Not Implemented"; },
 			getShardVersion : function() { throw "Not Implemented"; },
 			// non-mongo
@@ -1225,6 +1466,7 @@ export function DB(options) {
 			insertOne : function(doc) {
 				if (doc._id==undefined) doc._id = id();
 				storage.set(doc._id,doc);
+				updateIndexesOnInsert(doc);
 			},
 			insertMany : function(docs) {
 				for (var i=0 ; i<docs.length ; i++) {
@@ -1244,13 +1486,16 @@ export function DB(options) {
 					if (options && options.upsert) {
 						replacement._id = id();
 						storage.set(replacement._id,replacement);
+						updateIndexesOnInsert(replacement);
 						result.upsertedId = replacement._id;
 					}
 				} else {
 					result.modifiedCount = 1;
 					var doc = c.next();
+					updateIndexesOnDelete(doc);
 					replacement._id = doc._id;
 					storage.set(doc._id,replacement);
+					updateIndexesOnInsert(replacement);
 				}
 				return result;
 			},
@@ -1259,10 +1504,13 @@ export function DB(options) {
 				if (!c.hasNext()) return;
 				if (options===true || (options && options.justOne)) {
 					var doc = c.next();
+					updateIndexesOnDelete(doc);
 					storage.remove(doc._id);
 				} else {
 					while (c.hasNext()) {
-						storage.remove(c.next()._id);
+						var doc = c.next();
+						updateIndexesOnDelete(doc);
+						storage.remove(doc._id);
 					}
 				}
 			},
@@ -1278,18 +1526,23 @@ export function DB(options) {
 					if (options && options.multi) {
 						while (c.hasNext()) {
 							var doc = c.next();
+							updateIndexesOnDelete(doc);
 							applyUpdates(updates,doc);
 							storage.set(doc._id,doc);
+							updateIndexesOnInsert(doc);
 						}
 					} else {
 						var doc = c.next();
+						updateIndexesOnDelete(doc);
 						applyUpdates(updates,doc);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				} else {
 					if (options && options.upsert) {
 						var doc = createDocFromUpdate(query,updates);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				}
 			},
@@ -1297,12 +1550,15 @@ export function DB(options) {
 				var c = this.find(query);
 				if (c.hasNext()) {
 					var doc = c.next();
+					updateIndexesOnDelete(doc);
 					applyUpdates(updates,doc);
 					storage.set(doc._id,doc);
+					updateIndexesOnInsert(doc);
 				} else {
 					if (options && options.upsert) {
 						var doc = createDocFromUpdate(query,updates);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				}
 			},
@@ -1311,13 +1567,16 @@ export function DB(options) {
 				if (c.hasNext()) {
 					while (c.hasNext()) {
 						var doc = c.next();
+						updateIndexesOnDelete(doc);
 						applyUpdates(updates,doc);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				} else {
 					if (options && options.upsert) {
 						var doc = createDocFromUpdate(query,updates);
 						storage.set(doc._id,doc);
+						updateIndexesOnInsert(doc);
 					}
 				}
 			},
