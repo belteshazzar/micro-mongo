@@ -493,6 +493,137 @@ describe("DB", function() {
 		});
 		
 		/************************************************************************
+		 * Test $all operator - matches arrays that contain all elements
+		 */
+		it('should find with $all operator', function() {
+			db[collectionName].insert({ tags: ["javascript", "mongodb", "database"] });
+			db[collectionName].insert({ tags: ["javascript", "nodejs"] });
+			db[collectionName].insert({ tags: ["mongodb", "database"] });
+			
+			var docs = testFind({ tags: { $all: ["javascript", "mongodb"] }});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].tags).to.include("javascript");
+			expect(docs[0].tags).to.include("mongodb");
+			expect(docs[0].tags).to.include("database");
+		});
+
+		it('should not find with $all when not all elements present', function() {
+			db[collectionName].insert({ tags: ["javascript", "nodejs"] });
+			
+			var docs = testFind({ tags: { $all: ["javascript", "mongodb", "python"] }});
+			expect(docs.length).to.equal(0);
+		});
+
+		/************************************************************************
+		 * Test $elemMatch operator
+		 */
+		it('should find with $elemMatch operator', function() {
+			db[collectionName].insert({ 
+				results: [
+					{ score: 80, subject: "math" },
+					{ score: 90, subject: "english" }
+				]
+			});
+			db[collectionName].insert({ 
+				results: [
+					{ score: 70, subject: "math" },
+					{ score: 60, subject: "english" }
+				]
+			});
+			
+			var docs = testFind({ results: { $elemMatch: { score: { $gte: 80 }, subject: "math" }}});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].results[0].score).to.equal(80);
+		});
+
+		it('should find with $elemMatch on simple array', function() {
+			db[collectionName].insert({ scores: [85, 90, 75] });
+			db[collectionName].insert({ scores: [60, 70, 65] });
+			
+			var docs = testFind({ scores: { $elemMatch: { $gte: 80, $lte: 90 }}});
+			expect(docs.length).to.equal(1);
+		});
+
+		/************************************************************************
+		 * Test $size operator
+		 */
+		it('should find with $size operator', function() {
+			db[collectionName].insert({ items: ["a", "b", "c"] });
+			db[collectionName].insert({ items: ["x", "y"] });
+			db[collectionName].insert({ items: ["1"] });
+			
+			var docs = testFind({ items: { $size: 3 }});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].items.length).to.equal(3);
+		});
+
+		it('should find with $size 0 for empty arrays', function() {
+			db[collectionName].insert({ items: [] });
+			db[collectionName].insert({ items: ["a"] });
+			
+			var docs = testFind({ items: { $size: 0 }});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].items.length).to.equal(0);
+		});
+
+		/************************************************************************
+		 * Test $where operator with function
+		 */
+		it('should find with $where operator using function', function() {
+			db[collectionName].insert({ price: 100, quantity: 5 });
+			db[collectionName].insert({ price: 50, quantity: 10 });
+			db[collectionName].insert({ price: 200, quantity: 2 });
+			
+			var docs = testFind({ $where: function() { return this.price * this.quantity > 400; }});
+			expect(docs.length).to.equal(2);
+		});
+
+		it('should find with $where operator using string', function() {
+			db[collectionName].insert({ value: 100 });
+			db[collectionName].insert({ value: 50 });
+			
+			var docs = testFind({ $where: "this.value > 75" });
+			expect(docs.length).to.equal(1);
+			expect(docs[0].value).to.equal(100);
+		});
+
+		/************************************************************************
+		 * Test complex query combinations
+		 */
+		it('should combine $all with other operators', function() {
+			db[collectionName].insert({ tags: ["a", "b", "c"], priority: 1 });
+			db[collectionName].insert({ tags: ["a", "b"], priority: 2 });
+			db[collectionName].insert({ tags: ["a", "b", "c"], priority: 3 });
+			
+			var docs = testFind({ 
+				$and: [
+					{ tags: { $all: ["a", "b"] }},
+					{ priority: { $gte: 2 }}
+				]
+			});
+			expect(docs.length).to.equal(2);
+		});
+
+		it('should combine $elemMatch with $or', function() {
+			db[collectionName].insert({ 
+				scores: [{ value: 90 }, { value: 80 }],
+				status: "active"
+			});
+			db[collectionName].insert({ 
+				scores: [{ value: 70 }, { value: 60 }],
+				status: "inactive"
+			});
+			
+			var docs = testFind({ 
+				$or: [
+					{ scores: { $elemMatch: { value: { $gte: 85 }}}},
+					{ status: "inactive" }
+				]
+			});
+			expect(docs.length).to.equal(2);
+		});
+		
+		/************************************************************************
 		 * 
 		 */
 		it('should testFindDocument01', function() {
@@ -990,6 +1121,199 @@ describe("DB", function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs to start with";
 				db[collectionName].updateMany({age:57},{ $inc : { age:2 }},{ upsert: true});
 				if (db[collectionName].find({age:59}).count()!=1) throw "new doc should have been created with age:59";
+			});
+
+			/************************************************************************
+			 * Aggregation Pipeline Tests
+			 */
+			describe('Aggregation', function() {
+				
+				it('should aggregate with $match stage', function() {
+					var results = db[collectionName].aggregate([
+						{ $match: { age: { $gte: 16 }}}
+					]);
+					expect(results.length).to.equal(3);
+				});
+
+				it('should aggregate with $project stage', function() {
+					var results = db[collectionName].aggregate([
+						{ $match: { age: 54 }},
+						{ $project: { age: 1 }}
+					]);
+					expect(results.length).to.equal(2);
+					expect(results[0].age).to.equal(54);
+					expect(results[0].legs).to.be.undefined;
+				});
+
+				it('should aggregate with $sort stage', function() {
+					var results = db[collectionName].aggregate([
+						{ $match: { age: { $exists: true }}},
+						{ $sort: { age: 1 }}
+					]);
+					expect(results[0].age).to.equal(4);
+					expect(results[results.length - 1].age).to.equal(54);
+				});
+
+				it('should aggregate with $limit stage', function() {
+					var results = db[collectionName].aggregate([
+						{ $match: {}},
+						{ $limit: 3 }
+					]);
+					expect(results.length).to.equal(3);
+				});
+
+				it('should aggregate with $skip stage', function() {
+					var results = db[collectionName].aggregate([
+						{ $match: {}},
+						{ $sort: { age: 1 }},
+						{ $skip: 2 }
+					]);
+					expect(results.length).to.equal(4);
+				});
+
+				it('should aggregate with $group and $sum', function() {
+					var results = db[collectionName].aggregate([
+						{ $group: { 
+							_id: "$age", 
+							count: { $sum: 1 },
+							totalLegs: { $sum: "$legs" }
+						}}
+					]);
+					// Find the group with age 54
+					var group54 = results.find(r => r._id === 54);
+					expect(group54).to.not.be.undefined;
+					expect(group54.count).to.equal(2);
+				});
+
+				it('should aggregate with $group and $avg', function() {
+					db[collectionName].insert({ category: "A", value: 10 });
+					db[collectionName].insert({ category: "A", value: 20 });
+					db[collectionName].insert({ category: "B", value: 30 });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { category: { $exists: true }}},
+						{ $group: { 
+							_id: "$category", 
+							avgValue: { $avg: "$value" }
+						}}
+					]);
+					var groupA = results.find(r => r._id === "A");
+					expect(groupA.avgValue).to.equal(15);
+				});
+
+				it('should aggregate with $group and $min/$max', function() {
+					db[collectionName].insert({ type: "test", score: 85 });
+					db[collectionName].insert({ type: "test", score: 92 });
+					db[collectionName].insert({ type: "test", score: 78 });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { type: "test" }},
+						{ $group: { 
+							_id: "$type", 
+							minScore: { $min: "$score" },
+							maxScore: { $max: "$score" }
+						}}
+					]);
+					expect(results[0].minScore).to.equal(78);
+					expect(results[0].maxScore).to.equal(92);
+				});
+
+				it('should aggregate with $group and $push', function() {
+					db[collectionName].insert({ team: "A", player: "Alice" });
+					db[collectionName].insert({ team: "A", player: "Bob" });
+					db[collectionName].insert({ team: "B", player: "Charlie" });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { team: { $exists: true }}},
+						{ $group: { 
+							_id: "$team", 
+							players: { $push: "$player" }
+						}}
+					]);
+					var teamA = results.find(r => r._id === "A");
+					expect(teamA.players.length).to.equal(2);
+					expect(teamA.players).to.include("Alice");
+					expect(teamA.players).to.include("Bob");
+				});
+
+				it('should aggregate with $group and $addToSet', function() {
+					db[collectionName].insert({ dept: "IT", skill: "JavaScript" });
+					db[collectionName].insert({ dept: "IT", skill: "Python" });
+					db[collectionName].insert({ dept: "IT", skill: "JavaScript" });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { dept: "IT" }},
+						{ $group: { 
+							_id: "$dept", 
+							skills: { $addToSet: "$skill" }
+						}}
+					]);
+					expect(results[0].skills.length).to.equal(2);
+				});
+
+				it('should aggregate with $group and $first/$last', function() {
+					db[collectionName].insert({ order: 1, value: "first" });
+					db[collectionName].insert({ order: 2, value: "second" });
+					db[collectionName].insert({ order: 3, value: "third" });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { order: { $exists: true }}},
+						{ $sort: { order: 1 }},
+						{ $group: { 
+							_id: null, 
+							firstValue: { $first: "$value" },
+							lastValue: { $last: "$value" }
+						}}
+					]);
+					expect(results[0].firstValue).to.equal("first");
+					expect(results[0].lastValue).to.equal("third");
+				});
+
+				it('should aggregate with $count stage', function() {
+					var results = db[collectionName].aggregate([
+						{ $match: { age: { $gte: 16 }}},
+						{ $count: "total" }
+					]);
+					expect(results.length).to.equal(1);
+					expect(results[0].total).to.equal(3);
+				});
+
+				it('should aggregate with $unwind stage', function() {
+					db[collectionName].insert({ name: "Product1", tags: ["a", "b", "c"] });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { name: "Product1" }},
+						{ $unwind: "$tags" }
+					]);
+					expect(results.length).to.equal(3);
+					expect(results[0].tags).to.equal("a");
+					expect(results[1].tags).to.equal("b");
+					expect(results[2].tags).to.equal("c");
+				});
+
+				it('should aggregate with multiple stages combined', function() {
+					db[collectionName].insert({ category: "X", price: 100, quantity: 2 });
+					db[collectionName].insert({ category: "X", price: 50, quantity: 5 });
+					db[collectionName].insert({ category: "Y", price: 200, quantity: 1 });
+					
+					var results = db[collectionName].aggregate([
+						{ $match: { category: { $exists: true }}},
+						{ $group: { 
+							_id: "$category", 
+							count: { $sum: 1 },
+							avgPrice: { $avg: "$price" }
+						}},
+						{ $sort: { avgPrice: -1 }},
+						{ $limit: 2 }
+					]);
+					expect(results.length).to.be.lte(2);
+					expect(results[0]._id).to.equal("Y");
+				});
+
+				it('should handle empty pipeline', function() {
+					var results = db[collectionName].aggregate([]);
+					expect(results.length).to.equal(6); // Original docs
+				});
 			});
 			
 			describe('Cursor', function() {

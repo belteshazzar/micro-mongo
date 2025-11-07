@@ -8,14 +8,14 @@ import pkg from './package.json'
 export default {
   input: 'main.js',
   output: [{
-    file: `build/mongo-local-db-${pkg.version}.js`,
-    name: 'mongo-local-db',
+    file: `build/micro-mongo-${pkg.version}.js`,
+    name: 'micro-mongo',
     format: 'es',
     sourcemap: true
   }, {
-    file: `build/mongo-local-db-${pkg.version}.min.js`,
+    file: `build/micro-mongo-${pkg.version}.min.js`,
     format: 'es',
-    name: 'mongo-local-db',
+    name: 'micro-mongo',
     plugins: [terser()],
     sourcemap: true
   }],
