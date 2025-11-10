@@ -67,3 +67,6 @@ export const ObjectStore = function() {
 // Export refactored classes
 export { MongoClient } from './src/MongoClient.js';
 export { ObjectId } from './src/ObjectId.js';
+export { StorageEngine } from './src/StorageEngine.js';
+export { IndexedDbStorageEngine } from './src/IndexedDbStorageEngine.js';
+export { ObjectStorageEngine } from './src/ObjectStorageEngine.js';

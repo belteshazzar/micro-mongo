@@ -73,4 +73,20 @@ export class CollectionIndex {
 			key: this.keys
 		};
 	}
+
+	/**
+	 * Serialize index state for storage
+	 * @returns {Object} Serializable index state
+	 */
+	serialize() {
+		throw new Error('serialize() must be implemented by subclass');
+	}
+
+	/**
+	 * Restore index state from serialized data
+	 * @param {Object} data - Serialized index state
+	 */
+	deserialize(data) {
+		throw new Error('deserialize() must be implemented by subclass');
+	}
 }

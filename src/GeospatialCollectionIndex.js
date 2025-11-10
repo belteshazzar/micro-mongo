@@ -170,4 +170,29 @@ export class GeospatialCollectionIndex extends CollectionIndex {
 			'2dsphereIndexVersion': 3
 		};
 	}
+
+	/**
+	 * Serialize index state for storage
+	 * @returns {Object} Serializable index state
+	 */
+	serialize() {
+		return {
+			type: 'geospatial',
+			keys: this.keys,
+			options: this.options,
+			geoField: this.geoField,
+			rtreeState: this.rtree.serialize()
+		};
+	}
+
+	/**
+	 * Restore index state from serialized data
+	 * @param {Object} state - Serialized index state
+	 */
+	deserialize(state) {
+		this.geoField = state.geoField;
+		if (state.rtreeState) {
+			this.rtree.deserialize(state.rtreeState);
+		}
+	}
 }

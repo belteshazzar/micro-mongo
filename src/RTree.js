@@ -475,6 +475,77 @@ export class RTree {
 		this.root = new RTreeNode(true);
 		this._size = 0;
 	}
+
+	/**
+	 * Serialize the R-tree state for storage
+	 * @returns {Object} Serializable state
+	 */
+	serialize() {
+		return {
+			maxEntries: this.maxEntries,
+			minEntries: this.minEntries,
+			size: this._size,
+			root: this._serializeNode(this.root)
+		};
+	}
+
+	/**
+	 * Serialize a node recursively
+	 */
+	_serializeNode(node) {
+		const serialized = {
+			isLeaf: node.isLeaf,
+			bbox: node.bbox,
+			children: []
+		};
+
+		if (node.isLeaf) {
+			// Leaf nodes contain entries
+			serialized.children = node.children.map(entry => ({
+				lat: entry.lat,
+				lng: entry.lng,
+				data: entry.data
+			}));
+		} else {
+			// Internal nodes contain child nodes
+			serialized.children = node.children.map(child => this._serializeNode(child));
+		}
+
+		return serialized;
+	}
+
+	/**
+	 * Restore the R-tree state from serialized data
+	 * @param {Object} state - Serialized state
+	 */
+	deserialize(state) {
+		this.maxEntries = state.maxEntries || 9;
+		this.minEntries = state.minEntries || Math.ceil(this.maxEntries / 2);
+		this._size = state.size || 0;
+		this.root = this._deserializeNode(state.root);
+	}
+
+	/**
+	 * Deserialize a node recursively
+	 */
+	_deserializeNode(serialized) {
+		const node = new RTreeNode(serialized.isLeaf);
+		node.bbox = serialized.bbox;
+
+		if (serialized.isLeaf) {
+			// Restore leaf entries
+			node.children = serialized.children.map(entry => ({
+				lat: entry.lat,
+				lng: entry.lng,
+				data: entry.data
+			}));
+		} else {
+			// Restore child nodes
+			node.children = serialized.children.map(child => this._deserializeNode(child));
+		}
+
+		return node;
+	}
 }
 
 export default RTree;

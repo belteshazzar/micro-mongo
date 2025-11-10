@@ -103,4 +103,25 @@ export class RegularCollectionIndex extends CollectionIndex {
 	clear() {
 		this.data = {};
 	}
+
+	/**
+	 * Serialize index state for storage
+	 * @returns {Object} Serializable index state
+	 */
+	serialize() {
+		return {
+			type: 'regular',
+			keys: this.keys,
+			options: this.options,
+			data: this.data
+		};
+	}
+
+	/**
+	 * Restore index state from serialized data
+	 * @param {Object} state - Serialized index state
+	 */
+	deserialize(state) {
+		this.data = state.data || {};
+	}
 }
