@@ -23,7 +23,7 @@ npm install stemmer
 ### Basic Example
 
 ```javascript
-import { TextIndex } from './text-index.js';
+import { TextIndex } from './TextIndex.js';
 
 // Create a new index
 const index = new TextIndex();
@@ -141,7 +141,7 @@ index.query('brown fox'); // ['doc1']
 ## Example: Blog Search
 
 ```javascript
-import { TextIndex } from './text-index.js';
+import { TextIndex } from './TextIndex.js';
 
 const index = new TextIndex();
 

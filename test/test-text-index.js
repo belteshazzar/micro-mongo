@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { TextIndex } from '../src/text-index.js';
+import { TextIndex } from '../src/TextIndex.js';
 
 describe('TextIndex', function() {
   let index;

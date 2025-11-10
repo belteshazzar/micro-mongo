@@ -1,5 +1,5 @@
 import { CollectionIndex } from './CollectionIndex.js';
-import { TextIndex } from './text-index.js';
+import { TextIndex } from './TextIndex.js';
 import { getProp } from './utils.js';
 
 /**

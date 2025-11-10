@@ -1,5 +1,5 @@
 import { getProp, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
-import { TextIndex } from './text-index.js';
+import { TextIndex } from './TextIndex.js';
 import { ObjectId } from './ObjectId.js';
 
 /**

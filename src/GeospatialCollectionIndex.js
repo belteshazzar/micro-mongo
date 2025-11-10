@@ -1,5 +1,5 @@
 import { CollectionIndex } from './CollectionIndex.js';
-import { RTree } from './rtree.js';
+import { RTree } from './RTree.js';
 import { getProp } from './utils.js';
 
 /**

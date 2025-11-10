@@ -1,4 +1,4 @@
-import { TextIndex } from '../src/text-index.js';
+import { TextIndex } from '../src/TextIndex.js';
 
 // Test with stop words enabled (default)
 const index1 = new TextIndex();

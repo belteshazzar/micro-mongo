@@ -1,4 +1,4 @@
-import { TextIndex } from '../src/text-index.js';
+import { TextIndex } from '../src/TextIndex.js';
 
 /**
  * Performance analysis for TextIndex remove() operation

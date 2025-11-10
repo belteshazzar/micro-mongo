@@ -1,4 +1,4 @@
-import { RTree } from '../src/rtree.js';
+import { RTree } from '../src/RTree.js';
 import * as de9im from 'de9im';
 
 /**

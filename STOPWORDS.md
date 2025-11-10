@@ -151,7 +151,7 @@ The TextIndex includes comprehensive stop word tests:
 - Toggling filtering on/off
 - Query behavior with stop words
 
-Run tests: `npm test -- test/test-text-index.js --grep "Stop Words"`
+Run tests: `npm test -- test/test-TextIndex.js --grep "Stop Words"`
 
 ## See Also
 

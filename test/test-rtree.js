@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { RTree } from '../rtree.js';
+import { RTree } from '../src/RTree.js';
 
 describe('RTree Geospatial Index', function() {
 	
