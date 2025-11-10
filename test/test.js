@@ -23,23 +23,23 @@ describe("DB no options", function() {
 		db = null;
 	});
 
-	it('should have no collections by default', function() {			
+	it('should have no collections by default', async function() {			
 		expect(db.getCollectionNames().length).to.equal(0);
 	});
 
-	it('should be able to create a collection with default store', function() {			
+	it('should be able to create a collection with default store', async function() {			
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
 	});
 
-	it('should be able to create a collection with the provided store', function() {			
+	it('should be able to create a collection with the provided store', async function() {			
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
 	});
 
-	it('should be able to drop collection', function() {			
+	it('should be able to drop collection', async function() {			
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
@@ -74,23 +74,23 @@ describe("DB", function() {
 		db = null;
 	});
 
-	it('should have no collections by default', function() {			
+	it('should have no collections by default', async function() {			
 		expect(db.getCollectionNames().length).to.equal(0);
 	});
 
-	it('should be able to create a collection with default store', function() {			
+	it('should be able to create a collection with default store', async function() {			
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
 	});
 
-	it('should be able to create a collection with the provided store', function() {			
+	it('should be able to create a collection with the provided store', async function() {			
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
 	});
 
-	it('should be able to drop collection', function() {			
+	it('should be able to drop collection', async function() {			
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
@@ -103,7 +103,7 @@ describe("DB", function() {
 
 	describe('Dynamic Collection Creation (Proxy)', function() {
 		
-		it('should auto-create collection when accessing non-existent collection', function() {
+		it('should auto-create collection when accessing non-existent collection', async function() {
 			expect(db.getCollectionNames().length).to.equal(0);
 			const col = db.dynamicCollection;
 			expect(col).to.not.be.undefined;
@@ -111,49 +111,49 @@ describe("DB", function() {
 			expect(db.getCollectionNames()).to.include('dynamicCollection');
 		});
 
-		it('should allow inserting into dynamically created collection', function() {
-			db.users.insertOne({ name: 'Alice', age: 30 });
-			const result = db.users.findOne({ name: 'Alice' });
+		it('should allow inserting into dynamically created collection', async function() {
+			await db.users.insertOne({ name: 'Alice', age: 30 });
+			const result = await db.users.findOne({ name: 'Alice' });
 			expect(result).to.not.be.null;
 			expect(result.name).to.equal('Alice');
 			expect(result.age).to.equal(30);
 		});
 
-		it('should allow chaining methods on dynamically created collection', function() {
-			db.products.insertMany([
+		it('should allow chaining methods on dynamically created collection', async function() {
+			await db.products.insertMany([
 				{ name: 'Product A', price: 100 },
 				{ name: 'Product B', price: 200 },
 				{ name: 'Product C', price: 150 }
 			]);
-			const results = db.products.find({ price: { $gt: 100 } }).toArray();
+			const results = await db.products.find({ price: { $gt: 100 } }).toArray();
 			expect(results.length).to.equal(2);
 		});
 
-		it('should return same collection instance on repeated access', function() {
+		it('should return same collection instance on repeated access', async function() {
 			const col1 = db.testCollection;
 			const col2 = db.testCollection;
 			expect(col1).to.equal(col2);
 		});
 
-		it('should not create collection for internal properties', function() {
+		it('should not create collection for internal properties', async function() {
 			const options = db.options;
 			expect(options).to.not.be.undefined;
 			expect(db.getCollectionNames()).to.not.include('options');
 		});
 
-		it('should work with multiple dynamically created collections', function() {
-			db.collection1.insertOne({ value: 1 });
-			db.collection2.insertOne({ value: 2 });
-			db.collection3.insertOne({ value: 3 });
+		it('should work with multiple dynamically created collections', async function() {
+			await db.collection1.insertOne({ value: 1 });
+			await db.collection2.insertOne({ value: 2 });
+			await db.collection3.insertOne({ value: 3 });
 			
 			expect(db.getCollectionNames().length).to.equal(3);
-			expect(db.collection1.findOne().value).to.equal(1);
-			expect(db.collection2.findOne().value).to.equal(2);
-			expect(db.collection3.findOne().value).to.equal(3);
+			expect((await db.collection1.findOne()).value).to.equal(1);
+			expect((await db.collection2.findOne()).value).to.equal(2);
+			expect((await db.collection3.findOne()).value).to.equal(3);
 		});
 
-		it('should allow find() on non-existent collection without error', function() {
-			const results = db.emptyCollection.find().toArray();
+		it('should allow find() on non-existent collection without error', async function() {
+			const results = await db.emptyCollection.find().toArray();
 			expect(results).to.be.an('array');
 			expect(results.length).to.equal(0);
 		});
@@ -288,12 +288,12 @@ describe("DB", function() {
 			]
 		  };
 
-		function initDB() {
+		async function initDB() {
 			db.createCollection(collectionName);
-			db[collectionName].insert({ age: 4,	legs: 0, geojson: polygonInBox });
-			db[collectionName].insert([{ age: 4, legs: 5, geojson: pointInBox },{ age: 54, legs: 2, geojson: pointNotInBox }]);
-			db[collectionName].insertMany([{ age: 54, legs: 12 },{ age: 16, geojson: partiallyInBox }]);
-			db[collectionName].insertOne({ name: "steve", text: "this is a text string with paris and london", geojson: pointInBox });
+			await db[collectionName].insert({ age: 4,	legs: 0, geojson: polygonInBox });
+			await db[collectionName].insert([{ age: 4, legs: 5, geojson: pointInBox },{ age: 54, legs: 2, geojson: pointNotInBox }]);
+			await db[collectionName].insertMany([{ age: 54, legs: 12 },{ age: 16, geojson: partiallyInBox }]);
+			await db[collectionName].insertOne({ name: "steve", text: "this is a text string with paris and london", geojson: pointInBox });
 
 		}
 		
@@ -317,9 +317,9 @@ describe("DB", function() {
 			}
 		}
 	
-		function reset() {
+		async function reset() {
 			db.dropDatabase();
-			initDB();
+			await initDB();
 		}
 			
 		before(function() {
@@ -328,62 +328,64 @@ describe("DB", function() {
 		after(function() {
 		});
 	
-		beforeEach(initDB);
+		beforeEach(async function() {
+			await initDB();
+		});
 	
 		afterEach(function() {
 			db = null;
 		});
 			
-		it('should testCount', function() {
+		it('should testCount', async function() {
 			var q = { age : { $gt:3, $lt:7 }};
 			if (db[collectionName].find(q).count()!=2) throw "should be 2";
-			if (db[collectionName].find().count()!=6) throw "db should have 6 docs";
+			if ((await db[collectionName].count())!=6) throw "db should have 6 docs";
 		});
 
-		it('should testCopyTo', function() {
+		it('should testCopyTo', async function() {
 			var dest = "backup";
 			if (db.getCollectionNames().includes(dest)) throw "backup collection shouldn't exist";
-			if (db[collectionName].copyTo(dest)!=6) throw "should have copied all 6 docs";
+			if ((await db[collectionName].copyTo(dest))!=6) throw "should have copied all 6 docs";
 			if (!db.getCollectionNames().includes(dest)) throw "backup collection should have been created";
 			if (db[dest].find().count()!=6) throw "failed to copy all content";
 			if (db[collectionName].find().count()!=6) throw "original collection should still have 6 docs";
-			if (db[collectionName].copyTo(dest)!=6) throw "should have copied all 6 docs";
+			if ((await db[collectionName].copyTo(dest))!=6) throw "should have copied all 6 docs";
 			if (db[dest].find().count()!=6) throw "failed to copy all content";
 		});
 
-		it('should testDeleteOne', function() {
+		it('should testDeleteOne', async function() {
 			var q = { age : { $gt:3, $lt:7 }};
 			if (db[collectionName].find(q).count()!=2) throw "should be 2";
-			if (db[collectionName].find().count()!=6) throw "db should have 6 docs";
-			if (db[collectionName].deleteOne(q).deletedCount!=1) throw "didn't delete single doc";
+			if ((await db[collectionName].count())!=6) throw "db should have 6 docs";
+			if ((await db[collectionName].deleteOne(q)).deletedCount!=1) throw "didn't delete single doc";
 			if (db[collectionName].find(q).count()!=1) throw "should be 1 after deletion";
-			if (db[collectionName].find().count()!=5) throw "db should have 5 docs in db after deleteion";
+			if ((await db[collectionName].count())!=5) throw "db should have 5 docs in db after deleteion";
 		});
 
-		it('should testDeleteMany', function() {
+		it('should testDeleteMany', async function() {
 			var q = { age : { $gt:3, $lt:7 }};
 			if (db[collectionName].find(q).count()!=2) throw "should be 2";
-			if (db[collectionName].find().count()!=6) throw "db should have 6 docs";
-			if (db[collectionName].deleteMany(q).deletedCount!=2) throw "didn't delete 2 docs";
+			if ((await db[collectionName].count())!=6) throw "db should have 6 docs";
+			if ((await db[collectionName].deleteMany(q)).deletedCount!=2) throw "didn't delete 2 docs";
 			if (db[collectionName].find(q).count()!=0) throw "should be 0 after deletion";
-			if (db[collectionName].find().count()!=4) throw "db should have 4 docs in db after deleteion";
+			if ((await db[collectionName].count())!=4) throw "db should have 4 docs in db after deleteion";
 		});
 
-		it('should testDistinct', function() {
-			var vals = db[collectionName].distinct("age"); // [4,16,54]
+		it('should testDistinct', async function() {
+			var vals = await db[collectionName].distinct("age"); // [4,16,54]
 			if (vals.length!=3) throw "3 distinct values of age";
 			if (vals[0]!=4) throw "fail";
 			if (vals[1]!=16) throw "fail";
 			if (vals[2]!=54) throw "fail";
-			var vals = db[collectionName].distinct("age",{legs:2}); // [54]
+			var vals = await db[collectionName].distinct("age",{legs:2}); // [54]
 			if (vals.length!=1) throw "fail";
 			if (vals[0]!=54) throw "fail";
 		});
 
-		it('should testDrop', function() {
-			if (db[collectionName].find().count()!=6) throw "db should have 6 docs";
+		it('should testDrop', async function() {
+			if ((await db[collectionName].count())!=6) throw "db should have 6 docs";
 			db[collectionName].drop();
-			if (db[collectionName].find().count()!=0) throw "db should have no docs";
+			if ((await db[collectionName].count())!=0) throw "db should have no docs";
 		});
 
 
@@ -396,7 +398,7 @@ describe("DB", function() {
 		 * { "_id" : ObjectId("5695be7dadb5303f3336314a"), "name" : "steve" }
 		 * { "_id" : ObjectId("56983fa1396c05c1d83a87dd"), "age" : 16 }
 		 */
-		it('should testFind1', function() {
+		it('should testFind1', async function() {
 			var docs = testFind();
 			expect(docs.length).to.equal(6);
 		});
@@ -405,7 +407,7 @@ describe("DB", function() {
 		 * > db.peep.find({age:54,legs:2})
 		 * { "_id" : ObjectId("5695be6aadb5303f33363148"), "age" : 54, "legs" : 2 }
 		 */
-		it('should testFind2', function() {
+		it('should testFind2', async function() {
 			var docs = testFind({ age : 54,	legs: 2 });
 			if (docs.length!=1) throw "fail";
 		});
@@ -415,7 +417,7 @@ describe("DB", function() {
 		 * > db.peep.find({ $and: [{ age : 54},{ legs: 2 }] })
 		 * { "_id" : ObjectId("5695be6aadb5303f33363148"), "age" : 54, "legs" : 2 }
 		 */
-		it('should testFind3', function() {
+		it('should testFind3', async function() {
 			var docs = testFind({ $and: [{ age : 54},{ legs: 2 }] });
 			if (docs.length!=1) throw "fail";
 		});
@@ -427,7 +429,7 @@ describe("DB", function() {
 		 *				 "$err" : "Can't canonicalize query: BadValue unknown operator: $and",
 		 *				 "code" : 17287
 		 */
-		it('should testFind4', function() {
+		it('should testFind4', async function() {
 			var docs = testFind({ age: { $and: [{ $eq : 54}] }, legs: 2 });
 			if (docs.$err!="Can't canonicalize query: BadValue unknown operator: $and") throw "fail";		
 		});
@@ -438,7 +440,7 @@ describe("DB", function() {
 		 * { "_id" : ObjectId("5695be58adb5303f33363146"), "age" : 4, "legs" : 0 }
 		 * { "_id" : ObjectId("5695be62adb5303f33363147"), "age" : 4, "legs" : 5 }
 		 */
-		it('should testFind5', function() {
+		it('should testFind5', async function() {
 			var docs = testFind({ age : { $gt:3, $lt:7 }});
 			if (docs.length!=2) throw "fail";
 		});
@@ -448,7 +450,7 @@ describe("DB", function() {
 		 * 
 		 * No Error produced by mongo (?)
 		 */
-		it('should testFind6', function() {
+		it('should testFind6', async function() {
 			var docs = testFind({ age: {$gt:{t:3}, $lt: 7}});
 			if (docs.length!=0) throw "fail";
 		});
@@ -461,7 +463,7 @@ describe("DB", function() {
 		 *				 "code" : 17287
 		 * }
 		 */
-		it('should testFind7', function() {
+		it('should testFind7', async function() {
 			var docs = testFind({ age: {$gt:3, lt: 7}});
 			if (docs.$err!="Can't canonicalize query: BadValue unknown operator: lt") throw "fail";
 		});
@@ -469,7 +471,7 @@ describe("DB", function() {
 		/************************************************************************
 		 * > db.peep.find({ age: {gt:3, $lt: 7}})	// object comparison as no first '$'
 		 */
-		it('should testFind8', function() {
+		it('should testFind8', async function() {
 			var docs = testFind({ age: {gt:3, $lt: 7}});
 			if (docs.length!=0) throw "fail";
 		});
@@ -477,7 +479,7 @@ describe("DB", function() {
 		/************************************************************************
 		 * > db.peep.find({ age: {gt:3, lt: 7}}) // object comparison
 		 */
-		it('should testFind9', function() {
+		it('should testFind9', async function() {
 		 var docs = testFind({ age: {gt:3, lt: 7}});
 			if (docs.length!=0) throw "fail";
 		});
@@ -490,7 +492,7 @@ describe("DB", function() {
 		 *				 "code" : 17287
 		 * }
 		 */
-		it('should testFind10', function() {
+		it('should testFind10', async function() {
 			var docs = testFind({ age: {$gt:3, lt: 7}});
 			if (docs.$err!="Can't canonicalize query: BadValue unknown operator: lt") throw "fail";
 		});
@@ -499,21 +501,21 @@ describe("DB", function() {
 		 * 
 		 */
 
-		it('should find text', function() {
+		it('should find text', async function() {
 			var docs = testFind({ text: {$text: "pari" }})
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
 			expect(docs.length).to.equal(1)
 		})
 
-		it('should not find text', function() {
+		it('should not find text', async function() {
 			var docs = testFind({ text: {$text: "fred"} })
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
 			expect(docs.length).to.equal(0)
 		})
 
-		it('should find text in and', function() {
+		it('should find text in and', async function() {
 			var docs = testFind({ $and: [ { text: { $text: "pari"} },{ text: { $text: "lond" }} ]})
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
@@ -524,14 +526,14 @@ describe("DB", function() {
 		 * 
 		 */
 		  
-		 it('should geo within bbox', function() {
+		 it('should geo within bbox', async function() {
 			var docs = testFind({ geojson: { $geoWithin: [ topLeft, bottomRight ] }})
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
 			expect(docs.length).to.equal(3)
 		})
 
-		it('should geo witin in and', function() {
+		it('should geo witin in and', async function() {
 			var docs = testFind({ $and: [ { text: {$text: "pari" }},{ geojson: { $geoWithin: [ topLeft, bottomRight ] }} ]})
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
@@ -541,9 +543,9 @@ describe("DB", function() {
 		/************************************************************************
 		 * 
 		 */
-		it('should testFindArray01', function() {
-				db[collectionName].insert({ scores: [4,5,6] });
-				db[collectionName].insert({ scores: [3,5,7] });
+		it('should testFindArray01', async function() {
+				await db[collectionName].insert({ scores: [4,5,6] });
+				await db[collectionName].insert({ scores: [3,5,7] });
 			var docs = testFind({ "scores.2" : 7});
 			if (docs.length!=1) throw "fail";
 			if (docs[0].scores[2]!=7) throw "Fail";
@@ -552,9 +554,9 @@ describe("DB", function() {
 		/************************************************************************
 		 * 
 		 */
-		it('should testFindArray02', function() {
-				db[collectionName].insert({ scores: [4,5,6] });
-				db[collectionName].insert({ scores: [3,5,7] });
+		it('should testFindArray02', async function() {
+				await db[collectionName].insert({ scores: [4,5,6] });
+				await db[collectionName].insert({ scores: [3,5,7] });
 			var docs = testFind({ "scores.0" : { $lt : 4 }});
 			if (docs.length!=1) throw "fail";
 			if (docs[0].scores[2]!=7) throw "Fail";
@@ -563,10 +565,10 @@ describe("DB", function() {
 		/************************************************************************
 		 * Test $all operator - matches arrays that contain all elements
 		 */
-		it('should find with $all operator', function() {
-			db[collectionName].insert({ tags: ["javascript", "mongodb", "database"] });
-			db[collectionName].insert({ tags: ["javascript", "nodejs"] });
-			db[collectionName].insert({ tags: ["mongodb", "database"] });
+		it('should find with $all operator', async function() {
+			await db[collectionName].insert({ tags: ["javascript", "mongodb", "database"] });
+			await db[collectionName].insert({ tags: ["javascript", "nodejs"] });
+			await db[collectionName].insert({ tags: ["mongodb", "database"] });
 			
 			var docs = testFind({ tags: { $all: ["javascript", "mongodb"] }});
 			expect(docs.length).to.equal(1);
@@ -575,8 +577,8 @@ describe("DB", function() {
 			expect(docs[0].tags).to.include("database");
 		});
 
-		it('should not find with $all when not all elements present', function() {
-			db[collectionName].insert({ tags: ["javascript", "nodejs"] });
+		it('should not find with $all when not all elements present', async function() {
+			await db[collectionName].insert({ tags: ["javascript", "nodejs"] });
 			
 			var docs = testFind({ tags: { $all: ["javascript", "mongodb", "python"] }});
 			expect(docs.length).to.equal(0);
@@ -585,14 +587,14 @@ describe("DB", function() {
 		/************************************************************************
 		 * Test $elemMatch operator
 		 */
-		it('should find with $elemMatch operator', function() {
-			db[collectionName].insert({ 
+		it('should find with $elemMatch operator', async function() {
+			await db[collectionName].insert({ 
 				results: [
 					{ score: 80, subject: "math" },
 					{ score: 90, subject: "english" }
 				]
 			});
-			db[collectionName].insert({ 
+			await db[collectionName].insert({ 
 				results: [
 					{ score: 70, subject: "math" },
 					{ score: 60, subject: "english" }
@@ -604,9 +606,9 @@ describe("DB", function() {
 			expect(docs[0].results[0].score).to.equal(80);
 		});
 
-		it('should find with $elemMatch on simple array', function() {
-			db[collectionName].insert({ scores: [85, 90, 75] });
-			db[collectionName].insert({ scores: [60, 70, 65] });
+		it('should find with $elemMatch on simple array', async function() {
+			await db[collectionName].insert({ scores: [85, 90, 75] });
+			await db[collectionName].insert({ scores: [60, 70, 65] });
 			
 			var docs = testFind({ scores: { $elemMatch: { $gte: 80, $lte: 90 }}});
 			expect(docs.length).to.equal(1);
@@ -615,19 +617,19 @@ describe("DB", function() {
 		/************************************************************************
 		 * Test $size operator
 		 */
-		it('should find with $size operator', function() {
-			db[collectionName].insert({ items: ["a", "b", "c"] });
-			db[collectionName].insert({ items: ["x", "y"] });
-			db[collectionName].insert({ items: ["1"] });
+		it('should find with $size operator', async function() {
+			await db[collectionName].insert({ items: ["a", "b", "c"] });
+			await db[collectionName].insert({ items: ["x", "y"] });
+			await db[collectionName].insert({ items: ["1"] });
 			
 			var docs = testFind({ items: { $size: 3 }});
 			expect(docs.length).to.equal(1);
 			expect(docs[0].items.length).to.equal(3);
 		});
 
-		it('should find with $size 0 for empty arrays', function() {
-			db[collectionName].insert({ items: [] });
-			db[collectionName].insert({ items: ["a"] });
+		it('should find with $size 0 for empty arrays', async function() {
+			await db[collectionName].insert({ items: [] });
+			await db[collectionName].insert({ items: ["a"] });
 			
 			var docs = testFind({ items: { $size: 0 }});
 			expect(docs.length).to.equal(1);
@@ -637,18 +639,18 @@ describe("DB", function() {
 		/************************************************************************
 		 * Test $where operator with function
 		 */
-		it('should find with $where operator using function', function() {
-			db[collectionName].insert({ price: 100, quantity: 5 });
-			db[collectionName].insert({ price: 50, quantity: 10 });
-			db[collectionName].insert({ price: 200, quantity: 2 });
+		it('should find with $where operator using function', async function() {
+			await db[collectionName].insert({ price: 100, quantity: 5 });
+			await db[collectionName].insert({ price: 50, quantity: 10 });
+			await db[collectionName].insert({ price: 200, quantity: 2 });
 			
 			var docs = testFind({ $where: function() { return this.price * this.quantity > 400; }});
 			expect(docs.length).to.equal(2);
 		});
 
-		it('should find with $where operator using string', function() {
-			db[collectionName].insert({ value: 100 });
-			db[collectionName].insert({ value: 50 });
+		it('should find with $where operator using string', async function() {
+			await db[collectionName].insert({ value: 100 });
+			await db[collectionName].insert({ value: 50 });
 			
 			var docs = testFind({ $where: "this.value > 75" });
 			expect(docs.length).to.equal(1);
@@ -658,10 +660,10 @@ describe("DB", function() {
 		/************************************************************************
 		 * Test complex query combinations
 		 */
-		it('should combine $all with other operators', function() {
-			db[collectionName].insert({ tags: ["a", "b", "c"], priority: 1 });
-			db[collectionName].insert({ tags: ["a", "b"], priority: 2 });
-			db[collectionName].insert({ tags: ["a", "b", "c"], priority: 3 });
+		it('should combine $all with other operators', async function() {
+			await db[collectionName].insert({ tags: ["a", "b", "c"], priority: 1 });
+			await db[collectionName].insert({ tags: ["a", "b"], priority: 2 });
+			await db[collectionName].insert({ tags: ["a", "b", "c"], priority: 3 });
 			
 			var docs = testFind({ 
 				$and: [
@@ -672,12 +674,12 @@ describe("DB", function() {
 			expect(docs.length).to.equal(2);
 		});
 
-		it('should combine $elemMatch with $or', function() {
-			db[collectionName].insert({ 
+		it('should combine $elemMatch with $or', async function() {
+			await db[collectionName].insert({ 
 				scores: [{ value: 90 }, { value: 80 }],
 				status: "active"
 			});
-			db[collectionName].insert({ 
+			await db[collectionName].insert({ 
 				scores: [{ value: 70 }, { value: 60 }],
 				status: "inactive"
 			});
@@ -694,7 +696,7 @@ describe("DB", function() {
 		/************************************************************************
 		 * 
 		 */
-		it('should testFindDocument01', function() {
+		it('should testFindDocument01', async function() {
 		});
 	
 			/*
@@ -719,7 +721,7 @@ describe("DB", function() {
 	
 	
 			*/
-			it('should testFind_Projection', function() {
+			it('should testFind_Projection', async function() {
 
 				function testInclusion(doc,id,age,legs) {
 					if (!id != !doc._id) throw "id isn't correct";
@@ -743,17 +745,17 @@ describe("DB", function() {
 				testInclusion(db[collectionName].find(q,{}).next(),true,true,true);	 
 			});
 
-			it('should testFindAndModify', function() {
+			it('should testFindAndModify', async function() {
 			});
 
-			it('should testFindOne', function() {
+			it('should testFindOne', async function() {
 				var q = { age : { $gt:3, $lt:7 }};
 				if (db[collectionName].find(q).count()!=2) throw "should be 2";
-				if (!db[collectionName].findOne(q)) throw "should have found 1";
+				if (!(await db[collectionName].findOne(q))) throw "should have found 1";
 				if (db[collectionName].find().count()!=6) throw "db should have 6 docs";
 			});
 
-			it('should testFindOne_Projection', function() {
+			it('should testFindOne_Projection', async function() {
 
 				function testInclusion(doc,id,age,legs) {
 					if (!id != !doc._id) throw "id isn't correct";
@@ -762,87 +764,87 @@ describe("DB", function() {
 				}
 
 				var q = { age:54, legs: 2 };
-				if (!db[collectionName].findOne(q)) throw "should be 1 doc";
-				testInclusion(db[collectionName].findOne(q,{age:1}),true,true,false);
-				testInclusion(db[collectionName].findOne(q,{age:0}),true,false,true);
+				if (!(await db[collectionName].findOne(q))) throw "should be 1 doc";
+				testInclusion(await db[collectionName].findOne(q,{age:1}),true,true,false);
+				testInclusion(await db[collectionName].findOne(q,{age:0}),true,false,true);
 				try {
-					db[collectionName].findOne(q,{age:1,legs:0});
+					await db[collectionName].findOne(q,{age:1,legs:0});
 					throw "should have raised exception";
 				} catch (e) {
 					if (e.code!=17287) throw "wrong error code";
 					if (e.$err!="Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.") throw "wrong error message";
 				}
-				testInclusion(db[collectionName].findOne(q,{age:1,_id:1}),true,true,false);
-				testInclusion(db[collectionName].findOne(q,{age:0,_id:0}),false,false,true);
-				testInclusion(db[collectionName].findOne(q,{}),true,true,true);	 
+				testInclusion(await db[collectionName].findOne(q,{age:1,_id:1}),true,true,false);
+				testInclusion(await db[collectionName].findOne(q,{age:0,_id:0}),false,false,true);
+				testInclusion(await db[collectionName].findOne(q,{}),true,true,true);	 
 
 			});
 
-			it('should testFindOneAndDelete', function() {
+			it('should testFindOneAndDelete', async function() {
 				if (db[collectionName].find().count()!=6) throw "fail";
 				if (db[collectionName].find({age:54}).count()!=2) throw "need 2";
-				var doc = db[collectionName].findOneAndDelete({age:54});
+				var doc = await db[collectionName].findOneAndDelete({age:54});
 				if (!doc) throw "didn't return deleted doc";
 				if (db[collectionName].find().count()!=5) throw "fail";
 			});
 
-			it('should testFindOneAndDelete_NotFound', function() {
+			it('should testFindOneAndDelete_NotFound', async function() {
 				if (db[collectionName].find().count()!=6) throw "fail";
 				if (db[collectionName].find({age:74}).count()!=0) throw "need 0";
-				var doc = db[collectionName].findOneAndDelete({age:74});
+				var doc = await db[collectionName].findOneAndDelete({age:74});
 				if (doc) throw "shouldn't have found anything to delete";
 				if (db[collectionName].find().count()!=6) throw "fail";
 			});
 
-			it('should testFindOneAndDelete_Sort', function() {
+			it('should testFindOneAndDelete_Sort', async function() {
 				if (db[collectionName].find().count()!=6) throw "fail";
 				if (db[collectionName].find({age:54}).count()!=2) throw "need 2";
-				var first = db[collectionName].findOne({age:54});
+				var first = await db[collectionName].findOne({age:54});
 
-				var doc = db[collectionName].findOneAndDelete({age:54});
+				var doc = await db[collectionName].findOneAndDelete({age:54});
 				if (!doc) throw "should have found something to delete";
 				if (db[collectionName].find().count()!=5) throw "fail";
 				if (doc._id!=first._id) throw "shoudl have deleted the first doc";
 
-				reset();
+				await reset();
 				
-				var doc = db[collectionName].findOneAndDelete({age:54},{ sort : { legs :1 }});
+				var doc = await db[collectionName].findOneAndDelete({age:54},{ sort : { legs :1 }});
 				if (!doc) throw "should have found something to delete";
 				if (db[collectionName].find().count()!=5) throw "fail";
 				if (doc._id==first._id) throw "shouldnt have deleted the first doc";
 			 
 			});
 
-			it('should testFindOneAndDelete_Projection', function() {
+			it('should testFindOneAndDelete_Projection', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "need 2";
-				var first = db[collectionName].findOneAndDelete({age:54},{ projection : { _id: 0, legs: 0}});
+				var first = await db[collectionName].findOneAndDelete({age:54},{ projection : { _id: 0, legs: 0}});
 				if (!first.age) throw "age should be in projection";
 				if (first._id) throw "age shouldn't be included";
 				if (first.legs) throw "legs shouldn't be included";
 			});
 
-			it('should testFindOneAndReplace', function() {
-				if (db[collectionName].findOne({age:76,legs:17})) throw "this shouldn't exist yet";
-				var orig = db[collectionName].findOne({age:54});
+			it('should testFindOneAndReplace', async function() {
+				if (await db[collectionName].findOne({age:76,legs:17})) throw "this shouldn't exist yet";
+				var orig = await db[collectionName].findOne({age:54});
 				if (db[collectionName].find({age:54}).count()!=2) throw "there should be 2";
-				var replaced = db[collectionName].findOneAndReplace({age:54},{age:76,legs:17});
+				var replaced = await db[collectionName].findOneAndReplace({age:54},{age:76,legs:17});
 				if (orig._id!=replaced._id) throw "replaced doc incorrect";
-				if (!db[collectionName].findOne({age:76,legs:17})) throw "this doc should exist now";
+				if (!(await db[collectionName].findOne({age:76,legs:17}))) throw "this doc should exist now";
 				if (db[collectionName].find({age:54}).count()!=1) throw "there should only be one now";
 			});
 
-			it('should testFindOneAndReplace_NotFound', function() {
-				if (db[collectionName].findOne({age:76,legs:17})) throw "this shouldn't exist";
-				if (db[collectionName].findOneAndReplace({age:76,legs:17},{})) throw "nothing should have been found to replace";
+			it('should testFindOneAndReplace_NotFound', async function() {
+				if (await db[collectionName].findOne({age:76,legs:17})) throw "this shouldn't exist";
+				if (await db[collectionName].findOneAndReplace({age:76,legs:17},{})) throw "nothing should have been found to replace";
 			});
 
-			it('should testFindOneAndReplace_Projection', function() {
-				var replaced = db[collectionName].findOneAndReplace({age:54},{age:76,legs:17}, { projection : {age:0}});
+			it('should testFindOneAndReplace_Projection', async function() {
+				var replaced = await db[collectionName].findOneAndReplace({age:54},{age:76,legs:17}, { projection : {age:0}});
 				if (replaced.age) throw "age should not be in projected result";
 			});
 
-			it('should testFindOneAndReplace_Sort', function() {
-				var unsorted = db[collectionName].findOne({age:54});
+			it('should testFindOneAndReplace_Sort', async function() {
+				var unsorted = await db[collectionName].findOne({age:54});
 				var sortOrder = 1;
 				var sorted = db[collectionName].find({age:54}).sort({legs:sortOrder}).next();
 				if (unsorted._id==sorted._id) {
@@ -850,54 +852,54 @@ describe("DB", function() {
 					sorted = db[collectionName].find({age:54}).sort({legs:sortOrder}).next();
 					if (unsorted._id==sorted._id) throw "sorting should have returned a different doc";
 				}
-				var unsortedReplaced = db[collectionName].findOneAndReplace({age:54},{age:76,legs:17});
+				var unsortedReplaced = await db[collectionName].findOneAndReplace({age:54},{age:76,legs:17});
 				if (unsortedReplaced._id!=unsorted._id) throw "replaced incorrect doc when not sorting";
-				var sortedReplaced = db[collectionName].findOneAndReplace({age:54},{age:76,legs:17}, { sort : {legs:sortOrder}});
+				var sortedReplaced = await db[collectionName].findOneAndReplace({age:54},{age:76,legs:17}, { sort : {legs:sortOrder}});
 				if (sortedReplaced._id!=sorted._id) throw "replaced incorrect doc when sorting";
 			});
 
-			it('should testFindOneAndReplace_ReturnNewDocument', function() {
-				var orig = db[collectionName].findOne({age:54});
-				var replaced = db[collectionName].findOneAndReplace({age:54},{age:76,legs:17},{returnNewDocument: false});
+			it('should testFindOneAndReplace_ReturnNewDocument', async function() {
+				var orig = await db[collectionName].findOne({age:54});
+				var replaced = await db[collectionName].findOneAndReplace({age:54},{age:76,legs:17},{returnNewDocument: false});
 				if (orig._id!=replaced._id) throw "should have the returned the doc being replaced";
-				var newDoc = db[collectionName].findOne({age:76,legs:17});
-				var replacement = db[collectionName].findOneAndReplace({age:76,legs:17},{age:16,legs:47},{returnNewDocument: true});
+				var newDoc = await db[collectionName].findOne({age:76,legs:17});
+				var replacement = await db[collectionName].findOneAndReplace({age:76,legs:17},{age:16,legs:47},{returnNewDocument: true});
 				if (!replacement._id) throw "id should have been set";
 				if (newDoc._id!=replacement._id) throw "the replacement/new doc should have the same id as the one replaced";
 				if (replacement.age!=16) throw "doesn't appear to be the new doc (age)";
 				if (replacement.legs!=47) throw "doesn't appear to be the new doc (legs)";
 			});
 
-			it('should testFindOneAndUpdate', function() {
-				var orig = db[collectionName].findOne({age:54});
-				var original = db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }});
+			it('should testFindOneAndUpdate', async function() {
+				var orig = await db[collectionName].findOne({age:54});
+				var original = await db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }});
 				if (orig._id!=original._id) throw "orig and original id's should be teh same";
-				var updated = db[collectionName].findOne({_id:original._id});
+				var updated = await db[collectionName].findOne({_id:original._id});
 				if (updated._id!=orig._id) throw "doesn't appear to be teh same doc";
 				if (orig.legs!=updated.legs) throw "legs should be the same";
 				if (updated.age!=56) throw "age should ahve been incremented by 2";		
 			});
 
-			it('should testFindOneAndUpdate_NotFound', function() {
-				if (db[collectionName].findOne({age:79})) throw "this shouldn't exist";
-				if (db[collectionName].findOneAndUpdate({age:79},{ $inc : { age:2 }})) throw "should return null";
+			it('should testFindOneAndUpdate_NotFound', async function() {
+				if (await db[collectionName].findOne({age:79})) throw "this shouldn't exist";
+				if (await db[collectionName].findOneAndUpdate({age:79},{ $inc : { age:2 }})) throw "should return null";
 			});
 
-			it('should testFindOneAndUpdate_Projection', function() {
-				var original = db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }},{ projection: { _id:0,legs:0 }});
+			it('should testFindOneAndUpdate_Projection', async function() {
+				var original = await db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }},{ projection: { _id:0,legs:0 }});
 				if (original._id) throw "_id shouldn't be in projection";		
 				if (original.legs) throw "legs shouldn't be in projection";		
 				if (!original.age) throw "age should be in projection";
 				if (original.age!=54) throw "age should be 54 as per the original";
-				var updated = db[collectionName].findOneAndUpdate({age:56},{ $inc : { age:2 }},{ projection: { _id:0,legs:0 },returnNewDocument: true});
+				var updated = await db[collectionName].findOneAndUpdate({age:56},{ $inc : { age:2 }},{ projection: { _id:0,legs:0 },returnNewDocument: true});
 				if (updated._id) throw "_id shouldn't be in projection";		
 				if (updated.legs) throw "legs shouldn't be in projection";		
 				if (!updated.age) throw "age should be in projection";
 				if (updated.age!=58) throw "age should be 58 after updates";
 			});
 
-			it('should testFindOneAndUpdate_Sort', function() {
-				var unsorted = db[collectionName].findOne({age:54});
+			it('should testFindOneAndUpdate_Sort', async function() {
+				var unsorted = await db[collectionName].findOne({age:54});
 				var sortOrder = 1;
 				var sorted = db[collectionName].find({age:54}).sort({legs:sortOrder}).next();
 				if (unsorted._id==sorted._id) {
@@ -905,124 +907,124 @@ describe("DB", function() {
 					sorted = db[collectionName].find({age:54}).sort({legs:sortOrder}).next();
 					if (unsorted._id==sorted._id) throw "sorting should have returned a different doc";
 				}
-				var unsortedUpdated = db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }});
+				var unsortedUpdated = await db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }});
 				if (unsortedUpdated._id!=unsorted._id) throw "updated incorrect doc when not sorting";
-				var sortedUpdated = db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }}, { sort : {legs:sortOrder}});
+				var sortedUpdated = await db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }}, { sort : {legs:sortOrder}});
 				if (sortedUpdated._id!=sorted._id) throw "updated incorrect doc when sorting";
 			});
 
-			it('should testFindOneAndUpdate_ReturnNewDocument', function() {
-				var orig = db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }});
+			it('should testFindOneAndUpdate_ReturnNewDocument', async function() {
+				var orig = await db[collectionName].findOneAndUpdate({age:54},{ $inc : { age:2 }});
 				if (orig.age!=54) throw "should have returned original";
-				var orig2 = db[collectionName].findOneAndUpdate({age:56},{ $inc : { age:2 }},{ returnNewDocument: false});
+				var orig2 = await db[collectionName].findOneAndUpdate({age:56},{ $inc : { age:2 }},{ returnNewDocument: false});
 				if (orig2.age!=56) throw "should have returned original";
-				var updated = db[collectionName].findOneAndUpdate({age:58},{ $inc : { age:2 }},{ returnNewDocument: true});
+				var updated = await db[collectionName].findOneAndUpdate({age:58},{ $inc : { age:2 }},{ returnNewDocument: true});
 				if (updated.age!=60) throw "should have returned updated";
 			});
 
-			it('should testGroup', function() {
+			it('should testGroup', async function() {
 			});
 
-			it('should testInsert', function() {
+			it('should testInsert', async function() {
 				if (db[collectionName].find().count()!=6) throw "insert doesn't seem to be working in reset()";
 			});
 
-			it('should testInsertOne', function() {
+			it('should testInsertOne', async function() {
 				if (db[collectionName].find().count()!=6) throw "insert doesn't seem to be working in reset()";
 			});
 
-			it('should testInsertMany', function() {
+			it('should testInsertMany', async function() {
 				if (db[collectionName].find().count()!=6) throw "insert doesn't seem to be working in reset()";
 			});
 
-			it('should testMapReduce', function() {
+			it('should testMapReduce', async function() {
 			});
 
-			it('should testReplaceOne', function() {
+			it('should testReplaceOne', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
-				var result = db[collectionName].replaceOne({age:54},{ cars : 3 });
+				var result = await db[collectionName].replaceOne({age:54},{ cars : 3 });
 				if (result.matchedCount!=2) throw "should have matched 2 documents";
 				if (result.modifiedCount!=1) throw "should have replaced 1 document";
-				var replaced = db[collectionName].findOne({cars:3});
+				var replaced = await db[collectionName].findOne({cars:3});
 				if (replaced.cars!=3) throw "doc doesn't look like replacement";
 			});
 
-			it('should testReplaceOne_NotFound', function() {
+			it('should testReplaceOne_NotFound', async function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs";
-				var result = db[collectionName].replaceOne({age:57},{ cars : 3 });
+				var result = await db[collectionName].replaceOne({age:57},{ cars : 3 });
 				if (result.matchedCount!=0) throw "should have matched 0 documents";
 				if (result.modifiedCount!=0) throw "should have replaced 0 document";
 			});
 
-			it('should testReplaceOne_Upsert', function() {
+			it('should testReplaceOne_Upsert', async function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs";
-				var result = db[collectionName].replaceOne({age:57},{ cars : 3 },{upsert: true});
+				var result = await db[collectionName].replaceOne({age:57},{ cars : 3 },{upsert: true});
 				if (result.matchedCount!=0) throw "should have matched 0 documents";
 				if (result.modifiedCount!=0) throw "should have replaced 0 documents";
 				if (!result.upsertedId) throw "should have created new document";
-				var newDoc = db[collectionName].findOne({_id:result.upsertedId});
+				var newDoc = await db[collectionName].findOne({_id:result.upsertedId});
 				if (newDoc.cars!=3) throw "new doc doesn't look like replaced doc";
 			});
 
-			it('should testRemove', function() {
+			it('should testRemove', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
 				db[collectionName].remove({age:54});
 				if (db[collectionName].find({age:54}).count()!=0) throw "should be no docs";			 
 			});
 
-			it('should testRemove_JustOneTrue', function() {
+			it('should testRemove_JustOneTrue', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
 				db[collectionName].remove({age:54},true);
 				if (db[collectionName].find({age:54}).count()!=1) throw "should be 1 doc";
 			});
 
-			it('should testRemove_JustOneFalse', function() {
+			it('should testRemove_JustOneFalse', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
 				db[collectionName].remove({age:54},false);
 				if (db[collectionName].find({age:54}).count()!=0) throw "should be no docs";
 			});
 
-			it('should testRemove_JustOneDocTrue', function() {
+			it('should testRemove_JustOneDocTrue', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
 				db[collectionName].remove({age:54},{ justOne : true } );
 				if (db[collectionName].find({age:54}).count()!=1) throw "should be 1 doc";
 			});
 
-			it('should testRemove_JustOneDocFalse', function() {
+			it('should testRemove_JustOneDocFalse', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
 				db[collectionName].remove({age:54},{ justOne : false } );
 				if (db[collectionName].find({age:54}).count()!=0) throw "should be no docs";
 			});
 
-			it('should testUpdate', function() {
+			it('should testUpdate', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
 				db[collectionName].update({age:54},{ $inc : { age:2 }});
 				if (db[collectionName].find({age:54}).count()!=1) throw "one doc should have been updated from 54";
 				if (db[collectionName].find({age:56}).count()!=1) throw "one doc should have been updated to 56";
 			});
 
-			it('should testUpdate_Op_Inc', function() {
-				var orig = db[collectionName].findOne({legs:12});
+			it('should testUpdate_Op_Inc', async function() {
+				var orig = await db[collectionName].findOne({legs:12});
 				db[collectionName].update({legs:12},{ $inc : { age:2, legs:2 }});
-				var updated = db[collectionName].findOne({_id:orig._id});
+				var updated = await db[collectionName].findOne({_id:orig._id});
 				if (orig._id!=updated._id) throw "couldn't find updated doc";
 				if (updated.age!=56) throw "age didn't get updated";
 				if (updated.legs!=14) throw "legs didn't get updated";
 			});
 
-			it('should testUpdate_Op_Mul', function() {
-				var orig = db[collectionName].findOne({legs:12});
+			it('should testUpdate_Op_Mul', async function() {
+				var orig = await db[collectionName].findOne({legs:12});
 				db[collectionName].update({legs:12},{ $mul : { age:2, legs:2 }});
-				var updated = db[collectionName].findOne({_id:orig._id});
+				var updated = await db[collectionName].findOne({_id:orig._id});
 				if (orig._id!=updated._id) throw "couldn't find updated doc";
 				if (updated.age!=(54*2)) throw "age didn't get updated";
 				if (updated.legs!=(12*2)) throw "legs didn't get updated";
 			});
 
-			it('should testUpdate_Op_Rename', function() {
-				var orig = db[collectionName].findOne({legs:12});
+			it('should testUpdate_Op_Rename', async function() {
+				var orig = await db[collectionName].findOne({legs:12});
 				db[collectionName].update({legs:12},{ $rename : { age:"cats", legs:"dogs" }});
-				var updated = db[collectionName].findOne({_id:orig._id});
+				var updated = await db[collectionName].findOne({_id:orig._id});
 				if (orig._id!=updated._id) throw "couldn't find updated doc";
 				if (updated.age) throw "age shouldnt exist";
 				if (updated.legs) throw "legs shouldnt exist";
@@ -1030,164 +1032,164 @@ describe("DB", function() {
 				if (updated.dogs!=12) throw "dogs should have value of legs";
 			});
 
-			it('should testUpdate_Op_SetOnInsert', function() {
+			it('should testUpdate_Op_SetOnInsert', async function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs to start with";
 				db[collectionName].update({age:57},{ $setOnInsert: { dogs: 2, cats: 3}},{upsert:true});
 				if (db[collectionName].find({dogs:2,cats:3}).count()!=1) throw "one doc should have been created";
 			});
 
-			it('should testUpdate_Op_Set', function() {
+			it('should testUpdate_Op_Set', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
 				if (db[collectionName].find({age:54,dogs:2,cats:3}).count()!=0) throw "should be no docs";
-				db[collectionName].updateMany({age:54},{ $set: { dogs: 2, cats: 3}});
+				await db[collectionName].updateMany({age:54},{ $set: { dogs: 2, cats: 3}});
 				if (db[collectionName].find({age:54,dogs:2,cats:3}).count()!=2) throw "should be 2 docs";
 			});
 
-			it('should testUpdate_Op_Unset', function() {
+			it('should testUpdate_Op_Unset', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
-				db[collectionName].updateMany({age:54},{ $unset: { age: 2}});
+				await db[collectionName].updateMany({age:54},{ $unset: { age: 2}});
 				if (db[collectionName].find({age:54}).count()!=0) throw "no docs should be returned";
 			});
 
-			it('should testUpdate_Op_Min', function() {
+			it('should testUpdate_Op_Min', async function() {
 				if (db[collectionName].find({legs:10}).count()!=0) throw "should be no docs to start with";
-				db[collectionName].updateMany({legs:12},{ $min: { legs: 10}});
+				await db[collectionName].updateMany({legs:12},{ $min: { legs: 10}});
 				if (db[collectionName].find({legs:10}).count()!=1) throw "should have been udpated";
 			});
 
-			it('should testUpdate_Op_Max', function() {
+			it('should testUpdate_Op_Max', async function() {
 				if (db[collectionName].find({legs:24}).count()!=0) throw "should be no docs to start with";
-				db[collectionName].updateMany({legs:12},{ $max: { legs: 24}});
+				await db[collectionName].updateMany({legs:12},{ $max: { legs: 24}});
 				if (db[collectionName].find({legs:24}).count()!=1) throw "should have been udpated";
 			});
 
-			it('should testUpdate_Op_CurrentDate', function() {
+			it('should testUpdate_Op_CurrentDate', async function() {
 				if (db[collectionName].find({legs:12}).count()!=1) throw "should be 1 doc to start with";
-				db[collectionName].updateMany({legs:12},{ $currentDate: { now: 24}});
-				var doc = db[collectionName].findOne({legs:12});
+				await db[collectionName].updateMany({legs:12},{ $currentDate: { now: 24}});
+				var doc = await db[collectionName].findOne({legs:12});
 				if (!doc.now) throw "now should have been set to date";
 			});
 
-			it('should testUpdate_Op_AddToSet', function() {
-				db[collectionName].insert({ me: 7, nums: [3] });
-				var orig = db[collectionName].findOne({me:7});
+			it('should testUpdate_Op_AddToSet', async function() {
+				await db[collectionName].insert({ me: 7, nums: [3] });
+				var orig = await db[collectionName].findOne({me:7});
 				if (orig.nums.length!=1) throw "array of length 1 should exist";
 				db[collectionName].update({me:7},{ $addToSet : { nums : [4,5] }});
-				var updated = db[collectionName].findOne({me:7});
+				var updated = await db[collectionName].findOne({me:7});
 				if (updated.nums.length!=2) throw "array of length 2 should exist";
 				if (updated.nums[1].length!=2) throw "array of length 2 should exist";
 			});
 
-			it('should testUpdate_Op_Pop', function() {
-				db[collectionName].insert({ me: 7, nums: [1,2,3,4,5,6] });
+			it('should testUpdate_Op_Pop', async function() {
+				await db[collectionName].insert({ me: 7, nums: [1,2,3,4,5,6] });
 				db[collectionName].update({me:7},{ $pop : {nums:1} });
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.nums.length!=5) throw "incorrect length";
 				if (doc.nums[0]!=1) throw "first element should be 1";
 				if (doc.nums[doc.nums.length-1]!=5) throw "last element should be 5";
 				db[collectionName].update({me:7},{ $pop : {nums:-1} });
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.nums.length!=4) throw "incorrect length";
 				if (doc.nums[0]!=2) throw "first element should be 2";
 				if (doc.nums[doc.nums.length-1]!=5) throw "last element should be 5";
 			});
 
-			it('should testUpdate_Op_PullAll', function() {
-				db[collectionName].insert({ me: 7, nums: [3,5,2,3,4,5,2,5] });
+			it('should testUpdate_Op_PullAll', async function() {
+				await db[collectionName].insert({ me: 7, nums: [3,5,2,3,4,5,2,5] });
 				db[collectionName].update({me:7},{ $pullAll : {nums:[3,5]} });
-				var doc = db[collectionName].findOne({me:7});	// nums = [2,4,2]
+				var doc = await db[collectionName].findOne({me:7});	// nums = [2,4,2]
 				if (doc.nums.length!=3) throw "incorrect length";
 				if (doc.nums[0]!=2) throw "[0] element should be 2";
 				if (doc.nums[1]!=4) throw "[1] element should be 4";
 				if (doc.nums[2]!=2) throw "[2] element should be 2";
 			});
 
-			it('should testUpdate_Op_Pull', function() {
+			it('should testUpdate_Op_Pull', async function() {
 			});
 
-			it('should testUpdate_Op_PushAll', function() {
-				db[collectionName].insert({ me: 7, nums: [3] });
+			it('should testUpdate_Op_PushAll', async function() {
+				await db[collectionName].insert({ me: 7, nums: [3] });
 				db[collectionName].update({me:7},{ $pushAll : {nums:[4,5]} });
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.nums.length!=3) throw "incorrect length";
 				if (doc.nums[0]!=3) throw "[0] element should be 3";
 				if (doc.nums[1]!=4) throw "[1] element should be 4";
 				if (doc.nums[2]!=5) throw "[2] element should be 5";
 			});
 
-			it('should testUpdate_Op_Push', function() {
-				db[collectionName].insert({ me: 7, nums: [3] });
+			it('should testUpdate_Op_Push', async function() {
+				await db[collectionName].insert({ me: 7, nums: [3] });
 				db[collectionName].update({me:7},{ $push : {nums:4} });
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.nums.length!=2) throw "incorrect length";
 				if (doc.nums[0]!=3) throw "[0] element should be 3";
 				if (doc.nums[1]!=4) throw "[1] element should be 4";
 			});
 
-			it('should testUpdate_Op_Each', function() {
+			it('should testUpdate_Op_Each', async function() {
 			});
 
-			it('should testUpdate_Op_Slice', function() {
+			it('should testUpdate_Op_Slice', async function() {
 			});
 
-			it('should testUpdate_Op_Sort', function() {
+			it('should testUpdate_Op_Sort', async function() {
 			});
 
-			it('should testUpdate_Op_Position', function() {
+			it('should testUpdate_Op_Position', async function() {
 			});
 
-			it('should testUpdate_Op_Bit', function() {
-				db[collectionName].insert({ me: 7, val : 4 });
+			it('should testUpdate_Op_Bit', async function() {
+				await db[collectionName].insert({ me: 7, val : 4 });
 				db[collectionName].update({me:7},{$bit:{val: {or:3}}});
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.val!=7) throw "4 or 3 = 7";
 				db[collectionName].update({me:7},{$bit:{val: {and:14}}});
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.val!=6) throw "7 and 14 = 6";
 				db[collectionName].update({me:7},{$bit:{val: {xor:10}}});
-				var doc = db[collectionName].findOne({me:7});
+				var doc = await db[collectionName].findOne({me:7});
 				if (doc.val!=12) throw "6 xor 10 = 12";
 			});
 
-			it('should testUpdate_Op_Isolated', function() {
+			it('should testUpdate_Op_Isolated', async function() {
 			});
 
-			it('should testUpdate_Multi', function() {
+			it('should testUpdate_Multi', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
 				db[collectionName].update({age:54},{ $inc : { age:2 }},{multi:true});
 				if (db[collectionName].find({age:54}).count()!=0) throw "all docs should have been updated from 54";
 				if (db[collectionName].find({age:56}).count()!=2) throw "all docs should have been updated to 56";
 			});
 
-			it('should testUpdate_Upsert', function() {
+			it('should testUpdate_Upsert', async function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs to start with";
 				db[collectionName].update({age:57},{ $inc : { age:2 }},{upsert:true});
 				if (db[collectionName].find({age:59}).count()!=1) throw "one doc should have been created with age:59";
 			});
 
-			it('should testUpdateOne', function() {
+			it('should testUpdateOne', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
-				db[collectionName].updateOne({age:54},{ $inc : { age:2 }});
+				await db[collectionName].updateOne({age:54},{ $inc : { age:2 }});
 				if (db[collectionName].find({age:54}).count()!=1) throw "one doc should have been updated from 54";
 				if (db[collectionName].find({age:56}).count()!=1) throw "one doc should have been updated to 56";
 			});
 	
-			it('should testUpdateOne_Upsert', function() {
+			it('should testUpdateOne_Upsert', async function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs to start with";
-				db[collectionName].updateOne({age:57},{ $inc : { age:2 }},{ upsert: true});
+				await db[collectionName].updateOne({age:57},{ $inc : { age:2 }},{ upsert: true});
 				if (db[collectionName].find({age:59}).count()!=1) throw "new doc should have been created with age:59";
 			});
 
-			it('should testUpdateMany', function() {
+			it('should testUpdateMany', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
-				db[collectionName].updateMany({age:54},{ $inc : { age:2 }});
+				await db[collectionName].updateMany({age:54},{ $inc : { age:2 }});
 				if (db[collectionName].find({age:54}).count()!=0) throw "these docs should have been updated from 54";
 				if (db[collectionName].find({age:56}).count()!=2) throw "these docs should have been updated to 56";
 			});
 
-			it('should testUpdateMany_Upsert', function() {
+			it('should testUpdateMany_Upsert', async function() {
 				if (db[collectionName].find({age:57}).count()!=0) throw "should be no docs to start with";
-				db[collectionName].updateMany({age:57},{ $inc : { age:2 }},{ upsert: true});
+				await db[collectionName].updateMany({age:57},{ $inc : { age:2 }},{ upsert: true});
 				if (db[collectionName].find({age:59}).count()!=1) throw "new doc should have been created with age:59";
 			});
 
@@ -1196,14 +1198,14 @@ describe("DB", function() {
 			 */
 			describe('Aggregation', function() {
 				
-				it('should aggregate with $match stage', function() {
+				it('should aggregate with $match stage', async function() {
 					var results = db[collectionName].aggregate([
 						{ $match: { age: { $gte: 16 }}}
 					]);
 					expect(results.length).to.equal(3);
 				});
 
-				it('should aggregate with $project stage', function() {
+				it('should aggregate with $project stage', async function() {
 					var results = db[collectionName].aggregate([
 						{ $match: { age: 54 }},
 						{ $project: { age: 1 }}
@@ -1213,7 +1215,7 @@ describe("DB", function() {
 					expect(results[0].legs).to.be.undefined;
 				});
 
-				it('should aggregate with $sort stage', function() {
+				it('should aggregate with $sort stage', async function() {
 					var results = db[collectionName].aggregate([
 						{ $match: { age: { $exists: true }}},
 						{ $sort: { age: 1 }}
@@ -1222,7 +1224,7 @@ describe("DB", function() {
 					expect(results[results.length - 1].age).to.equal(54);
 				});
 
-				it('should aggregate with $limit stage', function() {
+				it('should aggregate with $limit stage', async function() {
 					var results = db[collectionName].aggregate([
 						{ $match: {}},
 						{ $limit: 3 }
@@ -1230,7 +1232,7 @@ describe("DB", function() {
 					expect(results.length).to.equal(3);
 				});
 
-				it('should aggregate with $skip stage', function() {
+				it('should aggregate with $skip stage', async function() {
 					var results = db[collectionName].aggregate([
 						{ $match: {}},
 						{ $sort: { age: 1 }},
@@ -1239,7 +1241,7 @@ describe("DB", function() {
 					expect(results.length).to.equal(4);
 				});
 
-				it('should aggregate with $group and $sum', function() {
+				it('should aggregate with $group and $sum', async function() {
 					var results = db[collectionName].aggregate([
 						{ $group: { 
 							_id: "$age", 
@@ -1253,10 +1255,10 @@ describe("DB", function() {
 					expect(group54.count).to.equal(2);
 				});
 
-				it('should aggregate with $group and $avg', function() {
-					db[collectionName].insert({ category: "A", value: 10 });
-					db[collectionName].insert({ category: "A", value: 20 });
-					db[collectionName].insert({ category: "B", value: 30 });
+				it('should aggregate with $group and $avg', async function() {
+					await db[collectionName].insert({ category: "A", value: 10 });
+					await db[collectionName].insert({ category: "A", value: 20 });
+					await db[collectionName].insert({ category: "B", value: 30 });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { category: { $exists: true }}},
@@ -1269,10 +1271,10 @@ describe("DB", function() {
 					expect(groupA.avgValue).to.equal(15);
 				});
 
-				it('should aggregate with $group and $min/$max', function() {
-					db[collectionName].insert({ type: "test", score: 85 });
-					db[collectionName].insert({ type: "test", score: 92 });
-					db[collectionName].insert({ type: "test", score: 78 });
+				it('should aggregate with $group and $min/$max', async function() {
+					await db[collectionName].insert({ type: "test", score: 85 });
+					await db[collectionName].insert({ type: "test", score: 92 });
+					await db[collectionName].insert({ type: "test", score: 78 });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { type: "test" }},
@@ -1286,10 +1288,10 @@ describe("DB", function() {
 					expect(results[0].maxScore).to.equal(92);
 				});
 
-				it('should aggregate with $group and $push', function() {
-					db[collectionName].insert({ team: "A", player: "Alice" });
-					db[collectionName].insert({ team: "A", player: "Bob" });
-					db[collectionName].insert({ team: "B", player: "Charlie" });
+				it('should aggregate with $group and $push', async function() {
+					await db[collectionName].insert({ team: "A", player: "Alice" });
+					await db[collectionName].insert({ team: "A", player: "Bob" });
+					await db[collectionName].insert({ team: "B", player: "Charlie" });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { team: { $exists: true }}},
@@ -1304,10 +1306,10 @@ describe("DB", function() {
 					expect(teamA.players).to.include("Bob");
 				});
 
-				it('should aggregate with $group and $addToSet', function() {
-					db[collectionName].insert({ dept: "IT", skill: "JavaScript" });
-					db[collectionName].insert({ dept: "IT", skill: "Python" });
-					db[collectionName].insert({ dept: "IT", skill: "JavaScript" });
+				it('should aggregate with $group and $addToSet', async function() {
+					await db[collectionName].insert({ dept: "IT", skill: "JavaScript" });
+					await db[collectionName].insert({ dept: "IT", skill: "Python" });
+					await db[collectionName].insert({ dept: "IT", skill: "JavaScript" });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { dept: "IT" }},
@@ -1319,10 +1321,10 @@ describe("DB", function() {
 					expect(results[0].skills.length).to.equal(2);
 				});
 
-				it('should aggregate with $group and $first/$last', function() {
-					db[collectionName].insert({ order: 1, value: "first" });
-					db[collectionName].insert({ order: 2, value: "second" });
-					db[collectionName].insert({ order: 3, value: "third" });
+				it('should aggregate with $group and $first/$last', async function() {
+					await db[collectionName].insert({ order: 1, value: "first" });
+					await db[collectionName].insert({ order: 2, value: "second" });
+					await db[collectionName].insert({ order: 3, value: "third" });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { order: { $exists: true }}},
@@ -1337,7 +1339,7 @@ describe("DB", function() {
 					expect(results[0].lastValue).to.equal("third");
 				});
 
-				it('should aggregate with $count stage', function() {
+				it('should aggregate with $count stage', async function() {
 					var results = db[collectionName].aggregate([
 						{ $match: { age: { $gte: 16 }}},
 						{ $count: "total" }
@@ -1346,8 +1348,8 @@ describe("DB", function() {
 					expect(results[0].total).to.equal(3);
 				});
 
-				it('should aggregate with $unwind stage', function() {
-					db[collectionName].insert({ name: "Product1", tags: ["a", "b", "c"] });
+				it('should aggregate with $unwind stage', async function() {
+					await db[collectionName].insert({ name: "Product1", tags: ["a", "b", "c"] });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { name: "Product1" }},
@@ -1359,10 +1361,10 @@ describe("DB", function() {
 					expect(results[2].tags).to.equal("c");
 				});
 
-				it('should aggregate with multiple stages combined', function() {
-					db[collectionName].insert({ category: "X", price: 100, quantity: 2 });
-					db[collectionName].insert({ category: "X", price: 50, quantity: 5 });
-					db[collectionName].insert({ category: "Y", price: 200, quantity: 1 });
+				it('should aggregate with multiple stages combined', async function() {
+					await db[collectionName].insert({ category: "X", price: 100, quantity: 2 });
+					await db[collectionName].insert({ category: "X", price: 50, quantity: 5 });
+					await db[collectionName].insert({ category: "Y", price: 200, quantity: 1 });
 					
 					var results = db[collectionName].aggregate([
 						{ $match: { category: { $exists: true }}},
@@ -1378,7 +1380,7 @@ describe("DB", function() {
 					expect(results[0]._id).to.equal("Y");
 				});
 
-				it('should handle empty pipeline', function() {
+				it('should handle empty pipeline', async function() {
 					var results = db[collectionName].aggregate([]);
 					expect(results.length).to.equal(6); // Original docs
 				});
@@ -1386,7 +1388,7 @@ describe("DB", function() {
 			
 			describe('Cursor', function() {
 
-			it('should testCount', function() {
+			it('should testCount', async function() {
 				var c = db[collectionName].find();
 				if (c.count()!=6) throw "incorrect count";
 				while (c.hasNext()) {
@@ -1395,10 +1397,10 @@ describe("DB", function() {
 				}
 			});
 				
-			it('should testForEach', function() {
+			it('should testForEach', async function() {
 				var numLegs = 0;
 				var numDocs = 0;
-				db[collectionName].find().forEach(function(doc) {
+				await db[collectionName].find().forEach(function(doc) {
 					numDocs++;
 					if (doc.legs) numLegs += doc.legs;
 				});
@@ -1406,14 +1408,14 @@ describe("DB", function() {
 				if (numLegs!=19) throw "total number of legs != 19";
 			});
 
-			it('should testHasNext', function() {
+			it('should testHasNext', async function() {
 				var c = db[collectionName].find();
 				while (c.hasNext()) {
 					c.next();
 				}
 			});
 
-			it('should testLimit', function() {
+			it('should testLimit', async function() {
 				var count = 0;
 				var c = db[collectionName].find().limit(3);
 				while (c.hasNext()) {
@@ -1423,7 +1425,7 @@ describe("DB", function() {
 				if (count!=3) throw "should only have max 3 when limited";
 			});
 
-			it('should testMap', function() {
+			it('should testMap', async function() {
 				var i = 0;
 				var numDocs = 0;
 				var result = db[collectionName].find().map(function(doc) {
@@ -1433,14 +1435,14 @@ describe("DB", function() {
 				if (result[2]!=2) throw "result array not correct";
 			});
 
-			it('should testNext', function() {
+			it('should testNext', async function() {
 				var c = db[collectionName].find();
 				while (c.hasNext()) {
 					c.next();
 				}
 			});
 
-			it('should testSkip', function() {
+			it('should testSkip', async function() {
 				var count = 0;
 				var c = db[collectionName].find().skip(3);
 				while (c.hasNext()) {
@@ -1450,7 +1452,7 @@ describe("DB", function() {
 				if (count!=3) throw "should have skipped 3 and return 3";
 			});
 
-			it('should testSort', function() {
+			it('should testSort', async function() {
 				var prev = 0;
 				var c = db[collectionName].find({legs:{$gt:1}}).sort({legs:1});
 				while (c.hasNext()) {
@@ -1467,15 +1469,15 @@ describe("DB", function() {
 				}
 			});
 
-			it('should testToArray', function() {
+			it('should testToArray', async function() {
 				var c = db[collectionName].find();
 				c.next();
 				c.next();
-				var arr = c.toArray();
+				var arr = await c.toArray();
 				if (arr.length!=4) throw "should be 4 elements in results array";
 			});
 
-			it('should testSortCount', function() {
+			it('should testSortCount', async function() {
 				var c = db[collectionName].find().sort({legs:1});
 				if (c.count()!=6) throw "incorrect count";
 				while (c.hasNext()) {
@@ -1484,10 +1486,10 @@ describe("DB", function() {
 				}
 			});
 
-			it('should testSortForEach', function() {
+			it('should testSortForEach', async function() {
 				var numLegs = 0;
 				var numDocs = 0;
-				db[collectionName].find().sort({legs:-1}).forEach(function(doc) {
+				await db[collectionName].find().sort({legs:-1}).forEach(function(doc) {
 					numDocs++;
 					if (doc.legs) numLegs += doc.legs;
 				});
@@ -1495,14 +1497,14 @@ describe("DB", function() {
 				if (numLegs!=19) throw "total number of legs != 19"; 
 			});
 				
-			it('should testSortHasNext', function() {
+			it('should testSortHasNext', async function() {
 				var c = db[collectionName].find().sort({legs:1});
 				while (c.hasNext()) {
 					c.next();
 				}
 			});
 
-			it('should testSortLimit', function() {
+			it('should testSortLimit', async function() {
 				var count = 0;
 				var c = db[collectionName].find().sort({legs:1}).limit(3);
 				while (c.hasNext()) {
@@ -1512,7 +1514,7 @@ describe("DB", function() {
 				if (count!=3) throw "should only have max 3 when limited";
 			});
 				
-			it('should testSortMap', function() {
+			it('should testSortMap', async function() {
 				var i = 0;
 				var numDocs = 0;
 				var result = db[collectionName].find().sort({legs:1}).map(function(doc) {
@@ -1522,14 +1524,14 @@ describe("DB", function() {
 				if (result[2]!=2) throw "result array not correct";
 			});
 				
-			it('should testSortNext', function() {
+			it('should testSortNext', async function() {
 				var c = db[collectionName].find().sort({legs:1});
 				while (c.hasNext()) {
 					c.next();
 				}
 			});
 				
-			it('should testSortSkip', function() {
+			it('should testSortSkip', async function() {
 				var count = 0;
 				var c = db[collectionName].find().sort({legs:1}).skip(3);
 				while (c.hasNext()) {
@@ -1539,7 +1541,7 @@ describe("DB", function() {
 				if (count!=3) throw "should have skipped 3 and return 3";
 			});
 
-			it('should testSortSort', function() {
+			it('should testSortSort', async function() {
 				var prev = 0;
 				var c = db[collectionName].find({legs:{$gt:1}}).sort({legs:-1}).sort({legs:1});
 				while (c.hasNext()) {
@@ -1556,19 +1558,19 @@ describe("DB", function() {
 				}
 			});
 
-			it('should testSortToArray', function() {
+			it('should testSortToArray', async function() {
 				var c = db[collectionName].find().sort({legs:1});
 				c.next();
 				c.next();
-				var arr = c.toArray();
+				var arr = await c.toArray();
 				if (arr.length!=4) throw "should be 4 elements in results array";
 			});
 		});
 
 		describe("Indexes", function() {
 			
-			it('should create a single-field index', function() {
-				var indexName = db[collectionName].createIndex({ age: 1 });
+			it('should create a single-field index', async function() {
+				var indexName = await db[collectionName].createIndex({ age: 1 });
 				expect(indexName).to.equal('age_1');
 				var indexes = db[collectionName].getIndexes();
 				expect(indexes.length).to.equal(1);
@@ -1576,53 +1578,53 @@ describe("DB", function() {
 				expect(indexes[0].key).to.deep.equal({ age: 1 });
 			});
 
-			it('should create a named index', function() {
-				var indexName = db[collectionName].createIndex({ legs: 1 }, { name: 'legs_index' });
+			it('should create a named index', async function() {
+				var indexName = await db[collectionName].createIndex({ legs: 1 }, { name: 'legs_index' });
 				expect(indexName).to.equal('legs_index');
 				var indexes = db[collectionName].getIndexes();
 				expect(indexes.length).to.equal(1);
 				expect(indexes[0].name).to.equal('legs_index');
 			});
 
-			it('should create multiple indexes', function() {
-				db[collectionName].createIndex({ age: 1 });
-				db[collectionName].createIndex({ legs: -1 });
+			it('should create multiple indexes', async function() {
+				await db[collectionName].createIndex({ age: 1 });
+				await db[collectionName].createIndex({ legs: -1 });
 				var indexes = db[collectionName].getIndexes();
 				expect(indexes.length).to.equal(2);
 			});
 
-			it('should not create duplicate index', function() {
-				db[collectionName].createIndex({ age: 1 });
-				db[collectionName].createIndex({ age: 1 });
+			it('should not create duplicate index', async function() {
+				await db[collectionName].createIndex({ age: 1 });
+				await db[collectionName].createIndex({ age: 1 });
 				var indexes = db[collectionName].getIndexes();
 				expect(indexes.length).to.equal(1);
 			});
 
-			it('should throw error when creating index with conflicting name', function() {
-				db[collectionName].createIndex({ age: 1 }, { name: 'my_index' });
+			it('should throw error when creating index with conflicting name', async function() {
+				await db[collectionName].createIndex({ age: 1 }, { name: 'my_index' });
 				try {
-					db[collectionName].createIndex({ legs: 1 }, { name: 'my_index' });
+					await db[collectionName].createIndex({ legs: 1 }, { name: 'my_index' });
 					throw new Error('Should have thrown an error');
 				} catch(e) {
 					expect(e.code).to.equal(85);
 				}
 			});
 
-			it('should throw error when keys is an array', function() {
+			it('should throw error when keys is an array', async function() {
 				try {
-					db[collectionName].createIndex([{ age: 1 }]);
+					await db[collectionName].createIndex([{ age: 1 }]);
 					throw new Error('Should have thrown an error');
 				} catch(e) {
 					expect(e.code).to.equal(2);
 				}
 			});
 
-			it('should use index for simple equality query', function() {
+			it('should use index for simple equality query', async function() {
 				// Create index on age field
-				db[collectionName].createIndex({ age: 1 });
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Query using indexed field
-				var results = db[collectionName].find({ age: 54 }).toArray();
+				var results = await db[collectionName].find({ age: 54 }).toArray();
 				expect(results.length).to.equal(2);
 				
 				// Verify we got the right documents
@@ -1631,60 +1633,60 @@ describe("DB", function() {
 				});
 			});
 
-			it('should still work with non-indexed queries', function() {
+			it('should still work with non-indexed queries', async function() {
 				// Create index on age field
-				db[collectionName].createIndex({ age: 1 });
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Query using non-indexed field
-				var results = db[collectionName].find({ legs: 5 }).toArray();
+				var results = await db[collectionName].find({ legs: 5 }).toArray();
 				expect(results.length).to.equal(1);
 				expect(results[0].legs).to.equal(5);
 			});
 
-			it('should maintain index on insert', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should maintain index on insert', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Insert a new document
-				db[collectionName].insertOne({ age: 25, legs: 2 });
+				await db[collectionName].insertOne({ age: 25, legs: 2 });
 				
 				// Query should find the new document
-				var results = db[collectionName].find({ age: 25 }).toArray();
+				var results = await db[collectionName].find({ age: 25 }).toArray();
 				expect(results.length).to.equal(1);
 				expect(results[0].age).to.equal(25);
 			});
 
-			it('should maintain index on delete', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should maintain index on delete', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Delete documents with age 54
-				var deleteResult = db[collectionName].deleteMany({ age: 54 });
+				var deleteResult = await db[collectionName].deleteMany({ age: 54 });
 				expect(deleteResult.deletedCount).to.equal(2);
 				
 				// Query should not find deleted documents
-				var results = db[collectionName].find({ age: 54 }).toArray();
+				var results = await db[collectionName].find({ age: 54 }).toArray();
 				expect(results.length).to.equal(0);
 			});
 
-			it('should handle complex queries with index', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should handle complex queries with index', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Complex query with indexed and non-indexed fields
-				var results = db[collectionName].find({ age: 4, legs: 5 }).toArray();
+				var results = await db[collectionName].find({ age: 4, legs: 5 }).toArray();
 				expect(results.length).to.equal(1);
 				expect(results[0].age).to.equal(4);
 				expect(results[0].legs).to.equal(5);
 			});
 
-			it('should handle queries with operators on indexed fields', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should handle queries with operators on indexed fields', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Query with operators falls back to full scan
-				var results = db[collectionName].find({ age: { $gt: 50 } }).toArray();
+				var results = await db[collectionName].find({ age: { $gt: 50 } }).toArray();
 				expect(results.length).to.equal(2);
 			});
 
-			it('should create compound index', function() {
-				var indexName = db[collectionName].createIndex({ age: 1, legs: 1 });
+			it('should create compound index', async function() {
+				var indexName = await db[collectionName].createIndex({ age: 1, legs: 1 });
 				expect(indexName).to.equal('age_1_legs_1');
 				
 				var indexes = db[collectionName].getIndexes();
@@ -1692,54 +1694,54 @@ describe("DB", function() {
 				expect(indexes[0].key).to.deep.equal({ age: 1, legs: 1 });
 			});
 
-			it('should handle empty result set with index', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should handle empty result set with index', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Query for non-existent value
-				var results = db[collectionName].find({ age: 999 }).toArray();
+				var results = await db[collectionName].find({ age: 999 }).toArray();
 				expect(results.length).to.equal(0);
 			});
 
-			it('should maintain index on update', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should maintain index on update', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Update a document's age
-				db[collectionName].updateOne({ age: 54 }, { $set: { age: 55 } });
+				await db[collectionName].updateOne({ age: 54 }, { $set: { age: 55 } });
 				
 				// Old value should not be found
-				var oldResults = db[collectionName].find({ age: 54 }).toArray();
+				var oldResults = await db[collectionName].find({ age: 54 }).toArray();
 				expect(oldResults.length).to.equal(1); // Only one doc with age 54 left
 				
 				// New value should be found
-				var newResults = db[collectionName].find({ age: 55 }).toArray();
+				var newResults = await db[collectionName].find({ age: 55 }).toArray();
 				expect(newResults.length).to.equal(1);
 				expect(newResults[0].age).to.equal(55);
 			});
 
-			it('should maintain index on replaceOne', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should maintain index on replaceOne', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Replace a document
-				db[collectionName].replaceOne({ age: 16 }, { age: 17, legs: 4 });
+				await db[collectionName].replaceOne({ age: 16 }, { age: 17, legs: 4 });
 				
 				// Old value should not be found
-				var oldResults = db[collectionName].find({ age: 16 }).toArray();
+				var oldResults = await db[collectionName].find({ age: 16 }).toArray();
 				expect(oldResults.length).to.equal(0);
 				
 				// New value should be found
-				var newResults = db[collectionName].find({ age: 17 }).toArray();
+				var newResults = await db[collectionName].find({ age: 17 }).toArray();
 				expect(newResults.length).to.equal(1);
 				expect(newResults[0].legs).to.equal(4);
 			});
 
-			it('should maintain index on remove', function() {
-				db[collectionName].createIndex({ age: 1 });
+			it('should maintain index on remove', async function() {
+				await db[collectionName].createIndex({ age: 1 });
 				
 				// Remove one document
 				db[collectionName].remove({ age: 4 }, true);
 				
 				// Should have one less document with age 4
-				var results = db[collectionName].find({ age: 4 }).toArray();
+				var results = await db[collectionName].find({ age: 4 }).toArray();
 				expect(results.length).to.equal(1);
 			});
 		});
