@@ -1,0 +1,218 @@
+import { getProp, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
+import {Txi} from 'txi';
+import * as de9im from 'de9im';
+
+/**
+ * Text search helper
+ */
+export function text(prop, query) {
+	const txi = new Txi().index('id', prop);
+	const search = txi.search(query);
+	return search.length == 1;
+}
+
+/**
+ * Geo within helper
+ */
+export function geoWithin(prop, query) {
+	try {
+		return de9im.default.within(prop, bboxToGeojson(query), false);
+	} catch (e) {
+		return false;
+	}
+}
+
+/**
+ * $where operator implementation
+ * SECURITY NOTE: This uses Function constructor which can execute arbitrary code.
+ * This is acceptable for a local/in-memory database but should NOT be used
+ * in environments where untrusted user input is processed.
+ */
+export function where(doc, value) {
+	if (typeof value === 'function') {
+		try {
+			return value.call(doc);
+		} catch (e) {
+			return false;
+		}
+	} else if (typeof value === 'string') {
+		// Evaluate the string as a function
+		try {
+			var fn = new Function('return ' + value);
+			return fn.call(doc);
+		} catch (e) {
+			return false;
+		}
+	}
+	return false;
+}
+
+/**
+ * Top-level match function
+ */
+export function tlMatches(doc, query) {
+	var key = Object.keys(query)[0];
+	var value = query[key];
+	if (key.charAt(0) == "$") {
+		if (key == "$and") return and(doc, value);
+		else if (key == "$or") return or(doc, value);
+		else if (key == "$not") return not(doc, value);
+		else if (key == "$nor") return nor(doc, value);
+		else if (key == "$where") return where(doc, value);
+		else throw { $err: "Can't canonicalize query: BadValue unknown top level operator: " + key, code: 17287 };
+	} else {
+		return opMatches(doc, key, value);
+	}
+}
+
+/**
+ * Operator match function
+ */
+export function opMatches(doc, key, value) {
+	if (typeof (value) == "string") return getProp(doc, key) == value;
+	else if (typeof (value) == "number") return getProp(doc, key) == value;
+	else if (typeof (value) == "boolean") return getProp(doc, key) == value;
+	else if (typeof (value) == "object") {
+		if (value instanceof RegExp) return getProp(doc, key) && getProp(doc, key).match(value);
+		else if (isArray(value)) return getProp(doc, key) && arrayMatches(getProp(doc, key), value);
+		else {
+			var keys = Object.keys(value);
+			if (keys[0].charAt(0) == "$") {
+				for (var i = 0; i < keys.length; i++) {
+					var operator = Object.keys(value)[i];
+					var operand = value[operator];
+					if (operator == "$eq") {
+						if (getProp(doc, key) == undefined || !(getProp(doc, key) == operand)) return false;
+					} else if (operator == "$gt") {
+						if (getProp(doc, key) == undefined || !(getProp(doc, key) > operand)) return false;
+					} else if (operator == "$gte") {
+						if (getProp(doc, key) == undefined || !(getProp(doc, key) >= operand)) return false;
+					} else if (operator == "$lt") {
+						if (getProp(doc, key) == undefined || !(getProp(doc, key) < operand)) return false;
+					} else if (operator == "$lte") {
+						if (getProp(doc, key) == undefined || !(getProp(doc, key) <= operand)) return false;
+					} else if (operator == "$ne") {
+						if (getProp(doc, key) == undefined || !(getProp(doc, key) != operand)) return false;
+					} else if (operator == "$in") {
+						if (getProp(doc, key) == undefined || !isIn(getProp(doc, key), operand)) return false;
+					} else if (operator == "$nin") {
+						if (getProp(doc, key) == undefined || isIn(getProp(doc, key), operand)) return false;
+					} else if (operator == "$exists") {
+						if (operand ? getProp(doc, key) == undefined : getProp(doc, key) != undefined) return false;
+					} else if (operator == "$type") {
+						if (typeof (getProp(doc, key)) != operand) return false;
+					} else if (operator == "$mod") {
+						if (operand.length != 2) throw { $err: "Can't canonicalize query: BadValue malformed mod, not enough elements", code: 17287 };
+						if (getProp(doc, key) == undefined || (getProp(doc, key) % operand[0] != operand[1])) return false;
+					} else if (operator == "$regex") {
+						if (getProp(doc, key) == undefined || !getProp(doc, key).match(operand)) return false;
+					} else if (operator == "$text") {
+						if (getProp(doc, key) == undefined || !text(getProp(doc, key), operand)) return false;
+					} else if (operator == "$geoWithin") {
+						if (getProp(doc, key) == undefined || !geoWithin(getProp(doc, key), operand)) return false;
+					} else if (operator == "$not") {
+						if (opMatches(doc, key, operand)) return false;
+					} else if (operator == "$all") {
+						var fieldValue = getProp(doc, key);
+						if (fieldValue == undefined || !isArray(fieldValue)) return false;
+						for (var j = 0; j < operand.length; j++) {
+							if (!isIn(operand[j], fieldValue)) return false;
+						}
+					} else if (operator == "$elemMatch") {
+						var fieldValue = getProp(doc, key);
+						if (fieldValue == undefined || !isArray(fieldValue)) return false;
+						var found = false;
+						for (var j = 0; j < fieldValue.length; j++) {
+							var element = fieldValue[j];
+							// Check if element matches the query
+							if (typeof element === 'object' && !isArray(element)) {
+								// For objects, use matches
+								if (matches(element, operand)) {
+									found = true;
+									break;
+								}
+							} else {
+								// For primitive values, check operators directly
+								var matchesPrimitive = true;
+								var opKeys = Object.keys(operand);
+								for (var k = 0; k < opKeys.length; k++) {
+									var op = opKeys[k];
+									var opValue = operand[op];
+									if (op == "$gte" && !(element >= opValue)) matchesPrimitive = false;
+									else if (op == "$gt" && !(element > opValue)) matchesPrimitive = false;
+									else if (op == "$lte" && !(element <= opValue)) matchesPrimitive = false;
+									else if (op == "$lt" && !(element < opValue)) matchesPrimitive = false;
+									else if (op == "$eq" && !(element == opValue)) matchesPrimitive = false;
+									else if (op == "$ne" && !(element != opValue)) matchesPrimitive = false;
+									else if (op == "$in" && !isIn(element, opValue)) matchesPrimitive = false;
+									else if (op == "$nin" && isIn(element, opValue)) matchesPrimitive = false;
+								}
+								if (matchesPrimitive) {
+									found = true;
+									break;
+								}
+							}
+						}
+						if (!found) return false;
+					} else if (operator == "$size") {
+						var fieldValue = getProp(doc, key);
+						if (fieldValue == undefined || !isArray(fieldValue)) return false;
+						if (fieldValue.length != operand) return false;
+					} else {
+						throw { $err: "Can't canonicalize query: BadValue unknown operator: " + operator, code: 17287 };
+					}
+				}
+				return true;
+			} else {
+				return getProp(doc, key) && objectMatches(getProp(doc, key), value);
+			}
+		}
+	}
+}
+
+/**
+ * $not operator
+ */
+export function not(doc, value) {
+	return !tlMatches(doc, value);
+}
+
+/**
+ * $and operator
+ */
+export function and(doc, els) {
+	for (var i = 0; i < els.length; i++) {
+		if (!tlMatches(doc, els[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * $or operator
+ */
+export function or(doc, els) {
+	for (var i = 0; i < els.length; i++) {
+		if (tlMatches(doc, els[i])) return true;
+	}
+	return false;
+}
+
+/**
+ * $nor operator
+ */
+export function nor(doc, els) {
+	for (var i = 0; i < els.length; i++) {
+		if (tlMatches(doc, els[i])) return false;
+	}
+	return true;
+}
+
+/**
+ * Main matches function - query structure: (top level operators ( "age" : (operators) ))
+ * top, top level query, implicit $and
+ */
+export function matches(doc, query) {
+	return and(doc, toArray(query));
+}

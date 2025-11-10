@@ -4,6 +4,7 @@ import * as mongo from '../main.js'
 
 describe("DB no options", function() {
 
+	var client;
 	var db;
 	
 	before(function() {
@@ -12,11 +13,13 @@ describe("DB no options", function() {
 	after(function() {
 	});
 
-	beforeEach(function() {
-		db = new mongo.DB();
+	beforeEach(async function() {
+		client = await mongo.MongoClient.connect('mongodb://localhost:27017');
+		db = client.db('testdb');
 	});
 
-	afterEach(function() {
+	afterEach(async function() {
+		await client.close();
 		db = null;
 	});
 
@@ -42,12 +45,15 @@ describe("DB no options", function() {
 		expect(db.myCollection).to.not.be.undefined;
 		db.dropDatabase();
 		expect(db.getCollectionNames().length).to.equal(0);
-		expect(db.myCollection).to.be.undefined;
+		// After dropping, accessing the collection will auto-create it (like real MongoDB)
+		// So we check getCollectionNames() to verify it's truly gone
+		expect(db.getCollectionNames()).to.not.include('myCollection');
 	});
 });
 
 describe("DB", function() {
 
+	var client;
 	var db;
 	
 	before(function() {
@@ -56,13 +62,15 @@ describe("DB", function() {
 	after(function() {
 	});
 
-	beforeEach(function() {
-		db = new mongo.DB({
+	beforeEach(async function() {
+		client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
 			print : console.log
 		});
+		db = client.db('testdb');
 	});
 
-	afterEach(function() {
+	afterEach(async function() {
+		await client.close();
 		db = null;
 	});
 
@@ -88,7 +96,67 @@ describe("DB", function() {
 		expect(db.myCollection).to.not.be.undefined;
 		db.dropDatabase();
 		expect(db.getCollectionNames().length).to.equal(0);
-		expect(db.myCollection).to.be.undefined;
+		// After dropping, accessing the collection will auto-create it (like real MongoDB)
+		// So we check getCollectionNames() to verify it's truly gone
+		expect(db.getCollectionNames()).to.not.include('myCollection');
+	});
+
+	describe('Dynamic Collection Creation (Proxy)', function() {
+		
+		it('should auto-create collection when accessing non-existent collection', function() {
+			expect(db.getCollectionNames().length).to.equal(0);
+			const col = db.dynamicCollection;
+			expect(col).to.not.be.undefined;
+			expect(db.getCollectionNames().length).to.equal(1);
+			expect(db.getCollectionNames()).to.include('dynamicCollection');
+		});
+
+		it('should allow inserting into dynamically created collection', function() {
+			db.users.insertOne({ name: 'Alice', age: 30 });
+			const result = db.users.findOne({ name: 'Alice' });
+			expect(result).to.not.be.null;
+			expect(result.name).to.equal('Alice');
+			expect(result.age).to.equal(30);
+		});
+
+		it('should allow chaining methods on dynamically created collection', function() {
+			db.products.insertMany([
+				{ name: 'Product A', price: 100 },
+				{ name: 'Product B', price: 200 },
+				{ name: 'Product C', price: 150 }
+			]);
+			const results = db.products.find({ price: { $gt: 100 } }).toArray();
+			expect(results.length).to.equal(2);
+		});
+
+		it('should return same collection instance on repeated access', function() {
+			const col1 = db.testCollection;
+			const col2 = db.testCollection;
+			expect(col1).to.equal(col2);
+		});
+
+		it('should not create collection for internal properties', function() {
+			const options = db.options;
+			expect(options).to.not.be.undefined;
+			expect(db.getCollectionNames()).to.not.include('options');
+		});
+
+		it('should work with multiple dynamically created collections', function() {
+			db.collection1.insertOne({ value: 1 });
+			db.collection2.insertOne({ value: 2 });
+			db.collection3.insertOne({ value: 3 });
+			
+			expect(db.getCollectionNames().length).to.equal(3);
+			expect(db.collection1.findOne().value).to.equal(1);
+			expect(db.collection2.findOne().value).to.equal(2);
+			expect(db.collection3.findOne().value).to.equal(3);
+		});
+
+		it('should allow find() on non-existent collection without error', function() {
+			const results = db.emptyCollection.find().toArray();
+			expect(results).to.be.an('array');
+			expect(results.length).to.equal(0);
+		});
 	});
 	
 	describe('Collection', function() {
@@ -274,9 +342,9 @@ describe("DB", function() {
 
 		it('should testCopyTo', function() {
 			var dest = "backup";
-			if (db[dest]) throw "backup collection shouldn't exist";
+			if (db.getCollectionNames().includes(dest)) throw "backup collection shouldn't exist";
 			if (db[collectionName].copyTo(dest)!=6) throw "should have copied all 6 docs";
-			if (!db[dest]) throw "backup collection should have been created";
+			if (!db.getCollectionNames().includes(dest)) throw "backup collection should have been created";
 			if (db[dest].find().count()!=6) throw "failed to copy all content";
 			if (db[collectionName].find().count()!=6) throw "original collection should still have 6 docs";
 			if (db[collectionName].copyTo(dest)!=6) throw "should have copied all 6 docs";
