@@ -502,6 +502,7 @@ export class RTree {
 		if (node.isLeaf) {
 			// Leaf nodes contain entries
 			serialized.children = node.children.map(entry => ({
+				bbox: entry.bbox,
 				lat: entry.lat,
 				lng: entry.lng,
 				data: entry.data
@@ -535,6 +536,7 @@ export class RTree {
 		if (serialized.isLeaf) {
 			// Restore leaf entries
 			node.children = serialized.children.map(entry => ({
+				bbox: entry.bbox,
 				lat: entry.lat,
 				lng: entry.lng,
 				data: entry.data
