@@ -2,15 +2,44 @@
  * Utility functions for MicroMongoDB
  */
 
+import { ObjectId } from './ObjectId.js';
+
+/**
+ * Compare two values for equality, handling ObjectId instances
+ */
+function valuesEqual(a, b) {
+	// Handle ObjectId comparison
+	if (a instanceof ObjectId || b instanceof ObjectId) {
+		if (a instanceof ObjectId && b instanceof ObjectId) {
+			return a.equals(b);
+		}
+		if (a instanceof ObjectId && typeof b === 'string') {
+			return a.equals(b);
+		}
+		if (b instanceof ObjectId && typeof a === 'string') {
+			return b.equals(a);
+		}
+		return false;
+	}
+	
+	// Regular equality
+	return a == b;
+}
+
 /**
  * Deep copy an object or array
  */
 export function copy(o) {
+	// Handle ObjectId
+	if (o instanceof ObjectId) {
+		return new ObjectId(o.id);
+	}
+	
 	var out, v, key;
 	out = Array.isArray(o) ? [] : {};
 	for (key in o) {
 		v = o[key];
-		out[key] = (typeof v === "object") ? copy(v) : v;
+		out[key] = (typeof v === "object" && v !== null) ? copy(v) : v;
 	}
 	return out;
 }
@@ -54,7 +83,9 @@ export function toArray(obj) {
  * Check if a value is in an array
  */
 export function isIn(val, values) {
-	for (var i = 0; i < values.length; i++) if (values[i] == val) return true;
+	for (var i = 0; i < values.length; i++) {
+		if (valuesEqual(values[i], val)) return true;
+	}
 	return false;
 }
 
@@ -64,16 +95,16 @@ export function isIn(val, values) {
 export function arrayMatches(x, y) {
 	if (x.length != y.length) return false;
 	for (var i = 0; i < x.length; i++) {
-		if (x[i] === y[i]) continue;
+		if (valuesEqual(x[i], y[i])) continue;
 		if (typeof (x[i]) != typeof (y[i])) return false;
-		if (typeof (x[i] == "object")) {
+		if (typeof (x[i]) == "object" && x[i] !== null) {
 			if (isArray(x[i])) {
-				if (!arrayMatches(x, y)) return false;
+				if (!arrayMatches(x[i], y[i])) return false;
 			} else {
 				if (!objectMatches(x[i], y[i])) return false;
 			}
 		} else {
-			if (x[i] != y[i]) return false;
+			if (!valuesEqual(x[i], y[i])) return false;
 		}
 	}
 	return true;
@@ -86,16 +117,16 @@ export function objectMatches(x, y) {
 	for (var p in x) {
 		if (!x.hasOwnProperty(p)) continue;
 		if (!y.hasOwnProperty(p)) return false;
-		if (x[p] === y[p]) continue;
+		if (valuesEqual(x[p], y[p])) continue;
 		if (typeof (x[p]) != typeof (y[p])) return false;
-		if (typeof (x[i]) == "object") {
-			if (isArray(x[i])) {
-				if (!arrayMatches(x[i], y[i])) return false;
+		if (typeof (x[p]) == "object" && x[p] !== null) {
+			if (isArray(x[p])) {
+				if (!arrayMatches(x[p], y[p])) return false;
 			} else {
-				if (!objectMatches(x[i], y[i])) return false;
+				if (!objectMatches(x[p], y[p])) return false;
 			}
 		} else {
-			if (x[i] != y[i]) return false;
+			if (!valuesEqual(x[p], y[p])) return false;
 		}
 	}
 	for (var p in y) {

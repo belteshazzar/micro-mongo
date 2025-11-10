@@ -66,3 +66,4 @@ export const ObjectStore = function() {
 
 // Export refactored classes
 export { MongoClient } from './src/MongoClient.js';
+export { ObjectId } from './src/ObjectId.js';

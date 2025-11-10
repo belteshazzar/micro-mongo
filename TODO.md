@@ -12,24 +12,31 @@ This document tracks the features needed to make micro-mongo more compatible wit
 
 ---
 
-## 1. ObjectId Support 🔴 HIGH PRIORITY
+## 1. ObjectId Support ✅ **COMPLETED**
 
-**Current State:** Uses UUID strings for `_id`  
+**Current State:** ✅ Uses ObjectId (12-byte identifier with timestamp)  
 **MongoDB:** Uses ObjectId (12-byte identifier with timestamp)  
-**Impact:** Cannot use ObjectId methods, sorting by `_id` doesn't work chronologically
+**Impact:** Full MongoDB compatibility for _id fields
 
 ### Tasks:
-- [ ] Create ObjectId class with timestamp, machine ID, process ID, counter
-- [ ] Implement ObjectId.toString() and ObjectId.toHexString()
-- [ ] Implement ObjectId.getTimestamp() method
-- [ ] Support ObjectId equality comparison
-- [ ] Make _id default to ObjectId instead of UUID
-- [ ] Support ObjectId in queries and updates
-- [ ] Add ObjectId constructor from hex string
-- [ ] Add tests for ObjectId functionality
+- [x] Create ObjectId class with timestamp, machine ID, process ID, counter
+- [x] Implement ObjectId.toString() and ObjectId.toHexString()
+- [x] Implement ObjectId.getTimestamp() method
+- [x] Support ObjectId equality comparison
+- [x] Make _id default to ObjectId instead of UUID
+- [x] Support ObjectId in queries and updates
+- [x] Add ObjectId constructor from hex string
+- [x] Add tests for ObjectId functionality
 
-**Estimated Effort:** 1-2 days  
-**Dependencies:** None
+**Status:** ✅ COMPLETED (November 10, 2025)  
+**Test Results:** 29 ObjectId tests passing, all 158 existing tests passing  
+**Changes Made:**
+- Created `src/ObjectId.js` with full ObjectId implementation
+- Updated `DB._id()` to return ObjectId instead of UUID
+- Updated `queryMatcher.js` to handle ObjectId comparisons
+- Updated `utils.js` to handle ObjectId in deep comparisons
+- Added 29 comprehensive tests in `test/test-objectid.js`
+- Updated `example-usage.js` to demonstrate ObjectId usage
 
 ---
 
@@ -476,10 +483,10 @@ This document tracks the features needed to make micro-mongo more compatible wit
 
 ### Phase 1: Foundation (Critical for compatibility)
 1. **Better Error Handling** (2-3 days) 🔴
-2. **ObjectId Support** (1-2 days) 🔴
+2. ~~**ObjectId Support** (1-2 days)~~ ✅ **COMPLETED**
 3. **Promise-Based API** (3-5 days) 🔴
 
-**Total: ~1.5 weeks**
+**Total: ~1.5 weeks** (~1 week remaining)
 
 ### Phase 2: Core Features (High value)
 4. **Better Index Support** (5-7 days) 🟡

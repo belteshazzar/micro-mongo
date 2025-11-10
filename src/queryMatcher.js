@@ -1,6 +1,53 @@
 import { getProp, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
 import {Txi} from 'txi';
 import * as de9im from 'de9im';
+import { ObjectId } from './ObjectId.js';
+
+/**
+ * Compare two values for equality, handling ObjectId instances
+ */
+function valuesEqual(a, b) {
+	// Handle ObjectId comparison
+	if (a instanceof ObjectId || b instanceof ObjectId) {
+		if (a instanceof ObjectId && b instanceof ObjectId) {
+			return a.equals(b);
+		}
+		if (a instanceof ObjectId && typeof b === 'string') {
+			return a.equals(b);
+		}
+		if (b instanceof ObjectId && typeof a === 'string') {
+			return b.equals(a);
+		}
+		return false;
+	}
+	
+	// Regular equality
+	return a == b;
+}
+
+/**
+ * Compare two values with a comparison operator, handling ObjectId instances
+ */
+function compareValues(a, b, operator) {
+	// Convert ObjectIds to comparable values (use timestamp for ordering)
+	let aVal = a;
+	let bVal = b;
+	
+	if (a instanceof ObjectId) {
+		aVal = a.toString();
+	}
+	if (b instanceof ObjectId) {
+		bVal = b.toString();
+	}
+	
+	switch(operator) {
+		case '>': return aVal > bVal;
+		case '>=': return aVal >= bVal;
+		case '<': return aVal < bVal;
+		case '<=': return aVal <= bVal;
+		default: return false;
+	}
+}
 
 /**
  * Text search helper
@@ -69,9 +116,10 @@ export function tlMatches(doc, query) {
  * Operator match function
  */
 export function opMatches(doc, key, value) {
-	if (typeof (value) == "string") return getProp(doc, key) == value;
-	else if (typeof (value) == "number") return getProp(doc, key) == value;
-	else if (typeof (value) == "boolean") return getProp(doc, key) == value;
+	if (typeof (value) == "string") return valuesEqual(getProp(doc, key), value);
+	else if (typeof (value) == "number") return valuesEqual(getProp(doc, key), value);
+	else if (typeof (value) == "boolean") return valuesEqual(getProp(doc, key), value);
+	else if (value instanceof ObjectId) return valuesEqual(getProp(doc, key), value);
 	else if (typeof (value) == "object") {
 		if (value instanceof RegExp) return getProp(doc, key) && getProp(doc, key).match(value);
 		else if (isArray(value)) return getProp(doc, key) && arrayMatches(getProp(doc, key), value);
@@ -82,17 +130,17 @@ export function opMatches(doc, key, value) {
 					var operator = Object.keys(value)[i];
 					var operand = value[operator];
 					if (operator == "$eq") {
-						if (getProp(doc, key) == undefined || !(getProp(doc, key) == operand)) return false;
+						if (getProp(doc, key) == undefined || !valuesEqual(getProp(doc, key), operand)) return false;
 					} else if (operator == "$gt") {
-						if (getProp(doc, key) == undefined || !(getProp(doc, key) > operand)) return false;
+						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '>')) return false;
 					} else if (operator == "$gte") {
-						if (getProp(doc, key) == undefined || !(getProp(doc, key) >= operand)) return false;
+						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '>=')) return false;
 					} else if (operator == "$lt") {
-						if (getProp(doc, key) == undefined || !(getProp(doc, key) < operand)) return false;
+						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '<')) return false;
 					} else if (operator == "$lte") {
-						if (getProp(doc, key) == undefined || !(getProp(doc, key) <= operand)) return false;
+						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '<=')) return false;
 					} else if (operator == "$ne") {
-						if (getProp(doc, key) == undefined || !(getProp(doc, key) != operand)) return false;
+						if (getProp(doc, key) == undefined || !(!valuesEqual(getProp(doc, key), operand))) return false;
 					} else if (operator == "$in") {
 						if (getProp(doc, key) == undefined || !isIn(getProp(doc, key), operand)) return false;
 					} else if (operator == "$nin") {

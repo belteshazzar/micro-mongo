@@ -1,5 +1,6 @@
 import { Collection } from './Collection.js';
 import { LocalStorageStore, ObjectStore } from '../main.js';
+import { ObjectId } from './ObjectId.js';
 
 /**
  * DB class
@@ -62,10 +63,7 @@ export class DB {
 	 */
 	_id() {
 		if (this.options && this.options.id) return this.options.id();
-		else return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-			const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-			return v.toString(16);
-		});
+		else return new ObjectId();
 	}
 
 	// DB Methods
