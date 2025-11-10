@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IndexedDB Storage Test</title>
+</head>
+<body>
+    <h1>IndexedDB Storage Engine Test</h1>
+    <div id="results"></div>
+    <pre id="output"></pre>
+
+    <script type="module">
+        import { MongoClient, IndexedDbStorageEngine } from './build/micro-mongo-1.1.3.js';
+
+        const resultsDiv = document.getElementById('results');
+        const outputPre = document.getElementById('output');
+
+        function log(message) {
+            console.log(message);
+            outputPre.textContent += message + '\n';
+        }
+
+        function assert(condition, message) {
+            if (!condition) {
+                throw new Error(`Assertion failed: ${message}`);
+            }
+        }
+
+        async function runTests() {
+            try {
+                log('Starting IndexedDB Storage Engine tests...\n');
+
+                // Test 1: Basic save and load
+                log('Test 1: Save and load database state');
+                const storageEngine = new IndexedDbStorageEngine('test-db');
+                const client = await MongoClient.connect('mongodb://localhost:27017', {
+                    storageEngine: storageEngine
+                });
+                const db = client.db('testdb');
+
+                // Insert some data
+                await db.users.insertOne({ name: 'Alice', age: 30 });
+                await db.users.insertOne({ name: 'Bob', age: 25 });
+                await db.posts.insertOne({ title: 'Hello World' });
+
+                // Save to storage
+                await db.saveToStorage();
+                log('✓ Saved database to IndexedDB');
+
+                // Clear the database
+                db.dropDatabase();
+                assert(db.getCollectionNames().length === 0, 'Database should be empty');
+                log('✓ Cleared database');
+
+                // Load from storage
+                await db.loadFromStorage();
+                assert(db.getCollectionNames().length === 2, 'Should have 2 collections');
+                log('✓ Loaded database from IndexedDB');
+
+                // Verify data
+                const users = await db.users.find({}).toArray();
+                assert(users.length === 2, 'Should have 2 users');
+                assert(users.some(u => u.name === 'Alice'), 'Should have Alice');
+                assert(users.some(u => u.name === 'Bob'), 'Should have Bob');
+                log('✓ Data integrity verified');
+
+                await client.close();
+
+                // Test 2: Save and load with indexes
+                log('\nTest 2: Save and load with indexes');
+                const storageEngine2 = new IndexedDbStorageEngine('test-db-2');
+                const client2 = await MongoClient.connect('mongodb://localhost:27017', {
+                    storageEngine: storageEngine2
+                });
+                const db2 = client2.db('testdb2');
+
+                // Insert data and create index
+                await db2.products.insertOne({ name: 'Widget', price: 10 });
+                await db2.products.insertOne({ name: 'Gadget', price: 20 });
+                await db2.products.createIndex({ price: 1 });
+                log('✓ Created index on price');
+
+                // Save and reload
+                await db2.saveToStorage();
+                db2.dropDatabase();
+                await db2.loadFromStorage();
+
+                // Verify index was restored
+                const indexes = db2.products.getIndexes();
+                assert(indexes.length === 1, 'Should have 1 index');
+                assert(indexes[0].key.price === 1, 'Index should be on price');
+                log('✓ Index restored correctly');
+
+                // Verify index works
+                const results = await db2.products.find({ price: 20 }).toArray();
+                assert(results.length === 1, 'Should find 1 product');
+                assert(results[0].name === 'Gadget', 'Should find Gadget');
+                log('✓ Index query works');
+
+                await client2.close();
+
+                // Test 3: Text index persistence
+                log('\nTest 3: Text index persistence');
+                const storageEngine3 = new IndexedDbStorageEngine('test-db-3');
+                const client3 = await MongoClient.connect('mongodb://localhost:27017', {
+                    storageEngine: storageEngine3
+                });
+                const db3 = client3.db('testdb3');
+
+                // Insert data and create text index
+                await db3.articles.insertOne({ title: 'JavaScript Tutorial', content: 'Learn JavaScript' });
+                await db3.articles.insertOne({ title: 'Python Guide', content: 'Learn Python' });
+                await db3.articles.createIndex({ title: 'text', content: 'text' });
+                log('✓ Created text index');
+
+                // Save and reload
+                await db3.saveToStorage();
+                db3.dropDatabase();
+                await db3.loadFromStorage();
+
+                // Verify text search works
+                const textResults = await db3.articles.find({ title: { $text: 'JavaScript' } }).toArray();
+                assert(textResults.length === 1, 'Should find 1 article');
+                assert(textResults[0].title === 'JavaScript Tutorial', 'Should find JavaScript Tutorial');
+                log('✓ Text index works after restore');
+
+                await client3.close();
+
+                // Test 4: Geospatial index persistence
+                log('\nTest 4: Geospatial index persistence');
+                const storageEngine4 = new IndexedDbStorageEngine('test-db-4');
+                const client4 = await MongoClient.connect('mongodb://localhost:27017', {
+                    storageEngine: storageEngine4
+                });
+                const db4 = client4.db('testdb4');
+
+                // Insert data and create geospatial index
+                await db4.places.insertOne({ 
+                    name: 'Park', 
+                    location: { type: 'Point', coordinates: [-73.97, 40.78] }
+                });
+                await db4.places.insertOne({ 
+                    name: 'Museum', 
+                    location: { type: 'Point', coordinates: [-73.98, 40.76] }
+                });
+                await db4.places.createIndex({ location: '2dsphere' });
+                log('✓ Created geospatial index');
+
+                // Save and reload
+                await db4.saveToStorage();
+                db4.dropDatabase();
+                await db4.loadFromStorage();
+
+                // Verify geospatial query works
+                const geoResults = await db4.places.find({
+                    location: { $geoWithin: [[-74.0, 40.8], [-73.9, 40.7]] }
+                }).toArray();
+                assert(geoResults.length === 2, 'Should find 2 places');
+                log('✓ Geospatial index works after restore');
+
+                await client4.close();
+
+                // Clean up - delete test databases
+                log('\nCleaning up test databases...');
+                await storageEngine.deleteDatabase('testdb');
+                await storageEngine2.deleteDatabase('testdb2');
+                await storageEngine3.deleteDatabase('testdb3');
+                await storageEngine4.deleteDatabase('testdb4');
+                log('✓ Cleaned up');
+
+                log('\n✅ All tests passed!');
+                resultsDiv.innerHTML = '<h2 style="color: green;">✅ All IndexedDB tests passed!</h2>';
+            } catch (error) {
+                log('\n❌ Test failed: ' + error.message);
+                log(error.stack);
+                resultsDiv.innerHTML = '<h2 style="color: red;">❌ Tests failed: ' + error.message + '</h2>';
+            }
+        }
+
+        // Run tests when page loads
+        runTests();
+    </script>
+</body>
+</html>

@@ -1,10 +1,11 @@
 # Micro-Mongo
 
-A JavaScript implementation of the mongo query api for plain objects and HTML5 localStorage.
+A JavaScript implementation of the mongo query api for plain objects and HTML5 localStorage, with optional persistent storage using IndexedDB.
 
-There are two main use cases that Micro-Mongo targets:
+There are three main use cases that Micro-Mongo targets:
 - providing a mongo interface to localStorage in HTML5 web browsers
 - for use as an in memory mongo database that can be used in the browser or nodejs
+- **NEW:** persistent storage using IndexedDB for saving and restoring database state including indexes
 
 [![Build Status](https://travis-ci.org/belteshazzar/micro-mongo.svg?branch=master)](https://travis-ci.org/belteshazzar/micro-mongo) [![Coverage Status](https://coveralls.io/repos/github/belteshazzar/micro-mongo/badge.svg?branch=master)](https://coveralls.io/github/belteshazzar/micro-mongo?branch=master)
 
@@ -110,6 +111,42 @@ Indexes can significantly improve query performance for large collections:
     var results = db.users.find({ age: 30 }).toArray()
 
 The query planner automatically uses indexes for simple equality queries. For complex queries, it combines index lookups with full collection scans to ensure complete and correct results.
+
+### Persistent Storage with IndexedDB
+
+Micro-Mongo supports persistent storage using IndexedDB, allowing you to save and restore your entire database state including all indexes:
+
+```javascript
+import { MongoClient, IndexedDbStorageEngine } from 'micro-mongo';
+
+async function main() {
+    // Create a storage engine
+    const storageEngine = new IndexedDbStorageEngine('my-app-db');
+    
+    // Connect with storage engine
+    const client = await MongoClient.connect('mongodb://localhost:27017', {
+        storageEngine: storageEngine
+    });
+    const db = client.db('myapp');
+    
+    // Load existing data (if any)
+    await db.loadFromStorage();
+    
+    // Use database normally
+    await db.users.insertOne({ name: 'Alice', age: 30 });
+    await db.users.createIndex({ age: 1 });
+    
+    // Save to IndexedDB (persists across page reloads)
+    await db.saveToStorage();
+    
+    // Next time you load the page, data and indexes will be restored!
+    await client.close();
+}
+
+main().catch(console.error);
+```
+
+See [STORAGE-ENGINE.md](STORAGE-ENGINE.md) for complete documentation on storage engines.
 
 ### Tests
 

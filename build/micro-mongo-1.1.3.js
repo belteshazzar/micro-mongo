@@ -944,6 +944,69 @@ class TextIndex {
     this.useStopWords = enabled;
     return this;
   }
+  /**
+   * Serialize the text index state for storage
+   * @returns {Object} Serializable state
+   */
+  serialize() {
+    const indexObj = {};
+    this.index.forEach((docs, term) => {
+      const docsObj = {};
+      docs.forEach((freq, docId) => {
+        docsObj[docId] = freq;
+      });
+      indexObj[term] = docsObj;
+    });
+    const documentTermsObj = {};
+    this.documentTerms.forEach((terms, docId) => {
+      const termsObj = {};
+      terms.forEach((freq, term) => {
+        termsObj[term] = freq;
+      });
+      documentTermsObj[docId] = termsObj;
+    });
+    const documentLengthsObj = {};
+    this.documentLengths.forEach((length, docId) => {
+      documentLengthsObj[docId] = length;
+    });
+    return {
+      index: indexObj,
+      documentTerms: documentTermsObj,
+      documentLengths: documentLengthsObj,
+      useStopWords: this.useStopWords,
+      stopWords: Array.from(this.stopWords)
+    };
+  }
+  /**
+   * Restore the text index state from serialized data
+   * @param {Object} state - Serialized state
+   */
+  deserialize(state) {
+    this.index = /* @__PURE__ */ new Map();
+    for (const term in state.index) {
+      const docs = /* @__PURE__ */ new Map();
+      for (const docId in state.index[term]) {
+        docs.set(docId, state.index[term][docId]);
+      }
+      this.index.set(term, docs);
+    }
+    this.documentTerms = /* @__PURE__ */ new Map();
+    for (const docId in state.documentTerms) {
+      const terms = /* @__PURE__ */ new Map();
+      for (const term in state.documentTerms[docId]) {
+        terms.set(term, state.documentTerms[docId][term]);
+      }
+      this.documentTerms.set(docId, terms);
+    }
+    this.documentLengths = /* @__PURE__ */ new Map();
+    for (const docId in state.documentLengths) {
+      this.documentLengths.set(docId, state.documentLengths[docId]);
+    }
+    this.useStopWords = state.useStopWords !== false;
+    if (state.stopWords) {
+      this.stopWords = new Set(state.stopWords);
+    }
+  }
 }
 function valuesEqual(a, b) {
   if (a instanceof ObjectId || b instanceof ObjectId) {
@@ -1411,6 +1474,20 @@ class CollectionIndex {
       key: this.keys
     };
   }
+  /**
+   * Serialize index state for storage
+   * @returns {Object} Serializable index state
+   */
+  serialize() {
+    throw new Error("serialize() must be implemented by subclass");
+  }
+  /**
+   * Restore index state from serialized data
+   * @param {Object} data - Serialized index state
+   */
+  deserialize(data) {
+    throw new Error("deserialize() must be implemented by subclass");
+  }
 }
 class RegularCollectionIndex extends CollectionIndex {
   constructor(keys, options = {}) {
@@ -1492,6 +1569,25 @@ class RegularCollectionIndex extends CollectionIndex {
    */
   clear() {
     this.data = {};
+  }
+  /**
+   * Serialize index state for storage
+   * @returns {Object} Serializable index state
+   */
+  serialize() {
+    return {
+      type: "regular",
+      keys: this.keys,
+      options: this.options,
+      data: this.data
+    };
+  }
+  /**
+   * Restore index state from serialized data
+   * @param {Object} state - Serialized index state
+   */
+  deserialize(state) {
+    this.data = state.data || {};
   }
 }
 class TextCollectionIndex extends CollectionIndex {
@@ -1590,6 +1686,29 @@ class TextCollectionIndex extends CollectionIndex {
       weights[field] = 1;
     }
     return weights;
+  }
+  /**
+   * Serialize index state for storage
+   * @returns {Object} Serializable index state
+   */
+  serialize() {
+    return {
+      type: "text",
+      keys: this.keys,
+      options: this.options,
+      indexedFields: this.indexedFields,
+      textIndexState: this.textIndex.serialize()
+    };
+  }
+  /**
+   * Restore index state from serialized data
+   * @param {Object} state - Serialized index state
+   */
+  deserialize(state) {
+    this.indexedFields = state.indexedFields || [];
+    if (state.textIndexState) {
+      this.textIndex.deserialize(state.textIndexState);
+    }
   }
 }
 function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -1931,6 +2050,67 @@ class RTree {
     this.root = new RTreeNode(true);
     this._size = 0;
   }
+  /**
+   * Serialize the R-tree state for storage
+   * @returns {Object} Serializable state
+   */
+  serialize() {
+    return {
+      maxEntries: this.maxEntries,
+      minEntries: this.minEntries,
+      size: this._size,
+      root: this._serializeNode(this.root)
+    };
+  }
+  /**
+   * Serialize a node recursively
+   */
+  _serializeNode(node) {
+    const serialized = {
+      isLeaf: node.isLeaf,
+      bbox: node.bbox,
+      children: []
+    };
+    if (node.isLeaf) {
+      serialized.children = node.children.map((entry) => ({
+        bbox: entry.bbox,
+        lat: entry.lat,
+        lng: entry.lng,
+        data: entry.data
+      }));
+    } else {
+      serialized.children = node.children.map((child) => this._serializeNode(child));
+    }
+    return serialized;
+  }
+  /**
+   * Restore the R-tree state from serialized data
+   * @param {Object} state - Serialized state
+   */
+  deserialize(state) {
+    this.maxEntries = state.maxEntries || 9;
+    this.minEntries = state.minEntries || Math.ceil(this.maxEntries / 2);
+    this._size = state.size || 0;
+    this.root = this._deserializeNode(state.root);
+  }
+  /**
+   * Deserialize a node recursively
+   */
+  _deserializeNode(serialized) {
+    const node = new RTreeNode(serialized.isLeaf);
+    node.bbox = serialized.bbox;
+    if (serialized.isLeaf) {
+      node.children = serialized.children.map((entry) => ({
+        bbox: entry.bbox,
+        lat: entry.lat,
+        lng: entry.lng,
+        data: entry.data
+      }));
+    } else {
+      node.children = serialized.children.map((child) => this._deserializeNode(child));
+    }
+    return node;
+  }
 }
 class GeospatialCollectionIndex extends CollectionIndex {
   constructor(keys, options = {}) {
@@ -2062,6 +2242,29 @@ class GeospatialCollectionIndex extends CollectionIndex {
       key: this.keys,
       "2dsphereIndexVersion": 3
     };
+  }
+  /**
+   * Serialize index state for storage
+   * @returns {Object} Serializable index state
+   */
+  serialize() {
+    return {
+      type: "geospatial",
+      keys: this.keys,
+      options: this.options,
+      geoField: this.geoField,
+      rtreeState: this.rtree.serialize()
+    };
+  }
+  /**
+   * Restore index state from serialized data
+   * @param {Object} state - Serialized index state
+   */
+  deserialize(state) {
+    this.geoField = state.geoField;
+    if (state.rtreeState) {
+      this.rtree.deserialize(state.rtreeState);
+    }
   }
 }
 class Collection {
@@ -2754,10 +2957,231 @@ class Collection {
   validate() {
     throw "Not Implemented";
   }
+  /**
+   * Export collection state for storage
+   * @returns {Object} Collection state including documents and indexes
+   */
+  exportState() {
+    const documents = [];
+    for (let i = 0; i < this.storage.size(); i++) {
+      const doc = this.storage.get(i);
+      if (doc) {
+        documents.push(doc);
+      }
+    }
+    const indexes = [];
+    for (const indexName in this.indexes) {
+      if (this.indexes.hasOwnProperty(indexName)) {
+        const index = this.indexes[indexName];
+        indexes.push(index.serialize());
+      }
+    }
+    return {
+      documents,
+      indexes
+    };
+  }
+  /**
+   * Import collection state from storage
+   * @param {Object} state - Collection state including documents and indexes
+   */
+  async importState(state) {
+    this.storage.clear();
+    for (const indexName in this.indexes) {
+      if (this.indexes.hasOwnProperty(indexName)) {
+        this.indexes[indexName].clear();
+      }
+    }
+    this.indexes = {};
+    if (state.documents && Array.isArray(state.documents)) {
+      for (const doc of state.documents) {
+        this.storage.set(doc._id, doc);
+      }
+    }
+    if (state.indexes && Array.isArray(state.indexes)) {
+      for (const indexState of state.indexes) {
+        let index;
+        if (indexState.type === "text") {
+          index = new TextCollectionIndex(indexState.keys, indexState.options);
+          index.deserialize(indexState);
+        } else if (indexState.type === "geospatial") {
+          index = new GeospatialCollectionIndex(indexState.keys, indexState.options);
+          index.deserialize(indexState);
+        } else {
+          index = new RegularCollectionIndex(indexState.keys, indexState.options);
+          index.deserialize(indexState);
+        }
+        this.indexes[index.name] = index;
+      }
+    }
+  }
+}
+class StorageEngine {
+  constructor() {
+    if (new.target === StorageEngine) {
+      throw new TypeError("Cannot construct StorageEngine instances directly");
+    }
+  }
+  /**
+   * Initialize the storage engine
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+    throw new Error("initialize() must be implemented by subclass");
+  }
+  /**
+   * Save the entire database state
+   * @param {Object} dbState - The database state to save
+   * @param {string} dbState.name - The database name
+   * @param {Object} dbState.collections - Map of collection names to collection data
+   * @returns {Promise<void>}
+   */
+  async saveDatabase(dbState) {
+    throw new Error("saveDatabase() must be implemented by subclass");
+  }
+  /**
+   * Load the entire database state
+   * @param {string} dbName - The database name
+   * @returns {Promise<Object|null>} The database state or null if not found
+   */
+  async loadDatabase(dbName) {
+    throw new Error("loadDatabase() must be implemented by subclass");
+  }
+  /**
+   * Save a single collection's state
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @param {Object} collectionState - The collection state to save
+   * @param {Array} collectionState.documents - The documents in the collection
+   * @param {Array} collectionState.indexes - The indexes in the collection
+   * @returns {Promise<void>}
+   */
+  async saveCollection(dbName, collectionName, collectionState) {
+    throw new Error("saveCollection() must be implemented by subclass");
+  }
+  /**
+   * Load a single collection's state
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @returns {Promise<Object|null>} The collection state or null if not found
+   */
+  async loadCollection(dbName, collectionName) {
+    throw new Error("loadCollection() must be implemented by subclass");
+  }
+  /**
+   * Delete a collection
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @returns {Promise<void>}
+   */
+  async deleteCollection(dbName, collectionName) {
+    throw new Error("deleteCollection() must be implemented by subclass");
+  }
+  /**
+   * Delete the entire database
+   * @param {string} dbName - The database name
+   * @returns {Promise<void>}
+   */
+  async deleteDatabase(dbName) {
+    throw new Error("deleteDatabase() must be implemented by subclass");
+  }
+  /**
+   * Close/cleanup the storage engine
+   * @returns {Promise<void>}
+   */
+  async close() {
+    throw new Error("close() must be implemented by subclass");
+  }
+}
+class ObjectStorageEngine extends StorageEngine {
+  constructor() {
+    super();
+    this.databases = {};
+  }
+  /**
+   * Initialize the storage engine
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+  }
+  /**
+   * Save the entire database state
+   * @param {Object} dbState - The database state to save
+   * @returns {Promise<void>}
+   */
+  async saveDatabase(dbState) {
+    this.databases[dbState.name] = JSON.parse(JSON.stringify(dbState));
+  }
+  /**
+   * Load the entire database state
+   * @param {string} dbName - The database name
+   * @returns {Promise<Object|null>} The database state or null if not found
+   */
+  async loadDatabase(dbName) {
+    if (this.databases[dbName]) {
+      return JSON.parse(JSON.stringify(this.databases[dbName]));
+    }
+    return null;
+  }
+  /**
+   * Save a single collection's state
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @param {Object} collectionState - The collection state to save
+   * @returns {Promise<void>}
+   */
+  async saveCollection(dbName, collectionName, collectionState) {
+    if (!this.databases[dbName]) {
+      this.databases[dbName] = {
+        name: dbName,
+        collections: {}
+      };
+    }
+    this.databases[dbName].collections[collectionName] = JSON.parse(JSON.stringify(collectionState));
+  }
+  /**
+   * Load a single collection's state
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @returns {Promise<Object|null>} The collection state or null if not found
+   */
+  async loadCollection(dbName, collectionName) {
+    if (this.databases[dbName] && this.databases[dbName].collections[collectionName]) {
+      return JSON.parse(JSON.stringify(this.databases[dbName].collections[collectionName]));
+    }
+    return null;
+  }
+  /**
+   * Delete a collection
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @returns {Promise<void>}
+   */
+  async deleteCollection(dbName, collectionName) {
+    if (this.databases[dbName] && this.databases[dbName].collections) {
+      delete this.databases[dbName].collections[collectionName];
+    }
+  }
+  /**
+   * Delete the entire database
+   * @param {string} dbName - The database name
+   * @returns {Promise<void>}
+   */
+  async deleteDatabase(dbName) {
+    delete this.databases[dbName];
+  }
+  /**
+   * Close/cleanup the storage engine
+   * @returns {Promise<void>}
+   */
+  async close() {
+  }
 }
 class DB {
   constructor(options) {
     this.options = options || {};
+    this.dbName = this.options.dbName || "default";
+    this.storageEngine = this.options.storageEngine || null;
     if (typeof localStorage !== "undefined") {
       this.localStorage = new Collection(
         this,
@@ -2969,6 +3393,90 @@ class DB {
   upgradeCheckAllDBs() {
     throw "Not Implemented";
   }
+  /**
+   * Save database state to storage engine
+   * @returns {Promise<void>}
+   */
+  async saveToStorage() {
+    if (!this.storageEngine) {
+      throw new Error("No storage engine configured. Pass a storageEngine option when creating the DB.");
+    }
+    if (this.storageEngine.initialize) {
+      await this.storageEngine.initialize();
+    }
+    const collections = {};
+    for (const key in this) {
+      if (this[key] != null && this[key].isCollection) {
+        collections[key] = this[key].exportState();
+      }
+    }
+    await this.storageEngine.saveDatabase({
+      name: this.dbName,
+      collections
+    });
+  }
+  /**
+   * Load database state from storage engine
+   * @returns {Promise<void>}
+   */
+  async loadFromStorage() {
+    if (!this.storageEngine) {
+      throw new Error("No storage engine configured. Pass a storageEngine option when creating the DB.");
+    }
+    if (this.storageEngine.initialize) {
+      await this.storageEngine.initialize();
+    }
+    const dbState = await this.storageEngine.loadDatabase(this.dbName);
+    if (!dbState || !dbState.collections) {
+      return;
+    }
+    this.dropDatabase();
+    for (const collectionName in dbState.collections) {
+      if (dbState.collections.hasOwnProperty(collectionName)) {
+        this.createCollection(collectionName);
+        await this[collectionName].importState(dbState.collections[collectionName]);
+      }
+    }
+  }
+  /**
+   * Save a specific collection to storage engine
+   * @param {string} collectionName - Name of the collection to save
+   * @returns {Promise<void>}
+   */
+  async saveCollection(collectionName) {
+    if (!this.storageEngine) {
+      throw new Error("No storage engine configured. Pass a storageEngine option when creating the DB.");
+    }
+    if (!this[collectionName] || !this[collectionName].isCollection) {
+      throw new Error(`Collection '${collectionName}' does not exist`);
+    }
+    if (this.storageEngine.initialize) {
+      await this.storageEngine.initialize();
+    }
+    const collectionState = this[collectionName].exportState();
+    await this.storageEngine.saveCollection(this.dbName, collectionName, collectionState);
+  }
+  /**
+   * Load a specific collection from storage engine
+   * @param {string} collectionName - Name of the collection to load
+   * @returns {Promise<void>}
+   */
+  async loadCollection(collectionName) {
+    if (!this.storageEngine) {
+      throw new Error("No storage engine configured. Pass a storageEngine option when creating the DB.");
+    }
+    if (this.storageEngine.initialize) {
+      await this.storageEngine.initialize();
+    }
+    const collectionState = await this.storageEngine.loadCollection(this.dbName, collectionName);
+    if (!collectionState) {
+      return;
+    }
+    if (!this[collectionName]) {
+      this.createCollection(collectionName);
+    }
+    await this[collectionName].importState(collectionState);
+  }
 }
 class MongoClient {
   constructor(uri, options = {}) {
@@ -2979,10 +3487,191 @@ class MongoClient {
     return new MongoClient(uri, options);
   }
   db(name, opts = {}) {
-    const dbOptions = { ...this.options, ...opts };
+    const dbOptions = { ...this.options, ...opts, dbName: name };
     return new DB(dbOptions);
   }
   async close() {
+  }
+}
+class IndexedDbStorageEngine extends StorageEngine {
+  constructor(dbName = "micro-mongo") {
+    super();
+    this.dbName = dbName;
+    this.db = null;
+    this.indexedDBName = `micro-mongo-${dbName}`;
+  }
+  /**
+   * Initialize the IndexedDB connection
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.indexedDBName, 1);
+      request.onerror = () => {
+        reject(new Error("Failed to open IndexedDB: " + request.error));
+      };
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve();
+      };
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains("collections")) {
+          db.createObjectStore("collections", { keyPath: "name" });
+        }
+        if (!db.objectStoreNames.contains("metadata")) {
+          db.createObjectStore("metadata", { keyPath: "key" });
+        }
+      };
+    });
+  }
+  /**
+   * Save the entire database state
+   * @param {Object} dbState - The database state to save
+   * @returns {Promise<void>}
+   */
+  async saveDatabase(dbState) {
+    if (!this.db) {
+      await this.initialize();
+    }
+    const transaction = this.db.transaction(["metadata"], "readwrite");
+    const metadataStore = transaction.objectStore("metadata");
+    await new Promise((resolve, reject) => {
+      const request = metadataStore.put({
+        key: "dbName",
+        value: dbState.name
+      });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+    for (const collectionName in dbState.collections) {
+      if (dbState.collections.hasOwnProperty(collectionName)) {
+        await this.saveCollection(dbState.name, collectionName, dbState.collections[collectionName]);
+      }
+    }
+  }
+  /**
+   * Load the entire database state
+   * @param {string} dbName - The database name
+   * @returns {Promise<Object|null>} The database state or null if not found
+   */
+  async loadDatabase(dbName) {
+    if (!this.db) {
+      await this.initialize();
+    }
+    const transaction = this.db.transaction(["collections"], "readonly");
+    const collectionsStore = transaction.objectStore("collections");
+    return new Promise((resolve, reject) => {
+      const request = collectionsStore.getAll();
+      request.onsuccess = () => {
+        const collections = {};
+        for (const collectionData of request.result) {
+          collections[collectionData.name] = {
+            documents: collectionData.documents || [],
+            indexes: collectionData.indexes || []
+          };
+        }
+        resolve({
+          name: dbName,
+          collections
+        });
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+  /**
+   * Save a single collection's state
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @param {Object} collectionState - The collection state to save
+   * @returns {Promise<void>}
+   */
+  async saveCollection(dbName, collectionName, collectionState) {
+    if (!this.db) {
+      await this.initialize();
+    }
+    const transaction = this.db.transaction(["collections"], "readwrite");
+    const collectionsStore = transaction.objectStore("collections");
+    return new Promise((resolve, reject) => {
+      const request = collectionsStore.put({
+        name: collectionName,
+        documents: collectionState.documents || [],
+        indexes: collectionState.indexes || []
+      });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+  /**
+   * Load a single collection's state
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @returns {Promise<Object|null>} The collection state or null if not found
+   */
+  async loadCollection(dbName, collectionName) {
+    if (!this.db) {
+      await this.initialize();
+    }
+    const transaction = this.db.transaction(["collections"], "readonly");
+    const collectionsStore = transaction.objectStore("collections");
+    return new Promise((resolve, reject) => {
+      const request = collectionsStore.get(collectionName);
+      request.onsuccess = () => {
+        if (request.result) {
+          resolve({
+            documents: request.result.documents || [],
+            indexes: request.result.indexes || []
+          });
+        } else {
+          resolve(null);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+  /**
+   * Delete a collection
+   * @param {string} dbName - The database name
+   * @param {string} collectionName - The collection name
+   * @returns {Promise<void>}
+   */
+  async deleteCollection(dbName, collectionName) {
+    if (!this.db) {
+      await this.initialize();
+    }
+    const transaction = this.db.transaction(["collections"], "readwrite");
+    const collectionsStore = transaction.objectStore("collections");
+    return new Promise((resolve, reject) => {
+      const request = collectionsStore.delete(collectionName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+  /**
+   * Delete the entire database
+   * @param {string} dbName - The database name
+   * @returns {Promise<void>}
+   */
+  async deleteDatabase(dbName) {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(this.indexedDBName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+  /**
+   * Close/cleanup the storage engine
+   * @returns {Promise<void>}
+   */
+  async close() {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
   }
 }
 const LocalStorageStore = /* @__PURE__ */ (function() {
@@ -3031,9 +3720,12 @@ const ObjectStore = function() {
   };
 };
 export {
+  IndexedDbStorageEngine,
   LocalStorageStore,
   MongoClient,
   ObjectId,
-  ObjectStore
+  ObjectStorageEngine,
+  ObjectStore,
+  StorageEngine
 };
 //# sourceMappingURL=micro-mongo-1.1.3.js.map
