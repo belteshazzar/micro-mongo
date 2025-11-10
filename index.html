@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>micro-mongo - Development</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    pre {
+      background: #f8f8f8;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      border: 1px solid #ddd;
+    }
+    code {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .output {
+      margin-top: 10px;
+      padding: 10px;
+      background: #e8f4f8;
+      border-left: 4px solid #007bff;
+      border-radius: 4px;
+    }
+    .success {
+      color: #28a745;
+      font-weight: bold;
+    }
+    .error {
+      color: #dc3545;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>🗄️ micro-mongo Development</h1>
+  
+  <div class="container">
+    <h2>Quick Test</h2>
+    <button onclick="runBasicTest()">Run Basic Test</button>
+    <button onclick="runObjectIdTest()">Test ObjectId</button>
+    <button onclick="runQueryTest()">Test Queries</button>
+    <button onclick="runAggregationTest()">Test Aggregation</button>
+    <button onclick="clearOutput()">Clear Output</button>
+    <div id="output" class="output" style="display: none;"></div>
+  </div>
+
+  <div class="container">
+    <h2>About</h2>
+    <p>This is the development environment for <strong>micro-mongo</strong> - a lightweight MongoDB-compatible database for JavaScript.</p>
+    <ul>
+      <li>✅ MongoDB-like API</li>
+      <li>✅ ObjectId support</li>
+      <li>✅ Query operators ($gt, $lt, $in, $all, etc.)</li>
+      <li>✅ Aggregation pipeline</li>
+      <li>✅ Indexing support</li>
+      <li>✅ Works in browser and Node.js</li>
+    </ul>
+  </div>
+
+  <script type="module">
+    import { MongoClient, ObjectId } from './main.js';
+
+    window.MongoClient = MongoClient;
+    window.ObjectId = ObjectId;
+
+    const output = document.getElementById('output');
+
+    function log(message, type = 'info') {
+      output.style.display = 'block';
+      const div = document.createElement('div');
+      div.className = type;
+      div.textContent = message;
+      output.appendChild(div);
+    }
+
+    function logObject(label, obj) {
+      output.style.display = 'block';
+      const div = document.createElement('div');
+      div.innerHTML = `<strong>${label}:</strong><pre><code>${JSON.stringify(obj, null, 2)}</code></pre>`;
+      output.appendChild(div);
+    }
+
+    window.clearOutput = function() {
+      output.innerHTML = '';
+      output.style.display = 'none';
+    };
+
+    window.runBasicTest = async function() {
+      clearOutput();
+      log('Running basic CRUD operations...', 'info');
+      
+      try {
+        const client = await MongoClient.connect();
+        const db = client.db('testdb');
+        
+        // Insert
+        db.users.insertOne({ name: 'Alice', age: 30 });
+        db.users.insertOne({ name: 'Bob', age: 25 });
+        db.users.insertOne({ name: 'Charlie', age: 35 });
+        
+        log('✓ Inserted 3 documents', 'success');
+        
+        // Find
+        const users = db.users.find().toArray();
+        logObject('All users', users);
+        
+        // Update
+        db.users.updateOne({ name: 'Bob' }, { $set: { age: 26 } });
+        log('✓ Updated Bob\'s age', 'success');
+        
+        // Find updated
+        const bob = db.users.findOne({ name: 'Bob' });
+        logObject('Updated Bob', bob);
+        
+        // Delete
+        db.users.deleteOne({ name: 'Charlie' });
+        log('✓ Deleted Charlie', 'success');
+        
+        // Count
+        const count = db.users.count();
+        log(`Final count: ${count} users`, 'success');
+        
+        await client.close();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+      }
+    };
+
+    window.runObjectIdTest = async function() {
+      clearOutput();
+      log('Testing ObjectId functionality...', 'info');
+      
+      try {
+        const client = await MongoClient.connect();
+        const db = client.db('testdb');
+        
+        // Create custom ObjectId
+        const customId = new ObjectId();
+        log(`Generated ObjectId: ${customId.toString()}`, 'info');
+        log(`Timestamp: ${customId.getTimestamp().toISOString()}`, 'info');
+        
+        // Insert with custom ID
+        db.items.insertOne({ _id: customId, name: 'Test Item' });
+        
+        // Query by ObjectId
+        const found = db.items.findOne({ _id: customId });
+        logObject('Found by ObjectId', found);
+        
+        // Query by hex string
+        const found2 = db.items.findOne({ _id: customId.toString() });
+        logObject('Found by hex string', found2);
+        
+        log('✓ ObjectId tests passed', 'success');
+        
+        await client.close();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+      }
+    };
+
+    window.runQueryTest = async function() {
+      clearOutput();
+      log('Testing query operators...', 'info');
+      
+      try {
+        const client = await MongoClient.connect();
+        const db = client.db('testdb');
+        
+        // Insert test data
+        db.products.insertMany([
+          { name: 'Laptop', price: 999, category: 'electronics' },
+          { name: 'Mouse', price: 25, category: 'electronics' },
+          { name: 'Keyboard', price: 75, category: 'electronics' },
+          { name: 'Desk', price: 300, category: 'furniture' },
+          { name: 'Chair', price: 150, category: 'furniture' }
+        ]);
+        
+        log('✓ Inserted 5 products', 'success');
+        
+        // Test $gt
+        const expensive = db.products.find({ price: { $gt: 100 } }).toArray();
+        logObject('Products > $100', expensive);
+        
+        // Test $in
+        const electronics = db.products.find({ 
+          category: { $in: ['electronics'] } 
+        }).toArray();
+        logObject('Electronics', electronics);
+        
+        // Test $and
+        const result = db.products.find({ 
+          $and: [
+            { price: { $gte: 50 } },
+            { price: { $lte: 200 } }
+          ]
+        }).toArray();
+        logObject('Price between $50 and $200', result);
+        
+        log('✓ Query tests passed', 'success');
+        
+        await client.close();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+      }
+    };
+
+    window.runAggregationTest = async function() {
+      clearOutput();
+      log('Testing aggregation pipeline...', 'info');
+      
+      try {
+        const client = await MongoClient.connect();
+        const db = client.db('testdb');
+        
+        db.sales.insertMany([
+          { product: 'Laptop', amount: 999, quantity: 2 },
+          { product: 'Mouse', amount: 25, quantity: 10 },
+          { product: 'Laptop', amount: 999, quantity: 1 },
+          { product: 'Keyboard', amount: 75, quantity: 3 }
+        ]);
+        
+        log('✓ Inserted sales data', 'success');
+        
+        // Aggregation pipeline
+        const result = db.sales.aggregate([
+          { $group: { 
+            _id: '$product', 
+            totalQuantity: { $sum: '$quantity' },
+            avgAmount: { $avg: '$amount' }
+          }},
+          { $sort: { totalQuantity: -1 } }
+        ]);
+        
+        logObject('Aggregation result', result);
+        
+        log('✓ Aggregation tests passed', 'success');
+        
+        await client.close();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+      }
+    };
+
+    // Auto-run basic test on load
+    log('micro-mongo loaded successfully! Click buttons above to run tests.', 'success');
+  </script>
+</body>
+</html>
