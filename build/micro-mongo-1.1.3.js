@@ -280,12 +280,7 @@ class Cursor {
     this.indexPos = 0;
     this.fullScanDocIds = {};
     if (queryPlan && queryPlan.useIndex) {
-      const index2 = this.indexes[queryPlan.indexName];
-      if (index2 && index2.data[queryPlan.indexKey]) {
-        this.indexDocIds = index2.data[queryPlan.indexKey].slice();
-      } else {
-        this.indexDocIds = [];
-      }
+      this.indexDocIds = queryPlan.docIds ? queryPlan.docIds.slice() : [];
     }
     this._findNext();
   }
@@ -299,7 +294,7 @@ class Cursor {
         return;
       }
     }
-    while (this.pos < this.collection.count() && (this.max == 0 || this.pos < this.max)) {
+    while (this.pos < this.storage.size() && (this.max == 0 || this.pos < this.max)) {
       const cur = this.storage.get(this.pos++);
       if (cur && !this.fullScanDocIds[cur._id] && this.matches(cur, this.query)) {
         this.fullScanDocIds[cur._id] = true;
@@ -330,9 +325,9 @@ class Cursor {
   explain() {
     throw "Not Implemented";
   }
-  forEach(fn) {
+  async forEach(fn) {
     while (this.hasNext()) {
-      fn(this.next());
+      await fn(this.next());
     }
   }
   hasNext() {
@@ -415,12 +410,18 @@ class Cursor {
   tailable() {
     throw "Not Implemented";
   }
-  toArray() {
+  async toArray() {
     const results = [];
     while (this.hasNext()) {
       results.push(this.next());
     }
     return results;
+  }
+  // Support for async iteration (for await...of)
+  async *[Symbol.asyncIterator]() {
+    while (this.hasNext()) {
+      yield this.next();
+    }
   }
 }
 class SortedCursor {
@@ -459,9 +460,9 @@ class SortedCursor {
   explain() {
     throw "Not Implemented";
   }
-  forEach(fn) {
+  async forEach(fn) {
     while (this.hasNext()) {
-      fn(this.next());
+      await fn(this.next());
     }
   }
   hasNext() {
@@ -539,82 +540,21 @@ class SortedCursor {
   tailable() {
     throw "Not Implemented";
   }
-  toArray() {
+  async toArray() {
     const results = [];
     while (this.hasNext()) {
       results.push(this.next());
     }
     return results;
   }
-}
-function _copy(data) {
-  const type2 = typeof data;
-  if (data && type2 === "object") {
-    return Object.keys(data).reduce((accum, key) => {
-      accum[key] = _copy(data[key]);
-      return accum;
-    }, {});
-  }
-  return data;
-}
-function _tokenize(value, isObject2) {
-  return value.replace(new RegExp(`[^A-Za-z0-9\\s${isObject2 ? ":" : ""}]`, "g"), "").replace(/  +/g, " ").toLowerCase().split(" ");
-}
-function _misspellings(value, compress) {
-  const results = [];
-  {
-    const dedoubled = Object.values(value).reduce((accum, char) => accum[accum.length - 1] === char ? accum : accum += char, "");
-    if (dedoubled !== value) {
-      value = dedoubled;
-      results.push(dedoubled);
+  // Support for async iteration (for await...of)
+  async *[Symbol.asyncIterator]() {
+    while (this.hasNext()) {
+      yield this.next();
     }
   }
-  if (value.includes("ie")) results.push(value.replace(/ie/g, "ei"));
-  if (value.includes("ei")) results.push(value.replace(/ei/g, "ie"));
-  if (value.includes("ea") && !value[0] === "e" && !value[value.length - 1] === "a") results.push(value.replace(/ea/g, "e"));
-  if (value.includes("sc") && !value[0] === "s" && !value[value.length - 1] === "c") results.push(value.replace(/sc/g, "c"));
-  if (value.includes("os") && !value[0] === "o" && !value[value.length - 1] === "s") results.push(value.replace(/os/g, "ous"));
-  if (value.endsWith("ery")) results.push(value.substring(0, value.length - 3) + "ary");
-  if (value.includes("ite")) results.push(value.replace(/ite/g, "ate"));
-  if (value.endsWith("ent")) results.push(value.substring(0, value.length - 3) + "ant");
-  if (value.endsWith("eur")) results.push(value.substring(0, value.length - 3) + "er");
-  if (value.endsWith("for")) results.push(value + "e");
-  if (value.startsWith("gua")) results.push("gau" + value.substring(4));
-  if (value.endsWith("oah")) results.push(value.substring(0, value.length - 3) + "aoh");
-  if (value.endsWith("ally")) results.push(value.substring(0, value.length - 4) + "ly");
-  if (value.endsWith("ence")) results.push(value.substring(0, value.length - 4) + "ance");
-  if (value.endsWith("fore")) results.push(value.substring(0, value.length - 1));
-  if (value.endsWith("ious")) results.push(value.substring(0, value.length - 4) + "ous");
-  if (value.endsWith("guese")) results.push(value.substring(0, value.length - 4) + "gese");
-  if (value.endsWith("ible")) results.push(value.substring(0, value.length - 4) + "able");
-  if (value.startsWith("busi")) results.push("buis" + value.substring(5));
-  if (value.startsWith("fore")) results.push("for" + value.substring(5));
-  if (value.startsWith("fluor")) results.push("flor" + value.substring(5));
-  if (value.startsWith("propa")) results.push("propo" + value.substring(5));
-  return results;
 }
-function _disemvowel(value) {
-  return value.replace(/[AEIOUaeiou]+/g, "");
-}
-function _compress(value) {
-  return Object.values(_disemvowel(value)).reduce((accum, char) => accum[accum.length - 1] === char ? accum : accum += char, "");
-}
-function _trigrams(tokens) {
-  const { string, grams } = tokens.reduce((accum, token) => {
-    if (isNaN(parseFloat(token))) {
-      accum.string += token;
-    } else {
-      accum.grams.push(token);
-    }
-    return accum;
-  }, { string: "", grams: [] });
-  for (let i = 0; i < string.length - 2; i++) {
-    grams.push(string.substring(i, i + 3));
-  }
-  return grams;
-}
-var CC_Y = "y".charCodeAt(0);
-var step2list = {
+const step2list = {
   ational: "ate",
   tional: "tion",
   enci: "ence",
@@ -637,7 +577,7 @@ var step2list = {
   biliti: "ble",
   logi: "log"
 };
-var step3list = {
+const step3list = {
   icate: "ic",
   ative: "",
   alize: "al",
@@ -646,104 +586,91 @@ var step3list = {
   ful: "",
   ness: ""
 };
-var consonant = "[^aeiou]";
-var vowel = "[aeiouy]";
-var consonantSequence = "(" + consonant + "[^aeiouy]*)";
-var vowelSequence = "(" + vowel + "[aeiou]*)";
-var MEASURE_GT_0 = new RegExp(
-  "^" + consonantSequence + "?" + vowelSequence + consonantSequence
+const consonant = "[^aeiou]";
+const vowel = "[aeiouy]";
+const consonants = "(" + consonant + "[^aeiouy]*)";
+const vowels = "(" + vowel + "[aeiou]*)";
+const gt0 = new RegExp("^" + consonants + "?" + vowels + consonants);
+const eq1 = new RegExp(
+  "^" + consonants + "?" + vowels + consonants + vowels + "?$"
 );
-var MEASURE_EQ_1 = new RegExp(
-  "^" + consonantSequence + "?" + vowelSequence + consonantSequence + vowelSequence + "?$"
-);
-var MEASURE_GT_1 = new RegExp(
-  "^" + consonantSequence + "?(" + vowelSequence + consonantSequence + "){2,}"
-);
-var VOWEL_IN_STEM = new RegExp(
-  "^" + consonantSequence + "?" + vowel
-);
-var CONSONANT_LIKE = new RegExp(
-  "^" + consonantSequence + vowel + "[^aeiouwxy]$"
-);
-var SUFFIX_LL = /ll$/;
-var SUFFIX_E = /^(.+?)e$/;
-var SUFFIX_Y = /^(.+?)y$/;
-var SUFFIX_ION = /^(.+?(s|t))(ion)$/;
-var SUFFIX_ED_OR_ING = /^(.+?)(ed|ing)$/;
-var SUFFIX_AT_OR_BL_OR_IZ = /(at|bl|iz)$/;
-var SUFFIX_EED = /^(.+?)eed$/;
-var SUFFIX_S = /^.+?[^s]s$/;
-var SUFFIX_SSES_OR_IES = /^.+?(ss|i)es$/;
-var SUFFIX_MULTI_CONSONANT_LIKE = /([^aeiouylsz])\1$/;
-var STEP_2 = new RegExp(
-  "^(.+?)(ational|tional|enci|anci|izer|bli|alli|entli|eli|ousli|ization|ation|ator|alism|iveness|fulness|ousness|aliti|iviti|biliti|logi)$"
-);
-var STEP_3 = /^(.+?)(icate|ative|alize|iciti|ical|ful|ness)$/;
-var STEP_4 = new RegExp(
-  "^(.+?)(al|ance|ence|er|ic|able|ible|ant|ement|ment|ent|ou|ism|ate|iti|ous|ive|ize)$"
-);
-function _stemmer(value) {
-  var firstCharacterWasLowerCaseY;
-  var match;
-  value = String(value).toLowerCase();
-  if (value.length < 3) {
-    return value;
+const gt1 = new RegExp("^" + consonants + "?(" + vowels + consonants + "){2,}");
+const vowelInStem = new RegExp("^" + consonants + "?" + vowel);
+const consonantLike = new RegExp("^" + consonants + vowel + "[^aeiouwxy]$");
+const sfxLl = /ll$/;
+const sfxE = /^(.+?)e$/;
+const sfxY = /^(.+?)y$/;
+const sfxIon = /^(.+?(s|t))(ion)$/;
+const sfxEdOrIng = /^(.+?)(ed|ing)$/;
+const sfxAtOrBlOrIz = /(at|bl|iz)$/;
+const sfxEED = /^(.+?)eed$/;
+const sfxS = /^.+?[^s]s$/;
+const sfxSsesOrIes = /^.+?(ss|i)es$/;
+const sfxMultiConsonantLike = /([^aeiouylsz])\1$/;
+const step2 = /^(.+?)(ational|tional|enci|anci|izer|bli|alli|entli|eli|ousli|ization|ation|ator|alism|iveness|fulness|ousness|aliti|iviti|biliti|logi)$/;
+const step3 = /^(.+?)(icate|ative|alize|iciti|ical|ful|ness)$/;
+const step4 = /^(.+?)(al|ance|ence|er|ic|able|ible|ant|ement|ment|ent|ou|ism|ate|iti|ous|ive|ize)$/;
+function stemmer(value) {
+  let result = String(value).toLowerCase();
+  if (result.length < 3) {
+    return result;
   }
-  if (value.charCodeAt(0) === CC_Y) {
+  let firstCharacterWasLowerCaseY = false;
+  if (result.codePointAt(0) === 121) {
     firstCharacterWasLowerCaseY = true;
-    value = "Y" + value.substr(1);
+    result = "Y" + result.slice(1);
   }
-  if (SUFFIX_SSES_OR_IES.test(value)) {
-    value = value.substr(0, value.length - 2);
-  } else if (SUFFIX_S.test(value)) {
-    value = value.substr(0, value.length - 1);
+  if (sfxSsesOrIes.test(result)) {
+    result = result.slice(0, -2);
+  } else if (sfxS.test(result)) {
+    result = result.slice(0, -1);
   }
-  if (match = SUFFIX_EED.exec(value)) {
-    if (MEASURE_GT_0.test(match[1])) {
-      value = value.substr(0, value.length - 1);
+  let match;
+  if (match = sfxEED.exec(result)) {
+    if (gt0.test(match[1])) {
+      result = result.slice(0, -1);
     }
-  } else if ((match = SUFFIX_ED_OR_ING.exec(value)) && VOWEL_IN_STEM.test(match[1])) {
-    value = match[1];
-    if (SUFFIX_AT_OR_BL_OR_IZ.test(value)) {
-      value += "e";
-    } else if (SUFFIX_MULTI_CONSONANT_LIKE.test(value)) {
-      value = value.substr(0, value.length - 1);
-    } else if (CONSONANT_LIKE.test(value)) {
-      value += "e";
+  } else if ((match = sfxEdOrIng.exec(result)) && vowelInStem.test(match[1])) {
+    result = match[1];
+    if (sfxAtOrBlOrIz.test(result)) {
+      result += "e";
+    } else if (sfxMultiConsonantLike.test(result)) {
+      result = result.slice(0, -1);
+    } else if (consonantLike.test(result)) {
+      result += "e";
     }
   }
-  if ((match = SUFFIX_Y.exec(value)) && VOWEL_IN_STEM.test(match[1])) {
-    value = match[1] + "i";
+  if ((match = sfxY.exec(result)) && vowelInStem.test(match[1])) {
+    result = match[1] + "i";
   }
-  if ((match = STEP_2.exec(value)) && MEASURE_GT_0.test(match[1])) {
-    value = match[1] + step2list[match[2]];
+  if ((match = step2.exec(result)) && gt0.test(match[1])) {
+    result = match[1] + step2list[match[2]];
   }
-  if ((match = STEP_3.exec(value)) && MEASURE_GT_0.test(match[1])) {
-    value = match[1] + step3list[match[2]];
+  if ((match = step3.exec(result)) && gt0.test(match[1])) {
+    result = match[1] + step3list[match[2]];
   }
-  if (match = STEP_4.exec(value)) {
-    if (MEASURE_GT_1.test(match[1])) {
-      value = match[1];
+  if (match = step4.exec(result)) {
+    if (gt1.test(match[1])) {
+      result = match[1];
     }
-  } else if ((match = SUFFIX_ION.exec(value)) && MEASURE_GT_1.test(match[1])) {
-    value = match[1];
+  } else if ((match = sfxIon.exec(result)) && gt1.test(match[1])) {
+    result = match[1];
   }
-  if ((match = SUFFIX_E.exec(value)) && (MEASURE_GT_1.test(match[1]) || MEASURE_EQ_1.test(match[1]) && !CONSONANT_LIKE.test(match[1]))) {
-    value = match[1];
+  if ((match = sfxE.exec(result)) && (gt1.test(match[1]) || eq1.test(match[1]) && !consonantLike.test(match[1]))) {
+    result = match[1];
   }
-  if (SUFFIX_LL.test(value) && MEASURE_GT_1.test(value)) {
-    value = value.substr(0, value.length - 1);
+  if (sfxLl.test(result) && gt1.test(result)) {
+    result = result.slice(0, -1);
   }
   if (firstCharacterWasLowerCaseY) {
-    value = "y" + value.substr(1);
+    result = "y" + result.slice(1);
   }
-  return value;
+  return result;
 }
-var STOPWORDS = [
+const STOPWORDS = /* @__PURE__ */ new Set([
   "a",
   "about",
   "after",
-  "ala",
   "all",
   "also",
   "am",
@@ -787,9 +714,7 @@ var STOPWORDS = [
   "how",
   "i",
   "if",
-  "iff",
   "in",
-  "include",
   "into",
   "is",
   "it",
@@ -853,331 +778,195 @@ var STOPWORDS = [
   "would",
   "you",
   "your"
-];
-function _toText(objectOrPrimitive, seen = /* @__PURE__ */ new Set()) {
-  if (objectOrPrimitive && typeof objectOrPrimitive === "object" && !seen.has(objectOrPrimitive)) {
-    seen.add(objectOrPrimitive);
-    return Object.keys(objectOrPrimitive).reduce((accum, key, i, array) => accum += key + ": " + _toText(objectOrPrimitive[key], seen) + (i < array.length - 1 ? " " : ""), "");
+]);
+class TextIndex {
+  constructor(options = {}) {
+    this.index = /* @__PURE__ */ new Map();
+    this.documentTerms = /* @__PURE__ */ new Map();
+    this.documentLengths = /* @__PURE__ */ new Map();
+    this.useStopWords = options.useStopWords !== false;
+    this.stopWords = options.stopWords || new Set(STOPWORDS);
   }
-  return objectOrPrimitive;
-}
-function _coerceId(id) {
-  try {
-    return JSON.parse(id);
-  } catch (e) {
-    return id;
-  }
-}
-function Txi({ stops, stems = true, trigrams = true, compressions = true, misspellings = true, onchange, storage = {} } = {}) {
-  const defaults = { stops, stems, trigrams, compressions, misspellings, onchange, storage };
-  if (!this || !(this instanceof Txi)) {
-    return new Txi(defaults);
-  }
-  let { get: get5, set, keys: keys2, count: count2 } = storage;
-  stops = (defaults.stops || STOPWORDS).reduce((accum, word) => {
-    accum[word] = true;
-    return accum;
-  }, {});
-  let keycount = 0, index2 = {};
-  if (!keys2) {
-    keys2 = async function* () {
-      let i = 0, key = keys2[i];
-      while (key) {
-        yield key;
-        key = keys2[++i];
-      }
-    };
-  }
-  if (!get5) {
-    get5 = (key) => index2[key];
-  }
-  if (!set) {
-    set = (key, value) => index2[key] = value;
-  }
-  this.addStops = (...words) => {
-    words.forEach((word) => stops[word] = true);
-    return this;
-  };
-  this.compress = () => {
-    const onchange2 = this.onchange || (() => {
-    });
-    Object.keys(index2).forEach((word) => {
-      const entry = index2[word], ids = Object.keys(entry);
-      let changed;
-      ids.forEach((id) => {
-        if (entry[id].stems === 0 && entry[id].trigrams === 0 && entry[id].compressions === 0) {
-          delete entry[id];
-          changed = true;
-        }
-      });
-      if (Object.keys(entry).length === 0) {
-        delete index2[word];
-        delete keys2[word];
-        onchange2({ [word]: null });
-        keycount--;
-      } else if (changed) {
-        onchange2([word], entry);
-      }
-    });
-    return this;
-  };
-  this.removeStops = (...words) => {
-    words.forEach((word) => delete stops[word]);
-    return this;
-  };
-  this.remove = async (...ids) => {
-    const onchange2 = this.onchange || (() => {
-    });
-    for (const id of ids) {
-      for await (const word of keys2()) {
-        const node = await get5(word);
-        if (node && node[id]) {
-          delete node[id];
-          await set(word, node);
-          onchange2({ [word]: { [id]: { stems: 0, trigrams: 0, compressions: 0 } } });
-        }
-      }
-    }
-    return this;
-  };
-  this.getIndex = () => _copy(index2);
-  this.getKeys = async () => {
-    const results = {};
-    for await (const key of keys2()) {
-      results[key] = true;
-    }
-    return results;
-  };
-  this.getKeyCount = () => count2 ? count2() : keycount;
-  this.setIndex = (newIndex) => {
-    index2 = _copy(newIndex);
-    keycount = 0;
-    Object.assign(keys2, Object.keys(index2).reduce((accum, key) => {
-      accum[key] = true;
-      keycount++;
-      return accum;
-    }, {}));
-    return this;
-  };
-  this.onchange = defaults.onchange;
-  this.index = function(id, objectOrText, { stems: stems2 = defaults.stems, trigrams: trigrams2 = defaults.trigrams, compressions: compressions2 = defaults.compressions, misspellings: misspellings2 = defaults.misspellings } = defaults) {
-    const type2 = typeof objectOrText;
-    if (!objectOrText || !(type2 === "string" || type2 === "object")) {
-      return;
-    }
-    if (type2 === "object") {
-      stems2 = true;
-    }
-    const text2 = _toText(objectOrText);
-    const tokens = objectOrText ? _tokenize(text2, type2 === "object") : [];
-    const stemmed = stems2 || type2 === "object" ? tokens.reduce((accum, token) => {
-      const type3 = typeof token;
-      if (type3 !== "number" && type3 !== "boolean") {
-        const stem = _stemmer(token);
-        if (!stops[stem]) {
-          accum.push(stem);
-        }
-      }
-      return accum;
-    }, []) : [], other = tokens.filter((token) => token === "true" || token === "false" || !isNaN(parseFloat(token))), noproperties = (stems2 ? stemmed : tokens).filter((token) => token[token.length - 1] !== ":" && isNaN(parseFloat(token)) && token !== "true" && token !== "false"), grams = trigrams2 ? _trigrams(noproperties) : [], misspelled = (misspellings2 ? noproperties.reduce((accum, stem) => accum.concat(_misspellings(stem)), []) : []).filter((word) => !grams.includes(word)), compressed = compressions2 ? noproperties.reduce((accum, stem) => accum.concat(_compress(stem)), []).concat(misspelled.reduce((accum, stem) => accum.concat(_compress(stem)), [])) : [], onchange2 = this.onchange || (() => {
-    });
-    let changes, count3 = 0;
-    for (const word of stemmed.concat(misspelled).concat(compressed).concat(other)) {
-      if (!stops[word]) {
-        const isboolean = word === "false" || word === "true", isnumber = !isNaN(parseFloat(word));
-        let node = get5(word), change;
-        keys2[word] = true;
-        if (isboolean) {
-          if (!node) {
-            node = {};
-            count3++;
-          }
-          if (!node[id]) {
-            node[id] = { stems: 0, trigrams: 0, compressions: 0, numbers: 0, booleans: 0 };
-          }
-          node[id].boolean++;
-          change = node[id];
-        }
-        if (isnumber) {
-          if (!node) {
-            node = {};
-            count3++;
-          }
-          if (!node[id]) {
-            node[id] = { stems: 0, trigrams: 0, compressions: 0, numbers: 0, booleans: 0 };
-          }
-          node[id].numbers++;
-          change = node[id];
-        }
-        if (!isboolean && !isnumber) {
-          if (stems2 && (stemmed.includes(word) || misspelled.includes(word))) {
-            if (!node) {
-              node = {};
-              count3++;
-            }
-            if (!node[id]) {
-              node[id] = { stems: 0, trigrams: 0, compressions: 0, numbers: 0, booleans: 0 };
-            }
-            node[id].stems++;
-            change = node[id];
-          }
-          if (compressions2 && compressed.includes(word)) {
-            if (!node) {
-              node = {};
-              count3++;
-            }
-            if (!node[id]) {
-              node[id] = { stems: 0, trigrams: 0, compressions: 0 };
-            }
-            node[id].compressions++;
-            change = node[id];
-          }
-        }
-        if (change) {
-          if (!changes) {
-            changes = {};
-          }
-          if (!changes[word]) {
-            changes[word] = {};
-          }
-          changes[word][id] = change;
-          set(word, node);
-        }
-      }
-    }
-    for (const word of grams) {
-      if (!stops[word]) {
-        let node = get5(word);
-        keys2[word] = true;
-        if (!node) {
-          node = {};
-          count3++;
-        }
-        if (!node[id]) {
-          node[id] = { stems: 0, trigrams: 0, compressions: 0, booleans: 0, numbers: 0 };
-        }
-        node[id].trigrams++;
-        if (!changes) {
-          changes = {};
-        }
-        if (!changes[word]) {
-          changes[word] = {};
-        }
-        changes[word][id] = node[id];
-        set(word, node);
-      }
-    }
-    if (changes) onchange2(changes);
-    keycount += count3;
-    return this;
-  };
-  this.search = function(objectOrText, { all, stems: stems2 = defaults.stems, trigrams: trigrams2 = defaults.trigrams, compressions: compressions2 = defaults.compressions, misspellings: misspellings2 = defaults.misspellings } = defaults) {
-    const type2 = typeof objectOrText;
-    if (!objectOrText || !(type2 === "string" || type2 === "object")) {
+  /**
+   * Tokenize text into individual words
+   * @param {string} text - The text to tokenize
+   * @returns {string[]} Array of words
+   */
+  _tokenize(text2) {
+    if (typeof text2 !== "string") {
       return [];
     }
-    if (type2 === "object") {
-      stems2 = true;
+    const words = text2.toLowerCase().split(/\W+/).filter((word) => word.length > 0);
+    if (this.useStopWords) {
+      return words.filter((word) => !this.stopWords.has(word));
     }
-    const text2 = _toText(objectOrText), tokens = objectOrText ? _tokenize(text2, type2 === "object") : [], stemmed = stems2 || type2 === "object" ? tokens.reduce((accum, token) => {
-      const type3 = typeof token;
-      if (type3 !== "number" && type3 !== "boolean") {
-        const stem = _stemmer(token);
-        if (!stops[stem]) {
-          accum.push(stem);
+    return words;
+  }
+  /**
+   * Add terms from text to the index for a given document ID
+   * @param {string} docId - The document identifier
+   * @param {string} text - The text content to index
+   */
+  add(docId, text2) {
+    if (!docId) {
+      throw new Error("Document ID is required");
+    }
+    const words = this._tokenize(text2);
+    const termFrequency = /* @__PURE__ */ new Map();
+    words.forEach((word) => {
+      const stem = stemmer(word);
+      termFrequency.set(stem, (termFrequency.get(stem) || 0) + 1);
+    });
+    termFrequency.forEach((frequency, stem) => {
+      if (!this.index.has(stem)) {
+        this.index.set(stem, /* @__PURE__ */ new Map());
+      }
+      this.index.get(stem).set(docId, frequency);
+    });
+    this.documentTerms.set(docId, termFrequency);
+    this.documentLengths.set(docId, words.length);
+  }
+  /**
+   * Remove all indexed terms for a given document ID
+   * @param {string} docId - The document identifier to remove
+   * @returns {boolean} True if document was found and removed, false otherwise
+   */
+  remove(docId) {
+    if (!this.documentTerms.has(docId)) {
+      return false;
+    }
+    const terms = this.documentTerms.get(docId);
+    terms.forEach((frequency, term) => {
+      if (this.index.has(term)) {
+        this.index.get(term).delete(docId);
+        if (this.index.get(term).size === 0) {
+          this.index.delete(term);
         }
       }
-      return accum;
-    }, []) : [], other = tokens.filter((token) => token === "true" || token === "false" || !isNaN(parseFloat(token))), noproperties = (stems2 ? stemmed : tokens).filter((token) => token[token.length - 1] !== ":" && isNaN(parseFloat(token)) && token !== "true" && token !== "false"), grams = trigrams2 ? _trigrams(noproperties) : [], compressed = compressions2 ? noproperties.map((stem) => _compress(stem)) : [], results = [];
-    for (const word of stemmed.concat(grams).concat(compressed).concat(other)) {
-      if (!stops[word]) {
-        const node = get5(word), isboolean = word === "false" || word === "true", isnumber = !isNaN(parseFloat(word));
-        if (node) {
-          Object.keys(node).forEach((id) => {
-            if (!results[id]) {
-              results[id] = { score: 0, count: 0, stems: {}, trigrams: {}, compressions: {}, booleans: {}, numbers: {} };
-            }
-            let count3 = 0;
-            if (isboolean) {
-              if (!results[id].booleans[word]) {
-                results[id].booleans[word] = 0;
-              }
-              results[id].booleans[word] += node[id].booleans;
-              results[id].score += node[id].booleans;
-              count3 = 1;
-            }
-            if (isnumber) {
-              if (!results[id].numbers[word]) {
-                results[id].numbers[word] = 0;
-              }
-              results[id].numbers[word] += node[id].numbers;
-              results[id].score += node[id].numbers;
-              count3 = 1;
-            }
-            if (stems2 && stemmed.includes(word)) {
-              if (!results[id].stems[word]) {
-                results[id].stems[word] = 0;
-              }
-              results[id].stems[word] += node[id].stems;
-              results[id].score += node[id].stems;
-              count3 = 1;
-            }
-            if (trigrams2 && grams.includes(word)) {
-              if (!results[id].trigrams[word]) {
-                results[id].trigrams[word] = 0;
-              }
-              const score = node[id].trigrams * 0.5;
-              results[id].trigrams[word] += score;
-              results[id].score += score;
-            }
-            if (compressions2 && compressed.includes(word)) {
-              if (!results[id].compressions[word]) {
-                results[id].compressions[word] = 0;
-              }
-              const score = node[id].compressions * 0.75;
-              results[id].compressions[word] += score;
-              results[id].score += score;
-              count3 || (count3 = 1);
-            }
-            results[id].count += count3;
-          });
-        }
-      }
+    });
+    this.documentTerms.delete(docId);
+    this.documentLengths.delete(docId);
+    return true;
+  }
+  /**
+   * Query the index for documents containing the given terms with relevance scoring
+   * @param {string} queryText - The search query text
+   * @param {Object} options - Query options
+   * @param {boolean} options.scored - If true, return scored results; if false, return just IDs (default: true)
+   * @param {boolean} options.requireAll - If true, require ALL terms; if false, rank by relevance (default: false)
+   * @returns {Array} Array of document IDs (if scored=false) or objects with {id, score} (if scored=true)
+   */
+  query(queryText, options = { scored: true, requireAll: false }) {
+    const words = this._tokenize(queryText);
+    if (words.length === 0) {
+      return [];
     }
-    const properties = type2 === "object" ? Object.keys(objectOrText) : [];
-    return Object.keys(results).reduce((accum, id) => {
-      const result = results[id];
-      if (result.score > 0) {
-        const method = all ? "every" : "some";
-        if (type2 === "object") {
-          if (properties[method]((property) => {
-            if (result.stems[property + ":"]) {
-              const value = objectOrText[property];
-              if (value === "_*_") return true;
-              if (value == "true" || value == "false") {
-                if (result.booleans[value]) return true;
-              } else if (typeof value === "number") {
-                if (result.numbers[value]) return true;
-              } else {
-                const stemmed2 = _tokenize(value).map((token) => _stemmer(token));
-                return stemmed2.some((stem) => result.stems[stem]);
-              }
-            }
-          })) {
-            accum.push(Object.assign({ id: _coerceId(id) }, result));
+    const stemmedTerms = words.map((word) => stemmer(word));
+    const uniqueTerms = [...new Set(stemmedTerms)];
+    if (options.requireAll) {
+      const docSets = uniqueTerms.map((term) => {
+        const termDocs = this.index.get(term);
+        return termDocs ? new Set(termDocs.keys()) : /* @__PURE__ */ new Set();
+      });
+      if (docSets.length === 0) {
+        return [];
+      }
+      const intersection8 = new Set(docSets[0]);
+      for (let i = 1; i < docSets.length; i++) {
+        for (const docId of intersection8) {
+          if (!docSets[i].has(docId)) {
+            intersection8.delete(docId);
           }
-        } else if (all) {
-          if (stems2 && Object.keys(result.stems).length === 0 && Object.keys(result.numbers).length === 0 && Object.keys(result.booleans).length === 0) return accum;
-          if (trigrams2 && Object.keys(result.trigrams).length === 0) return accum;
-          if (compressions2 && Object.keys(result.compressions).length === 0) return accum;
-          accum.push(Object.assign({ id: _coerceId(id) }, result));
-        } else {
-          accum.push(Object.assign({ id: _coerceId(id) }, result));
         }
       }
-      return accum;
-    }, []).sort((a, b) => b.score - a.score);
-  };
+      return Array.from(intersection8);
+    }
+    const totalDocs = this.documentLengths.size;
+    const idf = /* @__PURE__ */ new Map();
+    uniqueTerms.forEach((term) => {
+      const docsWithTerm = this.index.get(term)?.size || 0;
+      if (docsWithTerm > 0) {
+        idf.set(term, Math.log(totalDocs / docsWithTerm));
+      }
+    });
+    const docScores = /* @__PURE__ */ new Map();
+    uniqueTerms.forEach((term) => {
+      const termDocs = this.index.get(term);
+      if (!termDocs) return;
+      termDocs.forEach((termFreq, docId) => {
+        if (!docScores.has(docId)) {
+          docScores.set(docId, 0);
+        }
+        const docLength = this.documentLengths.get(docId) || 1;
+        const tf = termFreq / docLength;
+        const termIdf = idf.get(term) || 0;
+        const tfIdf = tf * termIdf;
+        docScores.set(docId, docScores.get(docId) + tfIdf);
+      });
+    });
+    docScores.forEach((score, docId) => {
+      const docTerms = this.documentTerms.get(docId);
+      if (docTerms) {
+        const matchingTerms = uniqueTerms.filter((term) => docTerms.has(term)).length;
+        const coverage = matchingTerms / uniqueTerms.length;
+        docScores.set(docId, score * (1 + coverage));
+      }
+    });
+    const results = Array.from(docScores.entries()).map(([id, score]) => ({ id, score })).sort((a, b) => b.score - a.score);
+    if (options.scored === false) {
+      return results.map((r) => r.id);
+    }
+    return results;
+  }
+  /**
+   * Get the number of unique terms in the index
+   * @returns {number} Number of unique terms
+   */
+  getTermCount() {
+    return this.index.size;
+  }
+  /**
+   * Get the number of documents in the index
+   * @returns {number} Number of indexed documents
+   */
+  getDocumentCount() {
+    return this.documentTerms.size;
+  }
+  /**
+   * Clear all data from the index
+   */
+  clear() {
+    this.index.clear();
+    this.documentTerms.clear();
+    this.documentLengths.clear();
+  }
+  /**
+   * Add custom stop words
+   * @param {...string} words - Words to add to stop word list
+   * @returns {TextIndex} this for chaining
+   */
+  addStopWords(...words) {
+    words.forEach((word) => this.stopWords.add(word.toLowerCase()));
+    return this;
+  }
+  /**
+   * Remove words from stop word list
+   * @param {...string} words - Words to remove from stop word list
+   * @returns {TextIndex} this for chaining
+   */
+  removeStopWords(...words) {
+    words.forEach((word) => this.stopWords.delete(word.toLowerCase()));
+    return this;
+  }
+  /**
+   * Enable or disable stop word filtering
+   * @param {boolean} enabled - Whether to filter stop words
+   * @returns {TextIndex} this for chaining
+   */
+  setStopWordFiltering(enabled) {
+    this.useStopWords = enabled;
+    return this;
+  }
 }
 function getDefaultExportFromCjs(x) {
   return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
@@ -26724,9 +26513,10 @@ function compareValues(a, b, operator) {
   }
 }
 function text(prop, query5) {
-  const txi = new Txi().index("id", prop);
-  const search = txi.search(query5);
-  return search.length == 1;
+  const textIndex = new TextIndex();
+  textIndex.add("id", prop);
+  const results = textIndex.query(query5, { scored: false });
+  return results.length === 1;
 }
 function geoWithin(prop, query5) {
   try {
@@ -27045,6 +26835,251 @@ function createDocFromUpdate(query5, updates, idGenerator) {
   }
   return newDoc;
 }
+class CollectionIndex {
+  constructor(keys2, options = {}) {
+    this.keys = keys2;
+    this.options = options;
+    this.name = options.name || this.generateIndexName(keys2);
+  }
+  /**
+   * Generate index name from keys
+   */
+  generateIndexName(keys2) {
+    const parts = [];
+    for (const field in keys2) {
+      if (keys2.hasOwnProperty(field)) {
+        parts.push(field + "_" + keys2[field]);
+      }
+    }
+    return parts.join("_");
+  }
+  /**
+   * Add a document to the index
+   * @param {Object} doc - The document to index
+   */
+  add(doc) {
+    throw new Error("add() must be implemented by subclass");
+  }
+  /**
+   * Remove a document from the index
+   * @param {Object} doc - The document to remove
+   */
+  remove(doc) {
+    throw new Error("remove() must be implemented by subclass");
+  }
+  /**
+   * Update a document in the index (remove old, add new)
+   * @param {Object} oldDoc - The old document
+   * @param {Object} newDoc - The new document
+   */
+  update(oldDoc, newDoc) {
+    this.remove(oldDoc);
+    this.add(newDoc);
+  }
+  /**
+   * Query the index
+   * @param {*} query - The query to execute
+   * @returns {Array} Array of document IDs or null if index cannot satisfy query
+   */
+  query(query5) {
+    throw new Error("query() must be implemented by subclass");
+  }
+  /**
+   * Clear all data from the index
+   */
+  clear() {
+    throw new Error("clear() must be implemented by subclass");
+  }
+  /**
+   * Get index specification (for getIndexes())
+   */
+  getSpec() {
+    return {
+      name: this.name,
+      key: this.keys
+    };
+  }
+}
+class RegularCollectionIndex extends CollectionIndex {
+  constructor(keys2, options = {}) {
+    super(keys2, options);
+    this.data = {};
+  }
+  /**
+   * Extract index key value from a document
+   */
+  extractIndexKey(doc) {
+    const keyFields = Object.keys(this.keys);
+    if (keyFields.length === 0) return null;
+    if (keyFields.length === 1) {
+      const field = keyFields[0];
+      const value = getProp(doc, field);
+      if (value === void 0) return null;
+      return JSON.stringify({ t: typeof value, v: value });
+    }
+    const keyParts = [];
+    for (let i = 0; i < keyFields.length; i++) {
+      const value = getProp(doc, keyFields[i]);
+      if (value === void 0) return null;
+      keyParts.push(JSON.stringify(value));
+    }
+    return keyParts.join("\0");
+  }
+  /**
+   * Add a document to the index
+   * @param {Object} doc - The document to index
+   */
+  add(doc) {
+    const indexKey = this.extractIndexKey(doc);
+    if (indexKey !== null) {
+      if (!this.data[indexKey]) {
+        this.data[indexKey] = [];
+      }
+      this.data[indexKey].push(doc._id);
+    }
+  }
+  /**
+   * Remove a document from the index
+   * @param {Object} doc - The document to remove
+   */
+  remove(doc) {
+    const indexKey = this.extractIndexKey(doc);
+    if (indexKey !== null && this.data[indexKey]) {
+      const arr = this.data[indexKey];
+      const idx = arr.indexOf(doc._id);
+      if (idx !== -1) {
+        arr.splice(idx, 1);
+      }
+      if (arr.length === 0) {
+        delete this.data[indexKey];
+      }
+    }
+  }
+  /**
+   * Query the index
+   * @param {*} query - The query object
+   * @returns {Array|null} Array of document IDs or null if index cannot satisfy query
+   */
+  query(query5) {
+    const queryKeys = Object.keys(query5);
+    const indexFields = Object.keys(this.keys);
+    if (indexFields.length === 1) {
+      const field = indexFields[0];
+      if (queryKeys.indexOf(field) !== -1) {
+        const queryValue = query5[field];
+        if (typeof queryValue !== "object" || queryValue === null) {
+          const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
+          return this.data[indexKey] || [];
+        }
+      }
+    }
+    return null;
+  }
+  /**
+   * Clear all data from the index
+   */
+  clear() {
+    this.data = {};
+  }
+}
+class TextCollectionIndex extends CollectionIndex {
+  constructor(keys2, options = {}) {
+    super(keys2, options);
+    this.textIndex = new TextIndex(options);
+    this.indexedFields = [];
+    for (const field in keys2) {
+      if (keys2[field] === "text") {
+        this.indexedFields.push(field);
+      }
+    }
+    if (this.indexedFields.length === 0) {
+      throw new Error('Text index must have at least one field with type "text"');
+    }
+  }
+  /**
+   * Extract text content from a document for the indexed fields
+   * @param {Object} doc - The document
+   * @returns {string} Combined text from all indexed fields
+   */
+  _extractText(doc) {
+    const textParts = [];
+    for (const field of this.indexedFields) {
+      const value = getProp(doc, field);
+      if (value !== void 0 && value !== null) {
+        textParts.push(String(value));
+      }
+    }
+    return textParts.join(" ");
+  }
+  /**
+   * Add a document to the text index
+   * @param {Object} doc - The document to index
+   */
+  add(doc) {
+    if (!doc._id) {
+      throw new Error("Document must have an _id field");
+    }
+    const text2 = this._extractText(doc);
+    if (text2) {
+      this.textIndex.add(String(doc._id), text2);
+    }
+  }
+  /**
+   * Remove a document from the text index
+   * @param {Object} doc - The document to remove
+   */
+  remove(doc) {
+    if (!doc._id) {
+      return;
+    }
+    this.textIndex.remove(String(doc._id));
+  }
+  /**
+   * Query the text index
+   * @param {*} query - The query object
+   * @returns {Array|null} Array of document IDs or null if query is not a text search
+   */
+  query(query5) {
+    return null;
+  }
+  /**
+   * Search the text index
+   * @param {string} searchText - The text to search for
+   * @param {Object} options - Search options
+   * @returns {Array} Array of document IDs
+   */
+  search(searchText, options = {}) {
+    const results = this.textIndex.query(searchText, { scored: false, ...options });
+    return results;
+  }
+  /**
+   * Clear all data from the index
+   */
+  clear() {
+    this.textIndex.clear();
+  }
+  /**
+   * Get index specification
+   */
+  getSpec() {
+    return {
+      name: this.name,
+      key: this.keys,
+      textIndexVersion: 3,
+      weights: this._getWeights()
+    };
+  }
+  /**
+   * Get field weights (all default to 1 for now)
+   */
+  _getWeights() {
+    const weights = {};
+    for (const field of this.indexedFields) {
+      weights[field] = 1;
+    }
+    return weights;
+  }
+}
 class Collection2 {
   constructor(db, storage, idGenerator) {
     this.db = db;
@@ -27066,48 +27101,34 @@ class Collection2 {
     return parts.join("_");
   }
   /**
+   * Determine if keys specify a text index
+   */
+  isTextIndex(keys2) {
+    for (const field in keys2) {
+      if (keys2[field] === "text") {
+        return true;
+      }
+    }
+    return false;
+  }
+  /**
    * Build/rebuild an index
    */
-  buildIndex(indexName, keys2) {
-    const index2 = {
-      keys: keys2,
-      data: {}
-      // Map of key value to array of document _ids
-    };
+  buildIndex(indexName, keys2, options = {}) {
+    let index2;
+    if (this.isTextIndex(keys2)) {
+      index2 = new TextCollectionIndex(keys2, { ...options, name: indexName });
+    } else {
+      index2 = new RegularCollectionIndex(keys2, { ...options, name: indexName });
+    }
     for (let i = 0; i < this.storage.size(); i++) {
       const doc = this.storage.get(i);
       if (doc) {
-        const indexKey = this.extractIndexKey(doc, keys2);
-        if (indexKey !== null) {
-          if (!index2.data[indexKey]) {
-            index2.data[indexKey] = [];
-          }
-          index2.data[indexKey].push(doc._id);
-        }
+        index2.add(doc);
       }
     }
     this.indexes[indexName] = index2;
     return index2;
-  }
-  /**
-   * Extract index key value from a document
-   */
-  extractIndexKey(doc, keys2) {
-    const keyFields = Object.keys(keys2);
-    if (keyFields.length === 0) return null;
-    if (keyFields.length === 1) {
-      const field = keyFields[0];
-      const value = getProp(doc, field);
-      if (value === void 0) return null;
-      return JSON.stringify({ t: typeof value, v: value });
-    }
-    const keyParts = [];
-    for (let i = 0; i < keyFields.length; i++) {
-      const value = getProp(doc, keyFields[i]);
-      if (value === void 0) return null;
-      keyParts.push(JSON.stringify(value));
-    }
-    return keyParts.join("\0");
   }
   /**
    * Update indexes when a document is inserted
@@ -27116,13 +27137,7 @@ class Collection2 {
     for (const indexName in this.indexes) {
       if (this.indexes.hasOwnProperty(indexName)) {
         const index2 = this.indexes[indexName];
-        const indexKey = this.extractIndexKey(doc, index2.keys);
-        if (indexKey !== null) {
-          if (!index2.data[indexKey]) {
-            index2.data[indexKey] = [];
-          }
-          index2.data[indexKey].push(doc._id);
-        }
+        index2.add(doc);
       }
     }
   }
@@ -27133,17 +27148,7 @@ class Collection2 {
     for (const indexName in this.indexes) {
       if (this.indexes.hasOwnProperty(indexName)) {
         const index2 = this.indexes[indexName];
-        const indexKey = this.extractIndexKey(doc, index2.keys);
-        if (indexKey !== null && index2.data[indexKey]) {
-          const arr = index2.data[indexKey];
-          const idx = arr.indexOf(doc._id);
-          if (idx !== -1) {
-            arr.splice(idx, 1);
-          }
-          if (arr.length === 0) {
-            delete index2.data[indexKey];
-          }
-        }
+        index2.remove(doc);
       }
     }
   }
@@ -27155,19 +27160,42 @@ class Collection2 {
     for (const indexName in this.indexes) {
       if (this.indexes.hasOwnProperty(indexName)) {
         const index2 = this.indexes[indexName];
+        if (index2 instanceof TextCollectionIndex) {
+          continue;
+        }
         const indexFields = Object.keys(index2.keys);
         if (indexFields.length === 1) {
           const field = indexFields[0];
           if (queryKeys.indexOf(field) !== -1) {
             const queryValue = query5[field];
             if (typeof queryValue !== "object" || queryValue === null) {
-              const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
-              return {
-                useIndex: true,
-                indexName,
-                indexKey
-              };
+              const docIds = index2.query(query5);
+              if (docIds !== null) {
+                return {
+                  useIndex: true,
+                  indexName,
+                  docIds
+                };
+              }
             }
+          }
+        }
+      }
+    }
+    return null;
+  }
+  /**
+   * Get a text index for the given field
+   * @param {string} field - The field name
+   * @returns {TextCollectionIndex|null} The text index or null if not found
+   */
+  getTextIndex(field) {
+    for (const indexName in this.indexes) {
+      if (this.indexes.hasOwnProperty(indexName)) {
+        const index2 = this.indexes[indexName];
+        if (index2 instanceof TextCollectionIndex) {
+          if (index2.indexedFields.includes(field)) {
+            return index2;
           }
         }
       }
@@ -27380,10 +27408,10 @@ class Collection2 {
   bulkWrite() {
     throw "Not Implemented";
   }
-  count() {
+  async count() {
     return this.storage.size();
   }
-  copyTo(destCollectionName) {
+  async copyTo(destCollectionName) {
     if (!this.db[destCollectionName]) {
       this.db.createCollection(destCollectionName);
     }
@@ -27391,12 +27419,12 @@ class Collection2 {
     let numCopied = 0;
     const c = this.find({});
     while (c.hasNext()) {
-      destCol.insertOne(c.next());
+      await destCol.insertOne(c.next());
       numCopied++;
     }
     return numCopied;
   }
-  createIndex(keys2, options) {
+  async createIndex(keys2, options) {
     if (!keys2 || typeof keys2 !== "object" || Array.isArray(keys2)) {
       throw { $err: "createIndex requires a key specification object", code: 2 };
     }
@@ -27410,14 +27438,14 @@ class Collection2 {
       }
       return indexName;
     }
-    this.buildIndex(indexName, keys2);
+    this.buildIndex(indexName, keys2, options);
     return indexName;
   }
   dataSize() {
     throw "Not Implemented";
   }
-  deleteOne(query5) {
-    const doc = this.findOne(query5);
+  async deleteOne(query5) {
+    const doc = await this.findOne(query5);
     if (doc) {
       this.updateIndexesOnDelete(doc);
       this.storage.remove(doc._id);
@@ -27426,7 +27454,7 @@ class Collection2 {
       return { deletedCount: 0 };
     }
   }
-  deleteMany(query5) {
+  async deleteMany(query5) {
     const c = this.find(query5);
     const ids = [];
     const docs = [];
@@ -27442,7 +27470,7 @@ class Collection2 {
     }
     return { deletedCount };
   }
-  distinct(field, query5) {
+  async distinct(field, query5) {
     const vals = {};
     const c = this.find(query5);
     while (c.hasNext()) {
@@ -27455,12 +27483,29 @@ class Collection2 {
   }
   drop() {
     this.storage.clear();
+    for (const indexName in this.indexes) {
+      if (this.indexes.hasOwnProperty(indexName)) {
+        this.indexes[indexName].clear();
+      }
+    }
   }
-  dropIndex() {
-    throw "Not Implemented";
+  dropIndex(indexName) {
+    if (!this.indexes[indexName]) {
+      throw { $err: "Index not found with name: " + indexName, code: 27 };
+    }
+    this.indexes[indexName].clear();
+    delete this.indexes[indexName];
+    return { nIndexesWas: Object.keys(this.indexes).length + 1, ok: 1 };
   }
   dropIndexes() {
-    throw "Not Implemented";
+    const count2 = Object.keys(this.indexes).length;
+    for (const indexName in this.indexes) {
+      if (this.indexes.hasOwnProperty(indexName)) {
+        this.indexes[indexName].clear();
+      }
+    }
+    this.indexes = {};
+    return { nIndexesWas: count2, msg: "non-_id indexes dropped", ok: 1 };
   }
   ensureIndex() {
     throw "Not Implemented";
@@ -27483,7 +27528,7 @@ class Collection2 {
   findAndModify() {
     throw "Not Implemented";
   }
-  findOne(query5, projection) {
+  async findOne(query5, projection) {
     const cursor = this.find(query5, projection);
     if (cursor.hasNext()) {
       return cursor.next();
@@ -27491,7 +27536,7 @@ class Collection2 {
       return null;
     }
   }
-  findOneAndDelete(filter17, options) {
+  async findOneAndDelete(filter17, options) {
     let c = this.find(filter17);
     if (options && options.sort) c = c.sort(options.sort);
     if (!c.hasNext()) return null;
@@ -27500,7 +27545,7 @@ class Collection2 {
     if (options && options.projection) return applyProjection(options.projection, doc);
     else return doc;
   }
-  findOneAndReplace(filter17, replacement, options) {
+  async findOneAndReplace(filter17, replacement, options) {
     let c = this.find(filter17);
     if (options && options.sort) c = c.sort(options.sort);
     if (!c.hasNext()) return null;
@@ -27515,7 +27560,7 @@ class Collection2 {
       else return doc;
     }
   }
-  findOneAndUpdate(filter17, update, options) {
+  async findOneAndUpdate(filter17, update, options) {
     let c = this.find(filter17);
     if (options && options.sort) c = c.sort(options.sort);
     if (!c.hasNext()) return null;
@@ -27535,10 +27580,7 @@ class Collection2 {
     const result = [];
     for (const indexName in this.indexes) {
       if (this.indexes.hasOwnProperty(indexName)) {
-        result.push({
-          name: indexName,
-          key: this.indexes[indexName].keys
-        });
+        result.push(this.indexes[indexName].getSpec());
       }
     }
     return result;
@@ -27556,22 +27598,26 @@ class Collection2 {
   group() {
     throw "Not Implemented";
   }
-  insert(doc) {
+  async insert(doc) {
     if (Array == doc.constructor) {
-      this.insertMany(doc);
+      return await this.insertMany(doc);
     } else {
-      this.insertOne(doc);
+      return await this.insertOne(doc);
     }
   }
-  insertOne(doc) {
+  async insertOne(doc) {
     if (doc._id == void 0) doc._id = this.idGenerator();
     this.storage.set(doc._id, doc);
     this.updateIndexesOnInsert(doc);
+    return { insertedId: doc._id };
   }
-  insertMany(docs) {
+  async insertMany(docs) {
+    const insertedIds = [];
     for (let i = 0; i < docs.length; i++) {
-      this.insertOne(docs[i]);
+      const result = await this.insertOne(docs[i]);
+      insertedIds.push(result.insertedId);
     }
+    return { insertedIds };
   }
   isCapped() {
     throw "Not Implemented";
@@ -27582,7 +27628,7 @@ class Collection2 {
   reIndex() {
     throw "Not Implemented";
   }
-  replaceOne(query5, replacement, options) {
+  async replaceOne(query5, replacement, options) {
     const result = {};
     const c = this.find(query5);
     result.matchedCount = c.count();
@@ -27663,7 +27709,7 @@ class Collection2 {
       }
     }
   }
-  updateOne(query5, updates, options) {
+  async updateOne(query5, updates, options) {
     const c = this.find(query5);
     if (c.hasNext()) {
       const doc = c.next();
@@ -27679,7 +27725,7 @@ class Collection2 {
       }
     }
   }
-  updateMany(query5, updates, options) {
+  async updateMany(query5, updates, options) {
     const c = this.find(query5);
     if (c.hasNext()) {
       while (c.hasNext()) {
