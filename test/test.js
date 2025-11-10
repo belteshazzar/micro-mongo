@@ -516,7 +516,7 @@ describe("DB", function() {
 		})
 
 		it('should find text in and', async function() {
-			var docs = testFind({ $and: [ { text: { $text: "pari"} },{ text: { $text: "lond" }} ]})
+			var docs = testFind({ $and: [ { text: { $text: "paris"} },{ text: { $text: "london" }} ]})
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
 			expect(docs.length).to.equal(1)

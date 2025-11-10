@@ -1,5 +1,5 @@
 import { getProp, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
-import {Txi} from 'txi';
+import { TextIndex } from './text-index.js';
 import * as de9im from 'de9im';
 import { ObjectId } from './ObjectId.js';
 
@@ -51,11 +51,13 @@ function compareValues(a, b, operator) {
 
 /**
  * Text search helper
+ * Creates a temporary TextIndex to check if the text matches the query
  */
 export function text(prop, query) {
-	const txi = new Txi().index('id', prop);
-	const search = txi.search(query);
-	return search.length == 1;
+	const textIndex = new TextIndex();
+	textIndex.add('id', prop);
+	const results = textIndex.query(query, { scored: false });
+	return results.length === 1;
 }
 
 /**
