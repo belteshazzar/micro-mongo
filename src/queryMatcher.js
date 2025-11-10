@@ -1,6 +1,5 @@
 import { getProp, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
 import { TextIndex } from './text-index.js';
-import * as de9im from 'de9im';
 import { ObjectId } from './ObjectId.js';
 
 /**
@@ -61,14 +60,126 @@ export function text(prop, query) {
 }
 
 /**
- * Geo within helper
+ * Geo within helper - using bounding box logic instead of de9im
+ * This is a simpler implementation that doesn't require de9im dependency
  */
 export function geoWithin(prop, query) {
 	try {
-		return de9im.default.within(prop, bboxToGeojson(query), false);
+		// bbox format: [[minLon, maxLat], [maxLon, minLat]]
+		if (!Array.isArray(query) || query.length !== 2) {
+			return false;
+		}
+
+		const minLon = query[0][0];
+		const maxLat = query[0][1];
+		const maxLon = query[1][0];
+		const minLat = query[1][1];
+
+		// Check if geometry is within bounding box
+		return isGeometryWithinBBox(prop, minLon, maxLon, minLat, maxLat);
 	} catch (e) {
 		return false;
 	}
+}
+
+/**
+ * Check if a GeoJSON geometry is within a bounding box
+ * For Points: checks if the point is within the bbox
+ * For Polygons: checks if ALL vertices are within the bbox
+ */
+function isGeometryWithinBBox(geoJson, minLon, maxLon, minLat, maxLat) {
+	if (!geoJson) return false;
+
+	// Handle GeoJSON FeatureCollection
+	if (geoJson.type === 'FeatureCollection' && geoJson.features && geoJson.features.length > 0) {
+		// All features must be within the bbox
+		for (const feature of geoJson.features) {
+			if (feature.geometry) {
+				if (!isGeometryWithinBBox(feature.geometry, minLon, maxLon, minLat, maxLat)) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	// Handle GeoJSON Feature
+	if (geoJson.type === 'Feature' && geoJson.geometry) {
+		return isGeometryWithinBBox(geoJson.geometry, minLon, maxLon, minLat, maxLat);
+	}
+
+	// Handle GeoJSON Point
+	if (geoJson.type === 'Point' && geoJson.coordinates) {
+		const [lng, lat] = geoJson.coordinates;
+		if (typeof lng === 'number' && typeof lat === 'number') {
+			return lng >= minLon && lng <= maxLon && lat >= minLat && lat <= maxLat;
+		}
+	}
+
+	// Handle GeoJSON Polygon - ALL vertices must be within the bbox
+	if (geoJson.type === 'Polygon' && geoJson.coordinates && geoJson.coordinates.length > 0) {
+		for (const ring of geoJson.coordinates) {
+			for (const coord of ring) {
+				const lng = coord[0];
+				const lat = coord[1];
+				if (lng < minLon || lng > maxLon || lat < minLat || lat > maxLat) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * Extract coordinates from a GeoJSON object for indexing purposes
+ * This uses centroid for polygons to get a single point to index
+ * @param {Object} geoJson - The GeoJSON object
+ * @returns {Object|null} Object with lat and lng, or null if invalid
+ */
+function extractCoordinatesFromGeoJSON(geoJson) {
+	if (!geoJson) return null;
+
+	// Handle GeoJSON FeatureCollection
+	if (geoJson.type === 'FeatureCollection' && geoJson.features && geoJson.features.length > 0) {
+		const feature = geoJson.features[0];
+		if (feature.geometry) {
+			return extractCoordinatesFromGeoJSON(feature.geometry);
+		}
+	}
+
+	// Handle GeoJSON Feature
+	if (geoJson.type === 'Feature' && geoJson.geometry) {
+		return extractCoordinatesFromGeoJSON(geoJson.geometry);
+	}
+
+	// Handle GeoJSON Point
+	if (geoJson.type === 'Point' && geoJson.coordinates) {
+		const [lng, lat] = geoJson.coordinates;
+		if (typeof lng === 'number' && typeof lat === 'number') {
+			return { lat, lng };
+		}
+	}
+
+	// Handle GeoJSON Polygon - use centroid of first coordinate ring
+	if (geoJson.type === 'Polygon' && geoJson.coordinates && geoJson.coordinates.length > 0) {
+		const ring = geoJson.coordinates[0];
+		if (ring.length > 0) {
+			let sumLat = 0, sumLng = 0;
+			for (const coord of ring) {
+				sumLng += coord[0];
+				sumLat += coord[1];
+			}
+			return {
+				lat: sumLat / ring.length,
+				lng: sumLng / ring.length
+			};
+		}
+	}
+
+	return null;
 }
 
 /**
