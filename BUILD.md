@@ -95,8 +95,7 @@ Current build sizes (version 1.1.3):
 
 Build dependencies are bundled into the output files:
 - `de9im` - Geospatial operations
-- `txi` - Text indexing
-- `stemmer` - Text stemming
+- `stemmer` - Text stemming for text indexing
 
 ## Customizing the Build
 

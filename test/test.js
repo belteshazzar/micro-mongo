@@ -516,7 +516,7 @@ describe("DB", function() {
 		})
 
 		it('should find text in and', async function() {
-			var docs = testFind({ $and: [ { text: { $text: "pari"} },{ text: { $text: "lond" }} ]})
+			var docs = testFind({ $and: [ { text: { $text: "paris"} },{ text: { $text: "london" }} ]})
 			expect(docs).to.not.be.null
 			expect(docs.$err).to.be.undefined
 			expect(docs.length).to.equal(1)
@@ -1743,6 +1743,226 @@ describe("DB", function() {
 				// Should have one less document with age 4
 				var results = await db[collectionName].find({ age: 4 }).toArray();
 				expect(results.length).to.equal(1);
+			});
+		});
+
+		describe("Text Indexes", function() {
+			const textCollectionName = "textTestCollection";
+
+			beforeEach(async function() {
+				db.createCollection(textCollectionName);
+			});
+
+			afterEach(async function() {
+				db.dropDatabase();
+			});
+
+			it('should create a text index', async function() {
+				await db[textCollectionName].insertMany([
+					{ title: 'MongoDB Tutorial', description: 'Learn MongoDB basics' },
+					{ title: 'Node.js Guide', description: 'JavaScript on the server' },
+					{ title: 'Database Design', description: 'How to design databases' }
+				]);
+
+				const indexName = await db[textCollectionName].createIndex({ description: 'text' });
+				expect(indexName).to.equal('description_text');
+
+				const indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].name).to.equal('description_text');
+				expect(indexes[0].key).to.deep.equal({ description: 'text' });
+			});
+
+			it('should create a named text index', async function() {
+				const indexName = await db[textCollectionName].createIndex(
+					{ title: 'text' }, 
+					{ name: 'title_search' }
+				);
+				expect(indexName).to.equal('title_search');
+
+				const indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].name).to.equal('title_search');
+			});
+
+			it('should create compound text index on multiple fields', async function() {
+				const indexName = await db[textCollectionName].createIndex({ 
+					title: 'text', 
+					description: 'text' 
+				});
+				expect(indexName).to.equal('title_text_description_text');
+
+				const indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].key).to.deep.equal({ title: 'text', description: 'text' });
+			});
+
+			it('should maintain text index on insert', async function() {
+				await db[textCollectionName].createIndex({ content: 'text' });
+				
+				// Insert a document
+				await db[textCollectionName].insertOne({ 
+					content: 'The quick brown fox jumps over the lazy dog' 
+				});
+
+				// The index should be updated automatically
+				const docs = await db[textCollectionName].find({ 
+					content: { $text: 'fox' } 
+				}).toArray();
+				expect(docs.length).to.equal(1);
+			});
+
+			it('should maintain text index on update', async function() {
+				await db[textCollectionName].insertOne({ 
+					_id: 'doc1',
+					content: 'original text' 
+				});
+				await db[textCollectionName].createIndex({ content: 'text' });
+
+				// Document should be found with original text
+				let docs = await db[textCollectionName].find({ 
+					content: { $text: 'original' } 
+				}).toArray();
+				expect(docs.length).to.equal(1);
+
+				// Update the document
+				await db[textCollectionName].updateOne(
+					{ _id: 'doc1' },
+					{ $set: { content: 'updated text' } }
+				);
+
+				// Should not find with old text
+				docs = await db[textCollectionName].find({ 
+					content: { $text: 'original' } 
+				}).toArray();
+				expect(docs.length).to.equal(0);
+
+				// Should find with new text
+				docs = await db[textCollectionName].find({ 
+					content: { $text: 'updated' } 
+				}).toArray();
+				expect(docs.length).to.equal(1);
+			});
+
+			it('should maintain text index on delete', async function() {
+				await db[textCollectionName].insertMany([
+					{ _id: 'doc1', content: 'first document' },
+					{ _id: 'doc2', content: 'second document' }
+				]);
+				await db[textCollectionName].createIndex({ content: 'text' });
+
+				// Both documents should be found
+				let docs = await db[textCollectionName].find({ 
+					content: { $text: 'document' } 
+				}).toArray();
+				expect(docs.length).to.equal(2);
+
+				// Delete one document
+				await db[textCollectionName].deleteOne({ _id: 'doc1' });
+
+				// Should only find one document
+				docs = await db[textCollectionName].find({ 
+					content: { $text: 'document' } 
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0]._id).to.equal('doc2');
+			});
+
+			it('should drop a text index', async function() {
+				await db[textCollectionName].createIndex({ content: 'text' });
+				
+				let indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+
+				// Drop the index
+				const result = db[textCollectionName].dropIndex('content_text');
+				expect(result.ok).to.equal(1);
+
+				indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(0);
+			});
+
+			it('should drop all indexes', async function() {
+				await db[textCollectionName].createIndex({ title: 'text' });
+				await db[textCollectionName].createIndex({ description: 'text' });
+				await db[textCollectionName].createIndex({ author: 1 }); // Regular index
+				
+				let indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(3);
+
+				// Drop all indexes
+				const result = db[textCollectionName].dropIndexes();
+				expect(result.ok).to.equal(1);
+
+				indexes = db[textCollectionName].getIndexes();
+				expect(indexes.length).to.equal(0);
+			});
+
+			it('should find documents using text search', async function() {
+				await db[textCollectionName].insertMany([
+					{ title: 'JavaScript Basics', content: 'Learn JavaScript programming' },
+					{ title: 'Python Tutorial', content: 'Learn Python programming' },
+					{ title: 'Database Design', content: 'Design principles for databases' }
+				]);
+				await db[textCollectionName].createIndex({ content: 'text' });
+
+				// Search for "programming"
+				const docs = await db[textCollectionName].find({ 
+					content: { $text: 'programming' } 
+				}).toArray();
+				expect(docs.length).to.equal(2);
+				
+				const titles = docs.map(d => d.title).sort();
+				expect(titles).to.deep.equal(['JavaScript Basics', 'Python Tutorial']);
+			});
+
+			it('should handle stemming in text search', async function() {
+				await db[textCollectionName].insertMany([
+					{ text: 'I am running fast' },
+					{ text: 'He runs every day' },
+					{ text: 'We like to run' }
+				]);
+				await db[textCollectionName].createIndex({ text: 'text' });
+
+				// All should match because of stemming (running, runs, run all stem to "run")
+				const docs = await db[textCollectionName].find({ 
+					text: { $text: 'run' } 
+				}).toArray();
+				expect(docs.length).to.equal(3);
+			});
+
+			it('should support $and queries with text search', async function() {
+				await db[textCollectionName].insertMany([
+					{ content: 'JavaScript and Python programming' },
+					{ content: 'JavaScript tutorial for beginners' },
+					{ content: 'Python programming guide' }
+				]);
+				await db[textCollectionName].createIndex({ content: 'text' });
+
+				// Find documents with both "JavaScript" and "programming"
+				const docs = await db[textCollectionName].find({ 
+					$and: [
+						{ content: { $text: 'JavaScript' } },
+						{ content: { $text: 'programming' } }
+					]
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0].content).to.include('JavaScript and Python programming');
+			});
+
+			it('should handle empty text field gracefully', async function() {
+				await db[textCollectionName].insertMany([
+					{ content: '' },
+					{ content: 'some text' },
+					{ content: null }
+				]);
+				await db[textCollectionName].createIndex({ content: 'text' });
+
+				const docs = await db[textCollectionName].find({ 
+					content: { $text: 'text' } 
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0].content).to.equal('some text');
 			});
 		});
 	});

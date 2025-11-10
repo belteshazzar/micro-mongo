@@ -42,12 +42,7 @@ export class Cursor {
 
 		// If using index, get the document IDs from the index
 		if (queryPlan && queryPlan.useIndex) {
-			const index = this.indexes[queryPlan.indexName];
-			if (index && index.data[queryPlan.indexKey]) {
-				this.indexDocIds = index.data[queryPlan.indexKey].slice(); // copy array
-			} else {
-				this.indexDocIds = [];
-			}
+			this.indexDocIds = queryPlan.docIds ? queryPlan.docIds.slice() : [];
 		}
 		
 		// Initialize by finding first document

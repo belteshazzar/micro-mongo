@@ -3,6 +3,8 @@ import { SortedCursor } from './SortedCursor.js';
 import { isArray, getProp, applyProjection, copy } from './utils.js';
 import { matches } from './queryMatcher.js';
 import { applyUpdates, createDocFromUpdate } from './updates.js';
+import { RegularCollectionIndex } from './RegularCollectionIndex.js';
+import { TextCollectionIndex } from './TextCollectionIndex.js';
 
 /**
  * Collection class
@@ -30,57 +32,40 @@ export class Collection {
 	}
 
 	/**
+	 * Determine if keys specify a text index
+	 */
+	isTextIndex(keys) {
+		for (const field in keys) {
+			if (keys[field] === 'text') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Build/rebuild an index
 	 */
-	buildIndex(indexName, keys) {
-		const index = {
-			keys: keys,
-			data: {} // Map of key value to array of document _ids
-		};
+	buildIndex(indexName, keys, options = {}) {
+		let index;
+		
+		// Create appropriate index type
+		if (this.isTextIndex(keys)) {
+			index = new TextCollectionIndex(keys, { ...options, name: indexName });
+		} else {
+			index = new RegularCollectionIndex(keys, { ...options, name: indexName });
+		}
 
 		// Build index by scanning all documents
 		for (let i = 0; i < this.storage.size(); i++) {
 			const doc = this.storage.get(i);
 			if (doc) {
-				const indexKey = this.extractIndexKey(doc, keys);
-				if (indexKey !== null) {
-					if (!index.data[indexKey]) {
-						index.data[indexKey] = [];
-					}
-					index.data[indexKey].push(doc._id);
-				}
+				index.add(doc);
 			}
 		}
 
 		this.indexes[indexName] = index;
 		return index;
-	}
-
-	/**
-	 * Extract index key value from a document
-	 */
-	extractIndexKey(doc, keys) {
-		const keyFields = Object.keys(keys);
-		if (keyFields.length === 0) return null;
-
-		// For simple single-field index
-		if (keyFields.length === 1) {
-			const field = keyFields[0];
-			const value = getProp(doc, field);
-			if (value === undefined) return null;
-			// Preserve type information in the key
-			return JSON.stringify({ t: typeof value, v: value });
-		}
-
-		// For compound index, concatenate values with type preservation
-		const keyParts = [];
-		for (let i = 0; i < keyFields.length; i++) {
-			const value = getProp(doc, keyFields[i]);
-			if (value === undefined) return null;
-			keyParts.push(JSON.stringify(value));
-		}
-		// Use a separator that won't appear in JSON
-		return keyParts.join('\x00');
 	}
 
 	/**
@@ -90,13 +75,7 @@ export class Collection {
 		for (const indexName in this.indexes) {
 			if (this.indexes.hasOwnProperty(indexName)) {
 				const index = this.indexes[indexName];
-				const indexKey = this.extractIndexKey(doc, index.keys);
-				if (indexKey !== null) {
-					if (!index.data[indexKey]) {
-						index.data[indexKey] = [];
-					}
-					index.data[indexKey].push(doc._id);
-				}
+				index.add(doc);
 			}
 		}
 	}
@@ -108,17 +87,7 @@ export class Collection {
 		for (const indexName in this.indexes) {
 			if (this.indexes.hasOwnProperty(indexName)) {
 				const index = this.indexes[indexName];
-				const indexKey = this.extractIndexKey(doc, index.keys);
-				if (indexKey !== null && index.data[indexKey]) {
-					const arr = index.data[indexKey];
-					const idx = arr.indexOf(doc._id);
-					if (idx !== -1) {
-						arr.splice(idx, 1);
-					}
-					if (arr.length === 0) {
-						delete index.data[indexKey];
-					}
-				}
+				index.remove(doc);
 			}
 		}
 	}
@@ -133,6 +102,12 @@ export class Collection {
 		for (const indexName in this.indexes) {
 			if (this.indexes.hasOwnProperty(indexName)) {
 				const index = this.indexes[indexName];
+				
+				// Skip text indexes - they are handled separately
+				if (index instanceof TextCollectionIndex) {
+					continue;
+				}
+				
 				const indexFields = Object.keys(index.keys);
 
 				// Check if query matches index (simple case: single field equality)
@@ -144,18 +119,40 @@ export class Collection {
 						const queryValue = query[field];
 						// Only use index for simple equality (not operators like $gt, $lt, etc.)
 						if (typeof queryValue !== 'object' || queryValue === null) {
-							const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
-							return {
-								useIndex: true,
-								indexName: indexName,
-								indexKey: indexKey
-							};
+							const docIds = index.query(query);
+							if (docIds !== null) {
+								return {
+									useIndex: true,
+									indexName: indexName,
+									docIds: docIds
+								};
+							}
 						}
 					}
 				}
 			}
 		}
 
+		return null;
+	}
+
+	/**
+	 * Get a text index for the given field
+	 * @param {string} field - The field name
+	 * @returns {TextCollectionIndex|null} The text index or null if not found
+	 */
+	getTextIndex(field) {
+		for (const indexName in this.indexes) {
+			if (this.indexes.hasOwnProperty(indexName)) {
+				const index = this.indexes[indexName];
+				if (index instanceof TextCollectionIndex) {
+					// Check if this field is indexed
+					if (index.indexedFields.includes(field)) {
+						return index;
+					}
+				}
+			}
+		}
 		return null;
 	}
 
@@ -420,7 +417,7 @@ export class Collection {
 
 	async createIndex(keys, options) {
 		// MongoDB-compliant createIndex
-		// keys: { fieldName: 1 } for ascending, { fieldName: -1 } for descending
+		// keys: { fieldName: 1 } for ascending, { fieldName: -1 } for descending, { fieldName: 'text' } for text
 		// options: { name: "indexName", unique: true, ... }
 
 		if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
@@ -443,7 +440,7 @@ export class Collection {
 		}
 
 		// Build the index
-		this.buildIndex(indexName, keys);
+		this.buildIndex(indexName, keys, options);
 
 		return indexName;
 	}
@@ -492,10 +489,33 @@ export class Collection {
 
 	drop() {
 		this.storage.clear();
+		// Clear all indexes
+		for (const indexName in this.indexes) {
+			if (this.indexes.hasOwnProperty(indexName)) {
+				this.indexes[indexName].clear();
+			}
+		}
 	}
 
-	dropIndex() { throw "Not Implemented"; }
-	dropIndexes() { throw "Not Implemented"; }
+	dropIndex(indexName) {
+		if (!this.indexes[indexName]) {
+			throw { $err: "Index not found with name: " + indexName, code: 27 };
+		}
+		this.indexes[indexName].clear();
+		delete this.indexes[indexName];
+		return { nIndexesWas: Object.keys(this.indexes).length + 1, ok: 1 };
+	}
+
+	dropIndexes() {
+		const count = Object.keys(this.indexes).length;
+		for (const indexName in this.indexes) {
+			if (this.indexes.hasOwnProperty(indexName)) {
+				this.indexes[indexName].clear();
+			}
+		}
+		this.indexes = {};
+		return { nIndexesWas: count, msg: "non-_id indexes dropped", ok: 1 };
+	}
 	ensureIndex() { throw "Not Implemented"; }
 	explain() { throw "Not Implemented"; }
 
@@ -571,10 +591,7 @@ export class Collection {
 		const result = [];
 		for (const indexName in this.indexes) {
 			if (this.indexes.hasOwnProperty(indexName)) {
-				result.push({
-					name: indexName,
-					key: this.indexes[indexName].keys
-				});
+				result.push(this.indexes[indexName].getSpec());
 			}
 		}
 		return result;
