@@ -14,17 +14,70 @@ There are two main use cases that Micro-Mongo targets:
 
   `npm install micro-mongo`
 
-### Usage
+### Usage with Async/Await (Recommended)
 
-    var mongo = require('micro-mongo');
-    var db = new mongo.DB()
-    db.createCollection("sample")
-    db.sample.insert({ age: 4,	legs: 0	});
-    db.sample.insert([{ age: 4,	legs: 5	},{ age: 54, legs: 2	}]);
-    db.sample.insertMany([{ age: 54, legs: 12 },{ age: 16					 }]);
-    db.sample.insertOne({ name: "steve"		 });
-    var cur = db.sample.find({ $and: [{ age : 54},{ legs: 2 }] })
-    cur.next()
+Micro-Mongo now supports async/await patterns compatible with the real MongoDB driver:
+
+```javascript
+import { MongoClient } from 'micro-mongo';
+
+async function main() {
+    // Connect to database (async)
+    const client = await MongoClient.connect('mongodb://localhost:27017');
+    const db = client.db('myapp');
+    
+    // Insert documents (async)
+    await db.sample.insertOne({ age: 4, legs: 0 });
+    await db.sample.insertMany([
+        { age: 4, legs: 5 },
+        { age: 54, legs: 2 }
+    ]);
+    
+    // Query documents (cursor iteration is still synchronous)
+    const cursor = db.sample.find({ age: { $gte: 4 } });
+    while (cursor.hasNext()) {
+        console.log(cursor.next());
+    }
+    
+    // Or use toArray() (async)
+    const results = await db.sample.find({ age: 54 }).toArray();
+    
+    // Or use async iteration
+    for await (const doc of db.sample.find({ legs: 2 })) {
+        console.log(doc);
+    }
+    
+    // Update (async)
+    await db.sample.updateOne({ age: 4 }, { $set: { legs: 4 } });
+    
+    // Delete (async)
+    await db.sample.deleteOne({ age: 54 });
+    
+    // Count (async)
+    const count = await db.sample.count();
+    
+    // Close connection
+    await client.close();
+}
+
+main().catch(console.error);
+```
+
+### Legacy Synchronous Usage (Still Supported)
+
+```javascript
+var mongo = require('micro-mongo');
+var db = new mongo.DB()
+db.createCollection("sample")
+db.sample.insert({ age: 4,	legs: 0	});
+db.sample.insert([{ age: 4,	legs: 5	},{ age: 54, legs: 2	}]);
+db.sample.insertMany([{ age: 54, legs: 12 },{ age: 16					 }]);
+db.sample.insertOne({ name: "steve"		 });
+var cur = db.sample.find({ $and: [{ age : 54},{ legs: 2 }] })
+cur.next()
+```
+
+**Note:** While synchronous usage still works for backwards compatibility, the async/await pattern is recommended for new code as it matches the real MongoDB driver API.
 
 ### Using Indexes
 
