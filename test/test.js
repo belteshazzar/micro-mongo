@@ -1965,5 +1965,220 @@ describe("DB", function() {
 				expect(docs[0].content).to.equal('some text');
 			});
 		});
+
+		describe("Geospatial Indexes", function() {
+			const geoCollectionName = "geoTestCollection";
+
+			beforeEach(async function() {
+				db.createCollection(geoCollectionName);
+			});
+
+			afterEach(async function() {
+				db.dropDatabase();
+			});
+
+			it('should create a 2dsphere index', async function() {
+				const indexName = await db[geoCollectionName].createIndex({ location: '2dsphere' });
+				expect(indexName).to.equal('location_2dsphere');
+
+				const indexes = db[geoCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].name).to.equal('location_2dsphere');
+				expect(indexes[0].key).to.deep.equal({ location: '2dsphere' });
+			});
+
+			it('should create a named geospatial index', async function() {
+				const indexName = await db[geoCollectionName].createIndex(
+					{ position: '2dsphere' }, 
+					{ name: 'geo_index' }
+				);
+				expect(indexName).to.equal('geo_index');
+
+				const indexes = db[geoCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+				expect(indexes[0].name).to.equal('geo_index');
+			});
+
+			it('should maintain geospatial index on insert', async function() {
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+				
+				// Insert documents with GeoJSON points
+				await db[geoCollectionName].insertMany([
+					{ 
+						name: 'Location A',
+						location: { type: 'Point', coordinates: [10, 20] }
+					},
+					{ 
+						name: 'Location B',
+						location: { type: 'Point', coordinates: [30, 40] }
+					}
+				]);
+
+				// Query with $geoWithin
+				const docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[5, 25], [35, 15]] }
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('Location A');
+			});
+
+			it('should use geospatial index for $geoWithin queries', async function() {
+				// Insert test documents
+				await db[geoCollectionName].insertMany([
+					{ name: 'NYC', location: { type: 'Point', coordinates: [-74.0060, 40.7128] } },
+					{ name: 'SF', location: { type: 'Point', coordinates: [-122.4194, 37.7749] } },
+					{ name: 'LA', location: { type: 'Point', coordinates: [-118.2437, 34.0522] } }
+				]);
+
+				// Create geospatial index
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+
+				// Query for locations on the east coast (roughly)
+				const eastCoastBBox = [[-80, 45], [-70, 35]]; // [topLeft, bottomRight]
+				const docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: eastCoastBBox }
+				}).toArray();
+
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('NYC');
+			});
+
+			it('should maintain geospatial index on update', async function() {
+				await db[geoCollectionName].insertOne({ 
+					_id: 'loc1',
+					location: { type: 'Point', coordinates: [10, 20] }
+				});
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+
+				// Should find with original location
+				let docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[5, 25], [15, 15]] }
+				}).toArray();
+				expect(docs.length).to.equal(1);
+
+				// Update the location
+				await db[geoCollectionName].updateOne(
+					{ _id: 'loc1' },
+					{ $set: { location: { type: 'Point', coordinates: [100, 200] } } }
+				);
+
+				// Should not find with old location
+				docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[5, 25], [15, 15]] }
+				}).toArray();
+				expect(docs.length).to.equal(0);
+
+				// Should find with new location
+				docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[95, 205], [105, 195]] }
+				}).toArray();
+				expect(docs.length).to.equal(1);
+			});
+
+			it('should maintain geospatial index on delete', async function() {
+				await db[geoCollectionName].insertMany([
+					{ _id: 'loc1', location: { type: 'Point', coordinates: [10, 20] } },
+					{ _id: 'loc2', location: { type: 'Point', coordinates: [11, 21] } }
+				]);
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+
+				// Both should be found
+				let docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[5, 25], [15, 15]] }
+				}).toArray();
+				expect(docs.length).to.equal(2);
+
+				// Delete one location
+				await db[geoCollectionName].deleteOne({ _id: 'loc1' });
+
+				// Should only find one
+				docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[5, 25], [15, 15]] }
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0]._id).to.equal('loc2');
+			});
+
+			it('should drop a geospatial index', async function() {
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+				
+				let indexes = db[geoCollectionName].getIndexes();
+				expect(indexes.length).to.equal(1);
+
+				// Drop the index
+				const result = db[geoCollectionName].dropIndex('location_2dsphere');
+				expect(result.ok).to.equal(1);
+
+				indexes = db[geoCollectionName].getIndexes();
+				expect(indexes.length).to.equal(0);
+			});
+
+			it('should handle GeoJSON FeatureCollection', async function() {
+				await db[geoCollectionName].insertOne({
+					name: 'Test Feature',
+					location: {
+						type: 'FeatureCollection',
+						features: [{
+							type: 'Feature',
+							geometry: { type: 'Point', coordinates: [10, 20] }
+						}]
+					}
+				});
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+
+				const docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[5, 25], [15, 15]] }
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('Test Feature');
+			});
+
+			it('should handle GeoJSON Polygon', async function() {
+				await db[geoCollectionName].insertOne({
+					name: 'Polygon Area',
+					location: {
+						type: 'Polygon',
+						coordinates: [[
+							[10, 20],
+							[11, 20],
+							[11, 21],
+							[10, 21],
+							[10, 20]
+						]]
+					}
+				});
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+
+				// Polygon should be found when all vertices are within bbox
+				const docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[9, 22], [12, 19]] }
+				}).toArray();
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('Polygon Area');
+			});
+
+			it('should not find polygon partially outside bbox', async function() {
+				await db[geoCollectionName].insertOne({
+					name: 'Partial Polygon',
+					location: {
+						type: 'Polygon',
+						coordinates: [[
+							[10, 20],
+							[15, 20],  // This extends outside
+							[15, 25],
+							[10, 25],
+							[10, 20]
+						]]
+					}
+				});
+				await db[geoCollectionName].createIndex({ location: '2dsphere' });
+
+				// Polygon should NOT be found when vertices extend outside bbox
+				const docs = await db[geoCollectionName].find({ 
+					location: { $geoWithin: [[9, 26], [12, 19]] }  // Max lng is 12, but polygon goes to 15
+				}).toArray();
+				expect(docs.length).to.equal(0);
+			});
+		});
 	});
 });

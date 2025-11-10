@@ -5,6 +5,7 @@ import { matches } from './queryMatcher.js';
 import { applyUpdates, createDocFromUpdate } from './updates.js';
 import { RegularCollectionIndex } from './RegularCollectionIndex.js';
 import { TextCollectionIndex } from './TextCollectionIndex.js';
+import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
 
 /**
  * Collection class
@@ -44,6 +45,18 @@ export class Collection {
 	}
 
 	/**
+	 * Determine if keys specify a geospatial index
+	 */
+	isGeospatialIndex(keys) {
+		for (const field in keys) {
+			if (keys[field] === '2dsphere' || keys[field] === '2d') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Build/rebuild an index
 	 */
 	buildIndex(indexName, keys, options = {}) {
@@ -52,6 +65,8 @@ export class Collection {
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
 			index = new TextCollectionIndex(keys, { ...options, name: indexName });
+		} else if (this.isGeospatialIndex(keys)) {
+			index = new GeospatialCollectionIndex(keys, { ...options, name: indexName });
 		} else {
 			index = new RegularCollectionIndex(keys, { ...options, name: indexName });
 		}
@@ -105,6 +120,19 @@ export class Collection {
 				
 				// Skip text indexes - they are handled separately
 				if (index instanceof TextCollectionIndex) {
+					continue;
+				}
+
+				// Try geospatial indexes
+				if (index instanceof GeospatialCollectionIndex) {
+					const docIds = index.query(query);
+					if (docIds !== null) {
+						return {
+							useIndex: true,
+							indexName: indexName,
+							docIds: docIds
+						};
+					}
 					continue;
 				}
 				
