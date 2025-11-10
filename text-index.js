@@ -1,5 +1,20 @@
 import { stemmer } from 'stemmer';
 
+// Common English stop words that don't add semantic value to searches
+const STOPWORDS = new Set([
+  'a', 'about', 'after', 'all', 'also', 'am', 'an', 'and', 'another', 'any', 'are', 
+  'around', 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'between', 'both', 
+  'but', 'by', 'came', 'can', 'come', 'could', 'did', 'do', 'each', 'for', 'from', 
+  'get', 'got', 'has', 'had', 'he', 'have', 'her', 'here', 'him', 'himself', 'his', 
+  'how', 'i', 'if', 'in', 'into', 'is', 'it', 'like', 'make', 'many', 'me', 'might', 
+  'more', 'most', 'much', 'must', 'my', 'never', 'now', 'of', 'on', 'only', 'or', 
+  'other', 'our', 'out', 'over', 'said', 'same', 'see', 'should', 'since', 'some', 
+  'still', 'such', 'take', 'than', 'that', 'the', 'their', 'them', 'then', 'there', 
+  'these', 'they', 'this', 'those', 'through', 'to', 'too', 'under', 'up', 'very', 
+  'was', 'way', 'we', 'well', 'were', 'what', 'where', 'which', 'while', 'who', 
+  'with', 'would', 'you', 'your'
+]);
+
 /**
  * TextIndex - A text index implementation using Porter stemmer algorithm
  * 
@@ -8,7 +23,7 @@ import { stemmer } from 'stemmer';
  * algorithm to normalize words to their root forms.
  */
 export class TextIndex {
-  constructor() {
+  constructor(options = {}) {
     // Map from stemmed term to Map of document IDs to term frequency
     // Structure: term -> { docId: frequency }
     this.index = new Map();
@@ -17,6 +32,10 @@ export class TextIndex {
     this.documentTerms = new Map();
     // Map from document ID to total term count (for normalization)
     this.documentLengths = new Map();
+    // Stop words configuration
+    this.useStopWords = options.useStopWords !== false; // default: true
+    // Create a copy of STOPWORDS to avoid mutating the global set
+    this.stopWords = options.stopWords || new Set(STOPWORDS);
   }
 
   /**
@@ -29,9 +48,16 @@ export class TextIndex {
       return [];
     }
     // Split on non-word characters and filter out empty strings
-    return text.toLowerCase()
+    const words = text.toLowerCase()
       .split(/\W+/)
       .filter(word => word.length > 0);
+    
+    // Filter stop words if enabled
+    if (this.useStopWords) {
+      return words.filter(word => !this.stopWords.has(word));
+    }
+    
+    return words;
   }
 
   /**
@@ -223,5 +249,35 @@ export class TextIndex {
     this.index.clear();
     this.documentTerms.clear();
     this.documentLengths.clear();
+  }
+
+  /**
+   * Add custom stop words
+   * @param {...string} words - Words to add to stop word list
+   * @returns {TextIndex} this for chaining
+   */
+  addStopWords(...words) {
+    words.forEach(word => this.stopWords.add(word.toLowerCase()));
+    return this;
+  }
+
+  /**
+   * Remove words from stop word list
+   * @param {...string} words - Words to remove from stop word list
+   * @returns {TextIndex} this for chaining
+   */
+  removeStopWords(...words) {
+    words.forEach(word => this.stopWords.delete(word.toLowerCase()));
+    return this;
+  }
+
+  /**
+   * Enable or disable stop word filtering
+   * @param {boolean} enabled - Whether to filter stop words
+   * @returns {TextIndex} this for chaining
+   */
+  setStopWordFiltering(enabled) {
+    this.useStopWords = enabled;
+    return this;
   }
 }
