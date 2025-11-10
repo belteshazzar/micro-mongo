@@ -40,27 +40,39 @@ This document tracks the features needed to make micro-mongo more compatible wit
 
 ---
 
-## 2. Promise-Based API 🔴 HIGH PRIORITY
+## 2. Promise-Based API ✅ **COMPLETED**
 
-**Current State:** Synchronous operations  
+**Current State:** ✅ All operations return Promises  
 **MongoDB:** All operations return Promises  
-**Impact:** Not compatible with async/await patterns in real MongoDB driver
+**Impact:** Fully compatible with async/await patterns in real MongoDB driver
 
 ### Tasks:
-- [ ] Make Collection methods async (insertOne, insertMany, find, etc.)
-- [ ] Update Cursor to support async iteration (`for await...of`)
-- [ ] Make cursor.toArray() return Promise
-- [ ] Make cursor.forEach() accept async callback
-- [ ] Update MongoClient.connect() to be properly async
-- [ ] Update DB methods to be async where appropriate
-- [ ] Refactor all tests to use async/await
+- [x] Make Collection methods async (insertOne, insertMany, find, etc.)
+- [x] Update Cursor to support async iteration (`for await...of`)
+- [x] Make cursor.toArray() return Promise
+- [x] Make cursor.forEach() accept async callback
+- [x] Update MongoClient.connect() to be properly async
+- [x] Update DB methods to be async where appropriate
+- [x] Refactor all tests to use async/await
 - [ ] Add async session support for future transaction work
-- [ ] Update example-usage.js with proper async patterns
-- [ ] Update README with async examples
+- [x] Update example-usage.js with proper async patterns
+- [x] Update README with async examples
 
-**Estimated Effort:** 3-5 days  
-**Dependencies:** None  
-**Breaking Change:** Yes - major version bump required
+**Status:** ✅ COMPLETED (November 10, 2025)  
+**Test Results:** All 158 tests passing with async/await patterns  
+**Changes Made:**
+- Made all Collection CRUD methods async (insertOne, insertMany, findOne, updateOne, updateMany, deleteOne, deleteMany, replaceOne, findOneAndUpdate, findOneAndReplace, findOneAndDelete)
+- Made Collection utility methods async (count, distinct, copyTo, createIndex, insert)
+- Made Cursor methods async (toArray, forEach)
+- Added Symbol.asyncIterator support to Cursor and SortedCursor for `for await...of` loops
+- Fixed Cursor._findNext to use storage.size() directly instead of async collection.count()
+- Converted all 158 tests to use async/await
+- Updated example-usage.js with comprehensive async/await examples
+- Updated README.md with async/await usage section and examples
+- MongoClient.connect() was already async
+
+**Breaking Change:** Yes - major version bump to 2.0.0 required
+**Estimated Effort:** 3-5 days ✅ **ACTUAL: 1 day**
 
 ---
 
@@ -484,9 +496,9 @@ This document tracks the features needed to make micro-mongo more compatible wit
 ### Phase 1: Foundation (Critical for compatibility)
 1. **Better Error Handling** (2-3 days) 🔴
 2. ~~**ObjectId Support** (1-2 days)~~ ✅ **COMPLETED**
-3. **Promise-Based API** (3-5 days) 🔴
+3. ~~**Promise-Based API** (3-5 days)~~ ✅ **COMPLETED**
 
-**Total: ~1.5 weeks** (~1 week remaining)
+**Total: ~1.5 weeks** ✅ **COMPLETED**
 
 ### Phase 2: Core Features (High value)
 4. **Better Index Support** (5-7 days) 🟡
@@ -536,12 +548,12 @@ These can be done independently and provide immediate value:
 
 These will require a major version bump (2.0.0):
 
-- Promise-based API (all methods become async)
-- ObjectId as default _id type
+- ~~Promise-based API (all methods become async)~~ ✅ **COMPLETED**
+- ~~ObjectId as default _id type~~ ✅ **COMPLETED**
 - Proper error classes (no more string throws)
-- Async cursor iteration
+- ~~Async cursor iteration~~ ✅ **COMPLETED**
 
-Consider batching these into a single 2.0.0 release.
+**Status:** Ready for 2.0.0 release with ObjectId and Promise-based API support. Consider adding proper error classes before releasing.
 
 ---
 

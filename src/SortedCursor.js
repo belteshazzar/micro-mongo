@@ -37,9 +37,9 @@ export class SortedCursor {
 	
 	explain() { throw "Not Implemented"; }
 	
-	forEach(fn) {
+	async forEach(fn) {
 		while (this.hasNext()) {
-			fn(this.next());
+			await fn(this.next());
 		}
 	}
 	
@@ -97,11 +97,18 @@ export class SortedCursor {
 	
 	tailable() { throw "Not Implemented"; }
 	
-	toArray() {
+	async toArray() {
 		const results = [];
 		while (this.hasNext()) {
 			results.push(this.next());
 		}
 		return results;
+	}
+	
+	// Support for async iteration (for await...of)
+	async *[Symbol.asyncIterator]() {
+		while (this.hasNext()) {
+			yield this.next();
+		}
 	}
 }

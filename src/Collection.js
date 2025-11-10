@@ -400,11 +400,11 @@ export class Collection {
 
 	bulkWrite() { throw "Not Implemented"; }
 
-	count() {
+	async count() {
 		return this.storage.size();
 	}
 
-	copyTo(destCollectionName) {
+	async copyTo(destCollectionName) {
 		if (!this.db[destCollectionName]) {
 			this.db.createCollection(destCollectionName);
 		}
@@ -412,13 +412,13 @@ export class Collection {
 		let numCopied = 0;
 		const c = this.find({});
 		while (c.hasNext()) {
-			destCol.insertOne(c.next());
+			await destCol.insertOne(c.next());
 			numCopied++;
 		}
 		return numCopied;
 	}
 
-	createIndex(keys, options) {
+	async createIndex(keys, options) {
 		// MongoDB-compliant createIndex
 		// keys: { fieldName: 1 } for ascending, { fieldName: -1 } for descending
 		// options: { name: "indexName", unique: true, ... }
@@ -450,8 +450,8 @@ export class Collection {
 
 	dataSize() { throw "Not Implemented"; }
 
-	deleteOne(query) {
-		const doc = this.findOne(query);
+	async deleteOne(query) {
+		const doc = await this.findOne(query);
 		if (doc) {
 			this.updateIndexesOnDelete(doc);
 			this.storage.remove(doc._id);
@@ -461,7 +461,7 @@ export class Collection {
 		}
 	}
 
-	deleteMany(query) {
+	async deleteMany(query) {
 		const c = this.find(query);
 		const ids = [];
 		const docs = [];
@@ -478,7 +478,7 @@ export class Collection {
 		return { deletedCount: deletedCount };
 	}
 
-	distinct(field, query) {
+	async distinct(field, query) {
 		const vals = {};
 		const c = this.find(query);
 		while (c.hasNext()) {
@@ -514,7 +514,7 @@ export class Collection {
 
 	findAndModify() { throw "Not Implemented"; }
 
-	findOne(query, projection) {
+	async findOne(query, projection) {
 		const cursor = this.find(query, projection);
 		if (cursor.hasNext()) {
 			return cursor.next();
@@ -523,7 +523,7 @@ export class Collection {
 		}
 	}
 
-	findOneAndDelete(filter, options) {
+	async findOneAndDelete(filter, options) {
 		let c = this.find(filter);
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
@@ -533,7 +533,7 @@ export class Collection {
 		else return doc;
 	}
 
-	findOneAndReplace(filter, replacement, options) {
+	async findOneAndReplace(filter, replacement, options) {
 		let c = this.find(filter);
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
@@ -549,7 +549,7 @@ export class Collection {
 		}
 	}
 
-	findOneAndUpdate(filter, update, options) {
+	async findOneAndUpdate(filter, update, options) {
 		let c = this.find(filter);
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
@@ -590,31 +590,35 @@ export class Collection {
 
 	group() { throw "Not Implemented"; }
 
-	insert(doc) {
+	async insert(doc) {
 		if (Array == doc.constructor) {
-			this.insertMany(doc);
+			return await this.insertMany(doc);
 		} else {
-			this.insertOne(doc);
+			return await this.insertOne(doc);
 		}
 	}
 
-	insertOne(doc) {
+	async insertOne(doc) {
 		if (doc._id == undefined) doc._id = this.idGenerator();
 		this.storage.set(doc._id, doc);
 		this.updateIndexesOnInsert(doc);
+		return { insertedId: doc._id };
 	}
 
-	insertMany(docs) {
+	async insertMany(docs) {
+		const insertedIds = [];
 		for (let i = 0; i < docs.length; i++) {
-			this.insertOne(docs[i]);
+			const result = await this.insertOne(docs[i]);
+			insertedIds.push(result.insertedId);
 		}
+		return { insertedIds: insertedIds };
 	}
 
 	isCapped() { throw "Not Implemented"; }
 	mapReduce() { throw "Not Implemented"; }
 	reIndex() { throw "Not Implemented"; }
 
-	replaceOne(query, replacement, options) { // only replace
+	async replaceOne(query, replacement, options) { // only replace
 		// first
 		const result = {};
 		const c = this.find(query);
@@ -688,7 +692,7 @@ export class Collection {
 		}
 	}
 
-	updateOne(query, updates, options) {
+	async updateOne(query, updates, options) {
 		const c = this.find(query);
 		if (c.hasNext()) {
 			const doc = c.next();
@@ -705,7 +709,7 @@ export class Collection {
 		}
 	}
 
-	updateMany(query, updates, options) {
+	async updateMany(query, updates, options) {
 		const c = this.find(query);
 		if (c.hasNext()) {
 			while (c.hasNext()) {

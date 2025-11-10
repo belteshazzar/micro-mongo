@@ -69,7 +69,7 @@ export class Cursor {
 
 		// Then fall back to full scan for remaining documents
 		// This handles complex queries where index only partially matches
-		while (this.pos < this.collection.count() && (this.max == 0 || this.pos < this.max)) {
+		while (this.pos < this.storage.size() && (this.max == 0 || this.pos < this.max)) {
 			const cur = this.storage.get(this.pos++);
 			// Skip docs we already returned from index
 			if (cur && !this.fullScanDocIds[cur._id] && this.matches(cur, this.query)) {
@@ -97,9 +97,9 @@ export class Cursor {
 	
 	explain() { throw "Not Implemented"; }
 	
-	forEach(fn) {
+	async forEach(fn) {
 		while (this.hasNext()) {
-			fn(this.next());
+			await fn(this.next());
 		}
 	}
 	
@@ -162,11 +162,18 @@ export class Cursor {
 	
 	tailable() { throw "Not Implemented"; }
 	
-	toArray() {
+	async toArray() {
 		const results = [];
 		while (this.hasNext()) {
 			results.push(this.next());
 		}
 		return results;
+	}
+	
+	// Support for async iteration (for await...of)
+	async *[Symbol.asyncIterator]() {
+		while (this.hasNext()) {
+			yield this.next();
+		}
 	}
 }
