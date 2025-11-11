@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>micro-mongo Browser Test</title>
+</head>
+<body>
+  <h1>micro-mongo Browser Test</h1>
+  <pre id="result"></pre>
+
+  <script type="module">
+    import { MongoClient } from './build/micro-mongo-1.1.3.js';
+
+    async function runTest() {
+      try {
+        // Connect to database
+        const client = await MongoClient.connect();
+        const db = client.db('testdb');
+        
+        // Get collections (should have localStorage collection by default)
+        const collections = db.getCollectionNames();
+        
+        // Build result object
+        const result = {};
+        collections.forEach(name => {
+          result[name] = {
+            isCollection: db[name] && typeof db[name].insertOne === 'function'
+          };
+        });
+        
+        // Output to pre tag
+        document.getElementById('result').textContent = JSON.stringify(result);
+        
+        await client.close();
+      } catch (error) {
+        document.getElementById('result').textContent = JSON.stringify({ error: error.message });
+      }
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

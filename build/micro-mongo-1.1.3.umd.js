@@ -257,11 +257,13 @@
       this.max = 0;
       this._next = false;
       const queryPlan = this.planQuery(this.query);
+      this.useIndex = queryPlan && queryPlan.useIndex;
+      this.planType = queryPlan ? queryPlan.planType : "full_scan";
       this.indexDocIds = null;
       this.indexPos = 0;
       this.fullScanDocIds = {};
-      if (queryPlan && queryPlan.useIndex) {
-        this.indexDocIds = queryPlan.docIds ? queryPlan.docIds.slice() : [];
+      if (this.useIndex && queryPlan.docIds) {
+        this.indexDocIds = queryPlan.docIds.slice();
       }
       this._findNext();
     }
@@ -1556,15 +1558,81 @@
     query(query) {
       const queryKeys = Object.keys(query);
       const indexFields = Object.keys(this.keys);
-      if (indexFields.length === 1) {
-        const field = indexFields[0];
-        if (queryKeys.indexOf(field) !== -1) {
-          const queryValue = query[field];
-          if (typeof queryValue !== "object" || queryValue === null) {
-            const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
-            return this.data[indexKey] || [];
+      if (indexFields.length !== 1) {
+        return null;
+      }
+      const field = indexFields[0];
+      if (queryKeys.indexOf(field) === -1) {
+        return null;
+      }
+      const queryValue = query[field];
+      if (typeof queryValue !== "object" || queryValue === null) {
+        const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
+        return this.data[indexKey] || [];
+      }
+      if (typeof queryValue === "object" && !Array.isArray(queryValue)) {
+        return this._queryWithOperators(field, queryValue);
+      }
+      return null;
+    }
+    /**
+     * Query index with comparison operators
+     * @private
+     */
+    _queryWithOperators(field, operators) {
+      const ops = Object.keys(operators);
+      const results = /* @__PURE__ */ new Set();
+      const hasRangeOp = ops.some((op) => ["$gt", "$gte", "$lt", "$lte"].includes(op));
+      if (hasRangeOp) {
+        for (const indexKey in this.data) {
+          try {
+            const parsed = JSON.parse(indexKey);
+            const value = parsed.v;
+            const type = parsed.t;
+            let matches2 = true;
+            for (const op of ops) {
+              const operand = operators[op];
+              if (op === "$gt" && !(value > operand)) matches2 = false;
+              else if (op === "$gte" && !(value >= operand)) matches2 = false;
+              else if (op === "$lt" && !(value < operand)) matches2 = false;
+              else if (op === "$lte" && !(value <= operand)) matches2 = false;
+              else if (op === "$eq" && !(value === operand)) matches2 = false;
+              else if (op === "$ne" && !(value !== operand)) matches2 = false;
+            }
+            if (matches2) {
+              this.data[indexKey].forEach((id) => results.add(id));
+            }
+          } catch (e) {
           }
         }
+        return Array.from(results);
+      }
+      if (ops.includes("$in")) {
+        const values = operators["$in"];
+        if (Array.isArray(values)) {
+          for (const value of values) {
+            const indexKey = JSON.stringify({ t: typeof value, v: value });
+            if (this.data[indexKey]) {
+              this.data[indexKey].forEach((id) => results.add(id));
+            }
+          }
+          return Array.from(results);
+        }
+      }
+      if (ops.includes("$eq")) {
+        const value = operators["$eq"];
+        const indexKey = JSON.stringify({ t: typeof value, v: value });
+        return this.data[indexKey] || [];
+      }
+      if (ops.includes("$ne")) {
+        const excludeValue = operators["$ne"];
+        const excludeKey = JSON.stringify({ t: typeof excludeValue, v: excludeValue });
+        for (const indexKey in this.data) {
+          if (indexKey !== excludeKey) {
+            this.data[indexKey].forEach((id) => results.add(id));
+          }
+        }
+        return Array.from(results);
       }
       return null;
     }
@@ -2271,12 +2339,303 @@
       }
     }
   }
+  class QueryPlan {
+    constructor() {
+      this.type = "full_scan";
+      this.indexes = [];
+      this.indexScans = [];
+      this.estimatedCost = Infinity;
+    }
+  }
+  class QueryPlanner {
+    constructor(indexes) {
+      this.indexes = indexes;
+    }
+    /**
+     * Generate an execution plan for a query
+     * @param {Object} query - MongoDB query object
+     * @returns {QueryPlan} Execution plan
+     */
+    plan(query) {
+      const plan = new QueryPlan();
+      if (!query || Object.keys(query).length === 0) {
+        return plan;
+      }
+      const analysis = this._analyzeQuery(query);
+      if (analysis.hasTextSearch) {
+        const textPlan = this._planTextSearch(query, analysis);
+        if (textPlan) {
+          return textPlan;
+        }
+      }
+      if (analysis.hasGeoQuery) {
+        const geoPlan = this._planGeoQuery(query, analysis);
+        if (geoPlan) {
+          return geoPlan;
+        }
+      }
+      if (analysis.type === "and") {
+        const andPlan = this._planAndQuery(query, analysis);
+        if (andPlan.type !== "full_scan") {
+          return andPlan;
+        }
+      }
+      if (analysis.type === "or") {
+        const orPlan = this._planOrQuery(query, analysis);
+        if (orPlan.type !== "full_scan") {
+          return orPlan;
+        }
+      }
+      const simplePlan = this._planSimpleQuery(query);
+      if (simplePlan.type !== "full_scan") {
+        return simplePlan;
+      }
+      return plan;
+    }
+    /**
+     * Analyze query structure
+     * @private
+     */
+    _analyzeQuery(query) {
+      const analysis = {
+        type: "simple",
+        // 'simple', 'and', 'or', 'complex'
+        fields: [],
+        operators: {},
+        hasTextSearch: false,
+        hasGeoQuery: false,
+        conditions: []
+      };
+      const keys = Object.keys(query);
+      if (keys.length === 1) {
+        const key = keys[0];
+        if (key === "$and") {
+          analysis.type = "and";
+          analysis.conditions = query.$and;
+          for (const condition of analysis.conditions) {
+            const subAnalysis = this._analyzeQuery(condition);
+            analysis.fields.push(...subAnalysis.fields);
+            if (subAnalysis.hasTextSearch) analysis.hasTextSearch = true;
+            if (subAnalysis.hasGeoQuery) analysis.hasGeoQuery = true;
+          }
+          return analysis;
+        } else if (key === "$or") {
+          analysis.type = "or";
+          analysis.conditions = query.$or;
+          for (const condition of analysis.conditions) {
+            const subAnalysis = this._analyzeQuery(condition);
+            analysis.fields.push(...subAnalysis.fields);
+            if (subAnalysis.hasTextSearch) analysis.hasTextSearch = true;
+            if (subAnalysis.hasGeoQuery) analysis.hasGeoQuery = true;
+          }
+          return analysis;
+        }
+      }
+      for (const field of keys) {
+        if (field.startsWith("$")) {
+          continue;
+        }
+        analysis.fields.push(field);
+        const value = query[field];
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          const ops = Object.keys(value);
+          analysis.operators[field] = ops;
+          if (ops.includes("$text")) {
+            analysis.hasTextSearch = true;
+          }
+          if (ops.some((op) => ["$geoWithin", "$geoIntersects", "$near", "$nearSphere"].includes(op))) {
+            analysis.hasGeoQuery = true;
+          }
+        }
+      }
+      if (keys.length > 1) {
+        analysis.type = "and";
+      }
+      return analysis;
+    }
+    /**
+     * Plan for text search queries
+     * @private
+     */
+    _planTextSearch(query, analysis) {
+      for (const indexName in this.indexes) {
+        const index = this.indexes[indexName];
+        if (index instanceof TextCollectionIndex) {
+          const textQuery = this._extractTextQuery(query);
+          if (textQuery) {
+            const plan = new QueryPlan();
+            plan.type = "index_scan";
+            plan.indexes = [indexName];
+            const docIds = index.search(textQuery);
+            plan.indexScans = [{ indexName, docIds }];
+            plan.estimatedCost = docIds.length;
+            return plan;
+          }
+        }
+      }
+      return null;
+    }
+    /**
+     * Extract $text query from query object
+     * @private
+     */
+    _extractTextQuery(query) {
+      for (const field in query) {
+        const value = query[field];
+        if (typeof value === "object" && value !== null && value.$text) {
+          return typeof value.$text === "string" ? value.$text : value.$text.$search;
+        }
+      }
+      return null;
+    }
+    /**
+     * Plan for geospatial queries
+     * @private
+     */
+    _planGeoQuery(query, analysis) {
+      for (const indexName in this.indexes) {
+        const index = this.indexes[indexName];
+        if (index instanceof GeospatialCollectionIndex) {
+          const docIds = index.query(query);
+          if (docIds !== null) {
+            const plan = new QueryPlan();
+            plan.type = "index_scan";
+            plan.indexes = [indexName];
+            plan.indexScans = [{ indexName, docIds }];
+            plan.estimatedCost = docIds.length;
+            return plan;
+          }
+        }
+      }
+      return null;
+    }
+    /**
+     * Plan for $and queries (index intersection)
+     * @private
+     */
+    _planAndQuery(query, analysis) {
+      const plan = new QueryPlan();
+      let conditions;
+      if (query.$and) {
+        conditions = query.$and;
+      } else {
+        conditions = Object.keys(query).map((field) => ({ [field]: query[field] }));
+      }
+      const indexableConditions = [];
+      for (const condition of conditions) {
+        const conditionPlan = this._planSimpleQuery(condition);
+        if (conditionPlan.type === "index_scan") {
+          indexableConditions.push(conditionPlan.indexScans[0]);
+        }
+      }
+      if (indexableConditions.length > 1) {
+        plan.type = "index_intersection";
+        plan.indexScans = indexableConditions;
+        plan.indexes = indexableConditions.map((scan) => scan.indexName);
+        plan.estimatedCost = Math.min(...indexableConditions.map((scan) => scan.docIds.length));
+        return plan;
+      }
+      if (indexableConditions.length === 1) {
+        plan.type = "index_scan";
+        plan.indexScans = [indexableConditions[0]];
+        plan.indexes = [indexableConditions[0].indexName];
+        plan.estimatedCost = indexableConditions[0].docIds.length;
+        return plan;
+      }
+      return plan;
+    }
+    /**
+     * Plan for $or queries (index union)
+     * @private
+     */
+    _planOrQuery(query, analysis) {
+      const plan = new QueryPlan();
+      if (!query.$or) {
+        return plan;
+      }
+      const conditions = query.$or;
+      const indexableConditions = [];
+      for (const condition of conditions) {
+        const conditionPlan = this._planSimpleQuery(condition);
+        if (conditionPlan.type === "index_scan") {
+          indexableConditions.push(conditionPlan.indexScans[0]);
+        }
+      }
+      if (indexableConditions.length > 0) {
+        plan.type = "index_union";
+        plan.indexScans = indexableConditions;
+        plan.indexes = indexableConditions.map((scan) => scan.indexName);
+        plan.estimatedCost = indexableConditions.reduce((sum, scan) => sum + scan.docIds.length, 0);
+        return plan;
+      }
+      return plan;
+    }
+    /**
+     * Plan for simple single-field queries
+     * @private
+     */
+    _planSimpleQuery(query) {
+      const plan = new QueryPlan();
+      const queryKeys = Object.keys(query);
+      if (queryKeys.length === 0) {
+        return plan;
+      }
+      for (const indexName in this.indexes) {
+        const index = this.indexes[indexName];
+        if (index instanceof TextCollectionIndex || index instanceof GeospatialCollectionIndex) {
+          continue;
+        }
+        const docIds = index.query(query);
+        if (docIds !== null && docIds.length >= 0) {
+          plan.type = "index_scan";
+          plan.indexes = [indexName];
+          plan.indexScans = [{ indexName, docIds }];
+          plan.estimatedCost = docIds.length;
+          return plan;
+        }
+      }
+      return plan;
+    }
+    /**
+     * Execute a query plan and return document IDs
+     * @param {QueryPlan} plan - The execution plan
+     * @returns {Array|null} Array of document IDs or null for full scan
+     */
+    execute(plan) {
+      if (plan.type === "full_scan") {
+        return null;
+      }
+      if (plan.type === "index_scan") {
+        return plan.indexScans[0].docIds;
+      }
+      if (plan.type === "index_intersection") {
+        if (plan.indexScans.length === 0) return null;
+        const sorted = plan.indexScans.slice().sort((a, b) => a.docIds.length - b.docIds.length);
+        let result = new Set(sorted[0].docIds);
+        for (let i = 1; i < sorted.length; i++) {
+          const currentSet = new Set(sorted[i].docIds);
+          result = new Set([...result].filter((id) => currentSet.has(id)));
+          if (result.size === 0) break;
+        }
+        return Array.from(result);
+      }
+      if (plan.type === "index_union") {
+        const result = /* @__PURE__ */ new Set();
+        for (const scan of plan.indexScans) {
+          scan.docIds.forEach((id) => result.add(id));
+        }
+        return Array.from(result);
+      }
+      return null;
+    }
+  }
   class Collection {
     constructor(db, storage, idGenerator) {
       this.db = db;
       this.storage = storage;
       this.idGenerator = idGenerator;
       this.indexes = {};
+      this.queryPlanner = new QueryPlanner(this.indexes);
       this.isCollection = true;
     }
     /**
@@ -2357,47 +2716,18 @@
       }
     }
     /**
-     * Query planner - analyze query and determine if an index can be used
+     * Query planner - analyze query and determine optimal execution plan
      */
     planQuery(query) {
-      const queryKeys = Object.keys(query);
-      for (const indexName in this.indexes) {
-        if (this.indexes.hasOwnProperty(indexName)) {
-          const index = this.indexes[indexName];
-          if (index instanceof TextCollectionIndex) {
-            continue;
-          }
-          if (index instanceof GeospatialCollectionIndex) {
-            const docIds = index.query(query);
-            if (docIds !== null) {
-              return {
-                useIndex: true,
-                indexName,
-                docIds
-              };
-            }
-            continue;
-          }
-          const indexFields = Object.keys(index.keys);
-          if (indexFields.length === 1) {
-            const field = indexFields[0];
-            if (queryKeys.indexOf(field) !== -1) {
-              const queryValue = query[field];
-              if (typeof queryValue !== "object" || queryValue === null) {
-                const docIds = index.query(query);
-                if (docIds !== null) {
-                  return {
-                    useIndex: true,
-                    indexName,
-                    docIds
-                  };
-                }
-              }
-            }
-          }
-        }
-      }
-      return null;
+      const plan = this.queryPlanner.plan(query);
+      const docIds = this.queryPlanner.execute(plan);
+      return {
+        useIndex: plan.type !== "full_scan",
+        planType: plan.type,
+        indexNames: plan.indexes,
+        docIds,
+        estimatedCost: plan.estimatedCost
+      };
     }
     /**
      * Get a text index for the given field

@@ -1,0 +1,111 @@
+# Browser Testing with Playwright
+
+This directory contains browser tests for micro-mongo using Playwright instead of Puppeteer.
+
+## Setup
+
+1. Install dependencies:
+```bash
+npm install
+```
+
+2. Install Playwright browsers:
+```bash
+npx playwright install chromium
+```
+
+3. Build the project:
+```bash
+npm run build
+```
+
+4. Start a local HTTP server (in a separate terminal):
+```bash
+python3 -m http.server 8080
+```
+
+Or use any other static file server on port 8080.
+
+## Running Tests
+
+Run browser tests only:
+```bash
+npm run test:browser
+```
+
+Run all tests (Node.js + Browser):
+```bash
+npm run test:all
+```
+
+## Test Files
+
+- `test-browser.js` - Main browser test suite using Playwright
+- `../test-browser-simple.html` - Simple test page for basic functionality
+- `../index.html` - Full development page with interactive tests
+
+## What's Tested
+
+The browser tests verify that micro-mongo works correctly in a real browser environment:
+
+1. **Basic Setup** - Collection creation and initialization
+2. **CRUD Operations** - Insert, find, update, delete
+3. **ObjectId Support** - ObjectId creation and querying
+4. **Query Operators** - $gt, $in, $and, etc.
+5. **Aggregation Pipeline** - $group, $sort, etc.
+6. **Indexes** - Index creation and usage
+
+## Migration from Puppeteer
+
+The tests have been migrated from Puppeteer to Playwright for better:
+- Cross-browser support
+- Modern async/await API
+- Better error reporting
+- Faster test execution
+- Official support and updates
+
+### Key Differences
+
+**Puppeteer:**
+```javascript
+const browser = await puppeteer.launch();
+const page = await browser.newPage();
+await page.goto(url);
+const element = await page.waitForSelector('selector');
+const text = await element.evaluate(el => el.textContent);
+```
+
+**Playwright:**
+```javascript
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto(url);
+const element = await page.locator('selector');
+const text = await element.textContent();
+```
+
+## Environment Variables
+
+- `BASE_URL` - Base URL for the test server (default: `http://localhost:8080`)
+
+Example:
+```bash
+BASE_URL=http://localhost:3000 npm run test:browser
+```
+
+## Troubleshooting
+
+### Tests timeout
+- Make sure the HTTP server is running on the correct port
+- Check that the build files exist in `build/` directory
+- Verify the browser installed correctly with `npx playwright install chromium`
+
+### Module import errors
+- Run `npm run build` to generate the bundled files
+- The test pages use the built version from `build/micro-mongo-1.1.3.js`
+- Make sure the simple HTTP server can serve static files
+
+### Port conflicts
+- The default port is 8080
+- Change it via `BASE_URL` environment variable
+- Make sure no other process is using the port
