@@ -1,7 +1,6 @@
 import { Collection } from './Collection.js';
-import { LocalStorageStore, ObjectStore } from '../main.js';
+import { MemoryStore } from './MemoryStore.js';
 import { ObjectId } from './ObjectId.js';
-import { ObjectStorageEngine } from './ObjectStorageEngine.js';
 
 /**
  * DB class
@@ -13,17 +12,6 @@ export class DB {
 		
 		// Initialize storage engine if provided
 		this.storageEngine = this.options.storageEngine || null;
-		
-		// Initialize localStorage collection if available
-		if (typeof localStorage !== "undefined") {
-			this.localStorage = new Collection(
-				this,
-				(this.options.localStorage ? this.options.localStorage : LocalStorageStore),
-				this._id.bind(this)
-			);
-		} else {
-			this.localStorage = null;
-		}
 
 		// Return a Proxy to enable dynamic collection creation
 		return new Proxy(this, {
@@ -38,19 +26,17 @@ export class DB {
 					return undefined;
 				}
 
-				// For collection names, create the collection if it doesn't exist
-				// Only auto-create if it's a valid collection name and doesn't already exist
-				if (typeof property === 'string' && property !== 'localStorage') {
-					// Don't auto-create if property was explicitly deleted
-					if (Object.prototype.hasOwnProperty.call(target, property)) {
-						return target[property];
-					}
-					// Auto-create the collection
-					target.createCollection(property);
+			// For collection names, create the collection if it doesn't exist
+			// Only auto-create if it's a valid collection name and doesn't already exist
+			if (typeof property === 'string') {
+				// Don't auto-create if property was explicitly deleted
+				if (Object.prototype.hasOwnProperty.call(target, property)) {
 					return target[property];
 				}
-
-				return undefined;
+				// Auto-create the collection
+				target.createCollection(property);
+				return target[property];
+			}				return undefined;
 			}
 		});
 	}
@@ -79,19 +65,11 @@ export class DB {
 
 	createCollection(name) {
 		if (!name) return;
-		if (name == "localStorage") {
-			this.localStorage = new Collection(
-				this,
-				(this.options.localStorage ? this.options.localStorage : LocalStorageStore),
-				this._id.bind(this)
-			);
-		} else {
-			this[name] = new Collection(
-				this,
-				(this.options && this.options.storage ? new this.options.storage() : new ObjectStore()),
-				this._id.bind(this)
-			);
-		}
+		this[name] = new Collection(
+			this,
+			new MemoryStore(),
+			this._id.bind(this)
+		);
 	}
 
 	currentOp() { throw "Not Implemented"; }
