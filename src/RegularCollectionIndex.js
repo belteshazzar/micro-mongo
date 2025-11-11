@@ -1,15 +1,16 @@
 import { CollectionIndex } from './CollectionIndex.js';
 import { getProp } from './utils.js';
+import { BPlusTree } from './BPlusTree.js';
 
 /**
- * Regular (B-tree style) index implementation
- * Supports equality queries on indexed fields
+ * Uses B+ tree for efficient storage and range queries
  */
 export class RegularCollectionIndex extends CollectionIndex {
 	constructor(keys, options = {}) {
 		super(keys, options);
-		// Map of key value to array of document _ids
-		this.data = {};
+		// B+ tree mapping index key to array of document _ids
+		// Order 50 provides good balance between node size and tree height
+		this.data = new BPlusTree(50);
 	}
 
 	/**
@@ -41,38 +42,48 @@ export class RegularCollectionIndex extends CollectionIndex {
 
 	/**
 	 * Add a document to the index
+   * 
 	 * @param {Object} doc - The document to index
 	 */
 	add(doc) {
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
-			if (!this.data[indexKey]) {
-				this.data[indexKey] = [];
+			// Get existing array or create new one
+			let idArray = this.data.search(indexKey);
+			if (!idArray) {
+				idArray = [];
 			}
-			this.data[indexKey].push(doc._id);
+			idArray.push(doc._id);
+			this.data.add(indexKey, idArray);
 		}
 	}
 
 	/**
 	 * Remove a document from the index
+   * 
 	 * @param {Object} doc - The document to remove
 	 */
 	remove(doc) {
 		const indexKey = this.extractIndexKey(doc);
-		if (indexKey !== null && this.data[indexKey]) {
-			const arr = this.data[indexKey];
-			const idx = arr.indexOf(doc._id);
-			if (idx !== -1) {
-				arr.splice(idx, 1);
-			}
-			if (arr.length === 0) {
-				delete this.data[indexKey];
+		if (indexKey !== null) {
+			const idArray = this.data.search(indexKey);
+			if (idArray) {
+				const idx = idArray.indexOf(doc._id);
+				if (idx !== -1) {
+					idArray.splice(idx, 1);
+				}
+				if (idArray.length === 0) {
+					this.data.delete(indexKey);
+				} else {
+					this.data.add(indexKey, idArray);
+				}
 			}
 		}
 	}
 
 	/**
 	 * Query the index
+   * 
 	 * @param {*} query - The query object
 	 * @returns {Array|null} Array of document IDs or null if index cannot satisfy query
 	 */
@@ -97,7 +108,8 @@ export class RegularCollectionIndex extends CollectionIndex {
 		// Case 1: Simple equality
 		if (typeof queryValue !== 'object' || queryValue === null) {
 			const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
-			return this.data[indexKey] || [];
+			const result = this.data.search(indexKey);
+			return result || [];
 		}
 
 		// Case 2: Query with operators
@@ -110,6 +122,7 @@ export class RegularCollectionIndex extends CollectionIndex {
 
 	/**
 	 * Query index with comparison operators
+   * 
 	 * @private
 	 */
 	_queryWithOperators(field, operators) {
@@ -120,34 +133,72 @@ export class RegularCollectionIndex extends CollectionIndex {
 		const hasRangeOp = ops.some(op => ['$gt', '$gte', '$lt', '$lte'].includes(op));
 		
 		if (hasRangeOp) {
-			// Scan all entries and filter by range
-			for (const indexKey in this.data) {
-				try {
-					const parsed = JSON.parse(indexKey);
-					const value = parsed.v;
-					const type = parsed.t;
-					
-					// Check if value matches all operators
-					let matches = true;
-					for (const op of ops) {
-						const operand = operators[op];
-						if (op === '$gt' && !(value > operand)) matches = false;
-						else if (op === '$gte' && !(value >= operand)) matches = false;
-						else if (op === '$lt' && !(value < operand)) matches = false;
-						else if (op === '$lte' && !(value <= operand)) matches = false;
-						else if (op === '$eq' && !(value === operand)) matches = false;
-						else if (op === '$ne' && !(value !== operand)) matches = false;
+			// Use B+ tree's efficient range search if we have both bounds
+			const hasGt = ops.includes('$gt') || ops.includes('$gte');
+			const hasLt = ops.includes('$lt') || ops.includes('$lte');
+			
+			if (hasGt && hasLt) {
+				// Determine min and max bounds
+				const minValue = ops.includes('$gte') ? operators['$gte'] : 
+				                ops.includes('$gt') ? operators['$gt'] : -Infinity;
+				const maxValue = ops.includes('$lte') ? operators['$lte'] : 
+				                ops.includes('$lt') ? operators['$lt'] : Infinity;
+				
+				const minKey = JSON.stringify({ t: typeof minValue, v: minValue });
+				const maxKey = JSON.stringify({ t: typeof maxValue, v: maxValue });
+				
+				// Use B+ tree range search
+				const rangeResults = this.data.rangeSearch(minKey, maxKey);
+				
+				for (const {key, value} of rangeResults) {
+					try {
+						const parsed = JSON.parse(key);
+						const keyValue = parsed.v;
+						
+						// Apply exact operator semantics
+						let matches = true;
+						if (ops.includes('$gt') && !(keyValue > operators['$gt'])) matches = false;
+						if (ops.includes('$gte') && !(keyValue >= operators['$gte'])) matches = false;
+						if (ops.includes('$lt') && !(keyValue < operators['$lt'])) matches = false;
+						if (ops.includes('$lte') && !(keyValue <= operators['$lte'])) matches = false;
+						
+						if (matches && value) {
+							value.forEach(id => results.add(id));
+						}
+					} catch (e) {
+						// Skip malformed entries
 					}
-					
-					if (matches) {
-						// Add all document IDs for this index entry
-						this.data[indexKey].forEach(id => results.add(id));
-					}
-				} catch (e) {
-					// Skip malformed entries
 				}
+				return Array.from(results);
+			} else {
+				// Scan all entries if we don't have both bounds
+				const allEntries = this.data.toArray();
+				for (const {key, value} of allEntries) {
+					try {
+						const parsed = JSON.parse(key);
+						const keyValue = parsed.v;
+						
+						// Check if value matches all operators
+						let matches = true;
+						for (const op of ops) {
+							const operand = operators[op];
+							if (op === '$gt' && !(keyValue > operand)) matches = false;
+							else if (op === '$gte' && !(keyValue >= operand)) matches = false;
+							else if (op === '$lt' && !(keyValue < operand)) matches = false;
+							else if (op === '$lte' && !(keyValue <= operand)) matches = false;
+							else if (op === '$eq' && !(keyValue === operand)) matches = false;
+							else if (op === '$ne' && !(keyValue !== operand)) matches = false;
+						}
+						
+						if (matches && value) {
+							value.forEach(id => results.add(id));
+						}
+					} catch (e) {
+						// Skip malformed entries
+					}
+				}
+				return Array.from(results);
 			}
-			return Array.from(results);
 		}
 
 		// Handle $in operator
@@ -156,8 +207,9 @@ export class RegularCollectionIndex extends CollectionIndex {
 			if (Array.isArray(values)) {
 				for (const value of values) {
 					const indexKey = JSON.stringify({ t: typeof value, v: value });
-					if (this.data[indexKey]) {
-						this.data[indexKey].forEach(id => results.add(id));
+					const idArray = this.data.search(indexKey);
+					if (idArray) {
+						idArray.forEach(id => results.add(id));
 					}
 				}
 				return Array.from(results);
@@ -168,16 +220,18 @@ export class RegularCollectionIndex extends CollectionIndex {
 		if (ops.includes('$eq')) {
 			const value = operators['$eq'];
 			const indexKey = JSON.stringify({ t: typeof value, v: value });
-			return this.data[indexKey] || [];
+			const result = this.data.search(indexKey);
+			return result || [];
 		}
 
 		// Handle $ne operator (requires full scan, not optimal)
 		if (ops.includes('$ne')) {
 			const excludeValue = operators['$ne'];
 			const excludeKey = JSON.stringify({ t: typeof excludeValue, v: excludeValue });
-			for (const indexKey in this.data) {
-				if (indexKey !== excludeKey) {
-					this.data[indexKey].forEach(id => results.add(id));
+			const allEntries = this.data.toArray();
+			for (const {key, value} of allEntries) {
+				if (key !== excludeKey && value) {
+					value.forEach(id => results.add(id));
 				}
 			}
 			return Array.from(results);
@@ -187,30 +241,44 @@ export class RegularCollectionIndex extends CollectionIndex {
 	}
 
 	/**
-	 * Clear all data from the index
+	 * Clear all entries from the index
 	 */
 	clear() {
-		this.data = {};
+		this.data.clear();
 	}
 
 	/**
 	 * Serialize index state for storage
+   * 
 	 * @returns {Object} Serializable index state
 	 */
 	serialize() {
+		// Convert B+ tree to plain object for serialization
+		const dataObj = {};
+		const entries = this.data.toArray();
+		for (const {key, value} of entries) {
+			dataObj[key] = value;
+		}
+		
 		return {
 			type: 'regular',
 			keys: this.keys,
 			options: this.options,
-			data: this.data
+			data: dataObj
 		};
 	}
 
 	/**
 	 * Restore index state from serialized data
+   * 
 	 * @param {Object} state - Serialized index state
 	 */
 	deserialize(state) {
-		this.data = state.data || {};
+		// Rebuild B+ tree from plain object
+		this.data.clear();
+		const dataObj = state.data || {};
+		for (const key in dataObj) {
+			this.data.add(key, dataObj[key]);
+		}
 	}
 }
