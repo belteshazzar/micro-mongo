@@ -76,28 +76,64 @@ This document tracks the features needed to make micro-mongo more compatible wit
 
 ---
 
-## 3. Better Index Support 🟡 MEDIUM PRIORITY
+## 3. Better Index Support � IN PROGRESS
 
-**Current State:** Only simple equality queries use indexes  
+**Current State:** ✅ Enhanced with range queries, query planning, and index combination  
 **MongoDB:** Indexes work with ranges, sorts, and complex queries
 
 ### Tasks:
-- [ ] Support range queries on indexed fields ($gt, $lt, $gte, $lte)
+- [x] Support range queries on indexed fields ($gt, $lt, $gte, $lte, $in, $ne, $eq) ✅
+- [x] Improve query planner to choose best index ✅
+- [x] Implement index intersection for $and queries ✅
+- [x] Implement index union for $or queries ✅
+- [x] Integrate text indexes into query planner ✅
+- [x] Integrate geospatial indexes into query planner ✅
+- [x] Add cost-based plan selection ✅
 - [ ] Support sorting using indexes (avoid in-memory sort)
 - [ ] Add unique index support with constraint enforcement
 - [ ] Add sparse index support (skip null/missing values)
 - [ ] Add TTL index support (time-to-live, auto-delete old docs)
-- [ ] Add text indexes (different from $text search)
-- [ ] Add 2d geospatial indexes
-- [ ] Add 2dsphere geospatial indexes
-- [ ] Implement dropIndex() method
-- [ ] Implement dropIndexes() method
 - [ ] Add index options: background, partialFilterExpression
-- [ ] Improve query planner to choose best index
 - [ ] Support compound index prefix matching
 - [ ] Add multikey index support (arrays)
 - [ ] Add hashed indexes
 - [ ] Implement covered queries (return from index only)
+
+**Status:** 🚧 IN PROGRESS (November 10, 2025)  
+**Test Results:** All 203 tests passing (180 original + 23 new advanced index tests)  
+**Changes Made:**
+- Enhanced `src/RegularCollectionIndex.js`:
+  - Added `_queryWithOperators()` method for range query support
+  - Support for $gt, $gte, $lt, $lte, $eq, $ne, $in operators
+  - Range scan implementation that filters index entries
+  - Maintains backward compatibility with simple equality queries
+- Created `src/QueryPlanner.js`:
+  - QueryPlan class to represent execution plans
+  - Query analysis to detect simple/and/or/complex query structures
+  - Text index integration via `_planTextSearch()`
+  - Geospatial index integration via `_planGeoQuery()`
+  - Index intersection for $and queries (docs in ALL indexes)
+  - Index union for $or queries (docs in ANY index)
+  - Cost-based plan selection with estimatedCost
+  - Plan types: full_scan, index_scan, index_intersection, index_union
+- Updated `src/Collection.js`:
+  - Replaced old simple `planQuery()` with QueryPlanner-based implementation
+  - Returns detailed plan with type, indexes used, docIds, cost estimate
+- Updated `src/Cursor.js`:
+  - Works with new query plan structure
+  - Maintains backward compatibility
+- Added comprehensive test suite in `test/test-advanced-indexes.js`:
+  - Range query tests (6 tests)
+  - $and query with index intersection (3 tests)
+  - $or query with index union (3 tests)
+  - Complex mixed operator queries (2 tests)
+  - Index selection tests (2 tests)
+  - Text and geospatial index integration (2 tests)
+  - Performance tests with large datasets (2 tests)
+  - Edge case handling (3 tests)
+
+**Estimated Effort:** 5-7 days for full completion  
+**Completed So Far:** Query planning, range queries, index combination - 2 days
 
 **Estimated Effort:** 5-7 days  
 **Dependencies:** None

@@ -134,13 +134,13 @@ describe("ObjectId", function() {
 			setTimeout(() => {
 				const id2 = new mongo.ObjectId();
 				
-				// Compare timestamps
+				// Compare timestamps - timestamps are in seconds, so they should be equal or id2 >= id1
 				expect(id2.getTimestamp().getTime()).to.be.at.least(id1.getTimestamp().getTime());
 				
-				// Hex strings should be comparable
+				// After 1+ second, timestamps should be different and id2 should be greater
 				expect(id2.toString() >= id1.toString()).to.be.true;
 				done();
-			}, 10);
+			}, 1100); // Wait >1 second so timestamp portion is guaranteed to be different
 		});
 
 		it('should extract correct timestamp', function() {
@@ -170,84 +170,84 @@ describe("ObjectId", function() {
 			await client.close();
 		});
 
-		it('should automatically generate ObjectId for _id', function() {
+		it('should automatically generate ObjectId for _id', async function() {
 			db.createCollection('users');
-			db.users.insertOne({ name: 'Alice' });
+			await db.users.insertOne({ name: 'Alice' });
 			
-			const doc = db.users.findOne({ name: 'Alice' });
+			const doc = await db.users.findOne({ name: 'Alice' });
 			expect(doc._id).to.be.instanceOf(mongo.ObjectId);
 			expect(doc._id.toString()).to.have.lengthOf(24);
 		});
 
-		it('should allow manual ObjectId assignment', function() {
+		it('should allow manual ObjectId assignment', async function() {
 			db.createCollection('users');
 			const customId = new mongo.ObjectId();
-			db.users.insertOne({ _id: customId, name: 'Bob' });
+			await db.users.insertOne({ _id: customId, name: 'Bob' });
 			
-			const doc = db.users.findOne({ name: 'Bob' });
+			const doc = await db.users.findOne({ name: 'Bob' });
 			expect(doc._id.equals(customId)).to.be.true;
 		});
 
-		it('should query by ObjectId', function() {
+		it('should query by ObjectId', async function() {
 			db.createCollection('users');
 			const id = new mongo.ObjectId();
-			db.users.insertOne({ _id: id, name: 'Charlie' });
+			await db.users.insertOne({ _id: id, name: 'Charlie' });
 			
-			const doc = db.users.findOne({ _id: id });
+			const doc = await db.users.findOne({ _id: id });
 			expect(doc).to.not.be.null;
 			expect(doc.name).to.equal('Charlie');
 		});
 
-		it('should query by ObjectId hex string', function() {
+		it('should query by ObjectId hex string', async function() {
 			db.createCollection('users');
 			const id = new mongo.ObjectId();
-			db.users.insertOne({ _id: id, name: 'David' });
+			await db.users.insertOne({ _id: id, name: 'David' });
 			
-			const doc = db.users.findOne({ _id: id.toString() });
+			const doc = await db.users.findOne({ _id: id.toString() });
 			expect(doc).to.not.be.null;
 			expect(doc.name).to.equal('David');
 		});
 
-		it('should support $eq operator with ObjectId', function() {
+		it('should support $eq operator with ObjectId', async function() {
 			db.createCollection('users');
 			const id = new mongo.ObjectId();
-			db.users.insertOne({ _id: id, name: 'Eve' });
+			await db.users.insertOne({ _id: id, name: 'Eve' });
 			
-			const doc = db.users.findOne({ _id: { $eq: id } });
+			const doc = await db.users.findOne({ _id: { $eq: id } });
 			expect(doc).to.not.be.null;
 			expect(doc.name).to.equal('Eve');
 		});
 
-		it('should support $ne operator with ObjectId', function() {
+		it('should support $ne operator with ObjectId', async function() {
 			db.createCollection('users');
 			const id1 = new mongo.ObjectId();
 			const id2 = new mongo.ObjectId();
-			db.users.insertOne({ _id: id1, name: 'Frank' });
-			db.users.insertOne({ _id: id2, name: 'Grace' });
+			await db.users.insertOne({ _id: id1, name: 'Frank' });
+			await db.users.insertOne({ _id: id2, name: 'Grace' });
 			
-			const docs = db.users.find({ _id: { $ne: id1 } }).toArray();
+			const docs = await db.users.find({ _id: { $ne: id1 } }).toArray();
 			expect(docs.length).to.equal(1);
 			expect(docs[0].name).to.equal('Grace');
 		});
 
-		it('should support $in operator with ObjectIds', function() {
+		it('should support $in operator with ObjectIds', async function() {
 			db.createCollection('users');
 			const id1 = new mongo.ObjectId();
 			const id2 = new mongo.ObjectId();
 			const id3 = new mongo.ObjectId();
 			
-			db.users.insertMany([
+			await db.users.insertMany([
 				{ _id: id1, name: 'User1' },
 				{ _id: id2, name: 'User2' },
 				{ _id: id3, name: 'User3' }
 			]);
 			
-			const docs = db.users.find({ _id: { $in: [id1, id3] } }).toArray();
+			const docs = await db.users.find({ _id: { $in: [id1, id3] } }).toArray();
 			expect(docs.length).to.equal(2);
 			expect(docs.map(d => d.name).sort()).to.deep.equal(['User1', 'User3']);
 		});
 
-		it('should support sorting by ObjectId (_id)', function() {
+		it('should support sorting by ObjectId (_id)', async function() {
 			db.createCollection('messages');
 			
 			// Insert in random order but with timestamps that increase
@@ -255,10 +255,10 @@ describe("ObjectId", function() {
 			for (let i = 0; i < 3; i++) {
 				const id = new mongo.ObjectId();
 				ids.push(id);
-				db.messages.insertOne({ _id: id, text: `Message ${i}` });
+				await db.messages.insertOne({ _id: id, text: `Message ${i}` });
 			}
 			
-			const sorted = db.messages.find().sort({ _id: 1 }).toArray();
+			const sorted = await db.messages.find().sort({ _id: 1 }).toArray();
 			expect(sorted.length).to.equal(3);
 			
 			// Should be in chronological order (roughly, if created close together)
@@ -267,25 +267,25 @@ describe("ObjectId", function() {
 			}
 		});
 
-		it('should handle ObjectId in updates', function() {
+		it('should handle ObjectId in updates', async function() {
 			db.createCollection('users');
 			const id = new mongo.ObjectId();
-			db.users.insertOne({ _id: id, name: 'Original' });
+			await db.users.insertOne({ _id: id, name: 'Original' });
 			
-			db.users.updateOne({ _id: id }, { $set: { name: 'Updated' } });
+			await db.users.updateOne({ _id: id }, { $set: { name: 'Updated' } });
 			
-			const doc = db.users.findOne({ _id: id });
+			const doc = await db.users.findOne({ _id: id });
 			expect(doc.name).to.equal('Updated');
 		});
 
-		it('should handle ObjectId in deletes', function() {
+		it('should handle ObjectId in deletes', async function() {
 			db.createCollection('users');
 			const id = new mongo.ObjectId();
-			db.users.insertOne({ _id: id, name: 'ToDelete' });
+			await db.users.insertOne({ _id: id, name: 'ToDelete' });
 			
-			db.users.deleteOne({ _id: id });
+			await db.users.deleteOne({ _id: id });
 			
-			const doc = db.users.findOne({ _id: id });
+			const doc = await db.users.findOne({ _id: id });
 			expect(doc).to.be.null;
 		});
 	});

@@ -6,6 +6,7 @@ import { applyUpdates, createDocFromUpdate } from './updates.js';
 import { RegularCollectionIndex } from './RegularCollectionIndex.js';
 import { TextCollectionIndex } from './TextCollectionIndex.js';
 import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
+import { QueryPlanner } from './QueryPlanner.js';
 
 /**
  * Collection class
@@ -16,6 +17,7 @@ export class Collection {
 		this.storage = storage;
 		this.idGenerator = idGenerator;
 		this.indexes = {}; // Index storage - map of index name to index structure
+		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
 		this.isCollection = true; // TODO used by dropDatabase, ugly
 	}
 
@@ -108,60 +110,19 @@ export class Collection {
 	}
 
 	/**
-	 * Query planner - analyze query and determine if an index can be used
+	 * Query planner - analyze query and determine optimal execution plan
 	 */
 	planQuery(query) {
-		// Simple query planner - look for equality queries on indexed fields
-		const queryKeys = Object.keys(query);
-
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				const index = this.indexes[indexName];
-				
-				// Skip text indexes - they are handled separately
-				if (index instanceof TextCollectionIndex) {
-					continue;
-				}
-
-				// Try geospatial indexes
-				if (index instanceof GeospatialCollectionIndex) {
-					const docIds = index.query(query);
-					if (docIds !== null) {
-						return {
-							useIndex: true,
-							indexName: indexName,
-							docIds: docIds
-						};
-					}
-					continue;
-				}
-				
-				const indexFields = Object.keys(index.keys);
-
-				// Check if query matches index (simple case: single field equality)
-				// Note: Compound indexes are created but only single-field equality queries use them
-				if (indexFields.length === 1) {
-					const field = indexFields[0];
-					// Check for simple equality
-					if (queryKeys.indexOf(field) !== -1) {
-						const queryValue = query[field];
-						// Only use index for simple equality (not operators like $gt, $lt, etc.)
-						if (typeof queryValue !== 'object' || queryValue === null) {
-							const docIds = index.query(query);
-							if (docIds !== null) {
-								return {
-									useIndex: true,
-									indexName: indexName,
-									docIds: docIds
-								};
-							}
-						}
-					}
-				}
-			}
-		}
-
-		return null;
+		const plan = this.queryPlanner.plan(query);
+		const docIds = this.queryPlanner.execute(plan);
+		
+		return {
+			useIndex: plan.type !== 'full_scan',
+			planType: plan.type,
+			indexNames: plan.indexes,
+			docIds: docIds,
+			estimatedCost: plan.estimatedCost
+		};
 	}
 
 	/**

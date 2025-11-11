@@ -36,13 +36,15 @@ export class Cursor {
 		
 		// Query planning - check if we can use an index
 		const queryPlan = this.planQuery(this.query);
+		this.useIndex = queryPlan && queryPlan.useIndex;
+		this.planType = queryPlan ? queryPlan.planType : 'full_scan';
 		this.indexDocIds = null;
 		this.indexPos = 0;
 		this.fullScanDocIds = {}; // Track which docs we've seen to avoid duplicates
 
-		// If using index, get the document IDs from the index
-		if (queryPlan && queryPlan.useIndex) {
-			this.indexDocIds = queryPlan.docIds ? queryPlan.docIds.slice() : [];
+		// If using index, get the document IDs from the query plan
+		if (this.useIndex && queryPlan.docIds) {
+			this.indexDocIds = queryPlan.docIds.slice();
 		}
 		
 		// Initialize by finding first document
