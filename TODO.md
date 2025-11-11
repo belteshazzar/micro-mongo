@@ -140,10 +140,12 @@ This document tracks the features needed to make micro-mongo more compatible wit
 
 ---
 
-## 4. Aggregation Pipeline Improvements 🟡 MEDIUM PRIORITY
+## 4. Aggregation Pipeline Improvements � IN PROGRESS
 
-**Current State:** Basic stages ($match, $project, $group, $sort, $limit, $skip, $count, $unwind)  
+**Current State:** ✅ Enhanced with expression operators, new stages, and improved accumulators  
 **MongoDB:** 40+ aggregation stages with rich expression language
+
+**Progress:** Core expression engine implemented with 60+ operators across 8 categories
 
 ### Core Stages:
 - [ ] Add $lookup (left outer join)
@@ -158,26 +160,43 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [ ] Add $geoNear (geospatial aggregation)
 - [ ] Add $sample (random document sampling)
 - [ ] Add $redact (conditional filtering)
-- [ ] Add $addFields / $set (add computed fields)
+- [x] Add $addFields / $set (add computed fields) ✅
 - [ ] Add $unset (remove fields)
 
 ### Group Accumulators:
-- [ ] Add $stdDevPop and $stdDevSamp
-- [ ] Add $mergeObjects (merge objects in group)
-- [ ] Improve existing accumulators ($sum, $avg, etc.)
+- [x] Add $stdDevPop and $stdDevSamp ✅
+- [x] Add $mergeObjects (merge objects in group) ✅
+- [x] Improve existing accumulators to support expressions ($sum, $avg, etc.) ✅
 
 ### Expression Operators:
-- [ ] String operators: $concat, $substr, $toLower, $toUpper, $trim, $split, $strLenCP
-- [ ] Date operators: $dateToString, $year, $month, $dayOfMonth, $hour, $minute, $second
-- [ ] Conditional operators: $cond, $ifNull, $switch
-- [ ] Array operators: $filter, $map, $reduce, $zip, $arrayElemAt, $slice, $concatArrays
-- [ ] Comparison operators: $cmp, $eq, $ne, $gt, $gte, $lt, $lte
-- [ ] Arithmetic operators: $add, $subtract, $multiply, $divide, $mod, $pow, $sqrt
-- [ ] Type operators: $type, $convert, $toBool, $toDate, $toDecimal, $toInt, $toString
-- [ ] Object operators: $objectToArray, $arrayToObject, $mergeObjects
+- [x] String operators: $concat, $substr, $toLower, $toUpper, $trim, $ltrim, $rtrim, $split, $strLenCP, $strcasecmp, $indexOfCP, $replaceOne, $replaceAll ✅
+- [x] Date operators: $dateToString, $year, $month, $dayOfMonth, $dayOfWeek, $dayOfYear, $hour, $minute, $second, $millisecond, $week, $isoWeek, $isoWeekYear, $toDate ✅
+- [x] Conditional operators: $cond, $ifNull, $switch ✅
+- [x] Array operators: $filter, $map, $reduce, $zip, $arrayElemAt, $slice, $concatArrays, $in, $indexOfArray, $isArray, $size, $reverseArray ✅
+- [x] Comparison operators: $cmp, $eq, $ne, $gt, $gte, $lt, $lte ✅
+- [x] Logical operators: $and, $or, $not ✅
+- [x] Arithmetic operators: $add, $subtract, $multiply, $divide, $mod, $pow, $sqrt, $abs, $ceil, $floor, $trunc, $round ✅
+- [x] Type operators: $type, $convert, $toBool, $toDate, $toDecimal, $toDouble, $toInt, $toLong, $toString ✅
+- [x] Object operators: $objectToArray, $arrayToObject, $mergeObjects ✅
+
+**Status:** 🚧 IN PROGRESS  
+**Test Results:** 53 new expression operator tests passing, all 299 existing tests passing  
+**Changes Made:**
+- Created comprehensive expression evaluator in `src/aggregationExpressions.js`
+- Implemented 60+ operators across 8 categories (arithmetic, string, comparison, logical, conditional, date, array, type, object)
+- Enhanced $project stage to support computed expressions
+- Added $addFields and $set stages for computed field addition
+- Upgraded $group accumulators to use expression evaluator
+- Added $stdDevPop, $stdDevSamp, and $mergeObjects group accumulators
+- Enhanced all existing accumulators ($sum, $avg, $min, $max, $push, $addToSet, $first, $last) to support expressions
+- Added support for $$ variable references in aggregation context
+- Fixed date operators to use UTC (MongoDB-compatible behavior)
+- Created comprehensive test suite with 53 tests in `test/test-aggregation-expressions.js`
 
 **Estimated Effort:** 10-15 days (staged implementation)  
-**Dependencies:** Promise-based API recommended first
+**Actual Progress:** 5-6 days worth completed
+**Remaining Work:** Advanced stages ($lookup, $facet, $bucket, etc.)
+**Dependencies:** Promise-based API ✅ completed first
 
 ---
 

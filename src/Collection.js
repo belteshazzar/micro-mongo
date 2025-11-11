@@ -7,6 +7,7 @@ import { RegularCollectionIndex } from './RegularCollectionIndex.js';
 import { TextCollectionIndex } from './TextCollectionIndex.js';
 import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
 import { QueryPlanner } from './QueryPlanner.js';
+import { evaluateExpression } from './aggregationExpressions.js';
 
 /**
  * Collection class
@@ -178,12 +179,24 @@ export class Collection {
 				}
 				results = matched;
 			} else if (stageType === "$project") {
-				// Reshape documents
+				// Reshape documents with expression support
 				const projected = [];
 				for (let j = 0; j < results.length; j++) {
-					projected.push(applyProjection(stageSpec, results[j]));
+					projected.push(applyProjectionWithExpressions(stageSpec, results[j]));
 				}
 				results = projected;
+			} else if (stageType === "$addFields" || stageType === "$set") {
+				// Add/set fields with computed expressions
+				const modified = [];
+				for (let j = 0; j < results.length; j++) {
+					const doc = copy(results[j]);
+					for (const field in stageSpec) {
+						const expr = stageSpec[field];
+						doc[field] = evaluateExpression(expr, results[j]);
+					}
+					modified.push(doc);
+				}
+				results = modified;
 			} else if (stageType === "$sort") {
 				// Sort documents
 				const sortKeys = Object.keys(stageSpec);
@@ -212,17 +225,11 @@ export class Collection {
 					const doc = results[j];
 					let key;
 
-					// Compute group key
+					// Compute group key using expression evaluator
 					if (groupId === null || groupId === undefined) {
 						key = null;
-					} else if (typeof groupId === 'string' && groupId.charAt(0) === '$') {
-						// Field reference
-						key = getProp(doc, groupId.substring(1));
-					} else if (typeof groupId === 'object') {
-						// Computed key
-						key = JSON.stringify(groupId);
 					} else {
-						key = groupId;
+						key = evaluateExpression(groupId, doc);
 					}
 
 					const keyStr = JSON.stringify(key);
@@ -259,11 +266,11 @@ export class Collection {
 						if (accType === '$sum') {
 							let sum = 0;
 							for (let k = 0; k < group.docs.length; k++) {
-								if (typeof accExpr === 'number') {
-									sum += accExpr;
-								} else if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									const val = getProp(group.docs[k], accExpr.substring(1));
-									sum += val || 0;
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (typeof val === 'number') {
+									sum += val;
+								} else if (val !== null && val !== undefined) {
+									sum += Number(val) || 0;
 								}
 							}
 							result[field] = sum;
@@ -271,53 +278,43 @@ export class Collection {
 							let sum = 0;
 							let count = 0;
 							for (let k = 0; k < group.docs.length; k++) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									const val = getProp(group.docs[k], accExpr.substring(1));
-									if (val !== undefined && val !== null) {
-										sum += val;
-										count++;
-									}
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (val !== undefined && val !== null) {
+									sum += Number(val) || 0;
+									count++;
 								}
 							}
 							result[field] = count > 0 ? sum / count : 0;
 						} else if (accType === '$min') {
 							let min = undefined;
 							for (let k = 0; k < group.docs.length; k++) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									const val = getProp(group.docs[k], accExpr.substring(1));
-									if (val !== undefined && (min === undefined || val < min)) {
-										min = val;
-									}
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (val !== undefined && (min === undefined || val < min)) {
+									min = val;
 								}
 							}
 							result[field] = min;
 						} else if (accType === '$max') {
 							let max = undefined;
 							for (let k = 0; k < group.docs.length; k++) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									const val = getProp(group.docs[k], accExpr.substring(1));
-									if (val !== undefined && (max === undefined || val > max)) {
-										max = val;
-									}
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (val !== undefined && (max === undefined || val > max)) {
+									max = val;
 								}
 							}
 							result[field] = max;
 						} else if (accType === '$push') {
 							const arr = [];
 							for (let k = 0; k < group.docs.length; k++) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									const val = getProp(group.docs[k], accExpr.substring(1));
-									arr.push(val);
-								}
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								arr.push(val);
 							}
 							result[field] = arr;
 						} else if (accType === '$addToSet') {
 							const set = {};
 							for (let k = 0; k < group.docs.length; k++) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									const val = getProp(group.docs[k], accExpr.substring(1));
-									set[JSON.stringify(val)] = val;
-								}
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								set[JSON.stringify(val)] = val;
 							}
 							const arr = [];
 							for (const valKey in set) {
@@ -326,16 +323,54 @@ export class Collection {
 							result[field] = arr;
 						} else if (accType === '$first') {
 							if (group.docs.length > 0) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									result[field] = getProp(group.docs[0], accExpr.substring(1));
-								}
+								result[field] = evaluateExpression(accExpr, group.docs[0]);
 							}
 						} else if (accType === '$last') {
 							if (group.docs.length > 0) {
-								if (typeof accExpr === 'string' && accExpr.charAt(0) === '$') {
-									result[field] = getProp(group.docs[group.docs.length - 1], accExpr.substring(1));
+								result[field] = evaluateExpression(accExpr, group.docs[group.docs.length - 1]);
+							}
+						} else if (accType === '$stdDevPop') {
+							// Population standard deviation
+							const values = [];
+							for (let k = 0; k < group.docs.length; k++) {
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (typeof val === 'number') {
+									values.push(val);
 								}
 							}
+							if (values.length > 0) {
+								const mean = values.reduce((a, b) => a + b, 0) / values.length;
+								const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+								result[field] = Math.sqrt(variance);
+							} else {
+								result[field] = 0;
+							}
+						} else if (accType === '$stdDevSamp') {
+							// Sample standard deviation
+							const values = [];
+							for (let k = 0; k < group.docs.length; k++) {
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (typeof val === 'number') {
+									values.push(val);
+								}
+							}
+							if (values.length > 1) {
+								const mean = values.reduce((a, b) => a + b, 0) / values.length;
+								const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / (values.length - 1);
+								result[field] = Math.sqrt(variance);
+							} else {
+								result[field] = 0;
+							}
+						} else if (accType === '$mergeObjects') {
+							// Merge objects from all documents in group
+							const merged = {};
+							for (let k = 0; k < group.docs.length; k++) {
+								const val = evaluateExpression(accExpr, group.docs[k]);
+								if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+									Object.assign(merged, val);
+								}
+							}
+							result[field] = merged;
 						}
 					}
 
@@ -806,4 +841,72 @@ export class Collection {
 			}
 		}
 	}
+}
+
+/**
+ * Apply projection with expression support
+ * Enhanced version of applyProjection that supports computed expressions
+ */
+function applyProjectionWithExpressions(projection, doc) {
+	const result = {};
+	const keys = Object.keys(projection);
+	
+	// Check if this is an inclusion or exclusion projection
+	let isInclusion = false;
+	let isExclusion = false;
+	let hasComputedFields = false;
+	
+	for (const key of keys) {
+		if (key === '_id') continue;
+		const value = projection[key];
+		
+		if (value === 1 || value === true) {
+			isInclusion = true;
+		} else if (value === 0 || value === false) {
+			isExclusion = true;
+		} else {
+			// Computed field (expression)
+			hasComputedFields = true;
+		}
+	}
+	
+	// Handle computed fields - they imply inclusion mode
+	if (hasComputedFields || isInclusion) {
+		// Inclusion mode: only include specified fields
+		// Always include _id unless explicitly excluded
+		if (projection._id !== 0 && projection._id !== false) {
+			result._id = doc._id;
+		}
+		
+		for (const key of keys) {
+			const value = projection[key];
+			
+			if (key === '_id') {
+				if (value === 0 || value === false) {
+					delete result._id;
+				}
+			} else if (value === 1 || value === true) {
+				// Simple field inclusion
+				result[key] = getProp(doc, key);
+			} else {
+				// Computed field (expression)
+				result[key] = evaluateExpression(value, doc);
+			}
+		}
+	} else {
+		// Exclusion mode: include all fields except specified ones
+		for (const key in doc) {
+			if (doc.hasOwnProperty(key)) {
+				result[key] = doc[key];
+			}
+		}
+		
+		for (const key of keys) {
+			if (projection[key] === 0 || projection[key] === false) {
+				delete result[key];
+			}
+		}
+	}
+	
+	return result;
 }
