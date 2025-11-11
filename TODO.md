@@ -161,7 +161,7 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [ ] Add $sample (random document sampling)
 - [ ] Add $redact (conditional filtering)
 - [x] Add $addFields / $set (add computed fields) ✅
-- [ ] Add $unset (remove fields)
+- [x] Add $unset (remove fields) ✅
 
 ### Group Accumulators:
 - [x] Add $stdDevPop and $stdDevSamp ✅
@@ -180,18 +180,24 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [x] Object operators: $objectToArray, $arrayToObject, $mergeObjects ✅
 
 **Status:** 🚧 IN PROGRESS  
-**Test Results:** 53 new expression operator tests passing, all 299 existing tests passing  
+**Test Results:** 60 new expression/stage tests passing (53 expression operators + 7 $unset), all 398 tests passing  
 **Changes Made:**
 - Created comprehensive expression evaluator in `src/aggregationExpressions.js`
 - Implemented 60+ operators across 8 categories (arithmetic, string, comparison, logical, conditional, date, array, type, object)
 - Enhanced $project stage to support computed expressions
 - Added $addFields and $set stages for computed field addition
+- Added $unset stage for field removal:
+  - Supports string syntax for single field: `{ $unset: "fieldName" }`
+  - Supports array syntax for multiple fields: `{ $unset: ["field1", "field2"] }`
+  - Supports object syntax: `{ $unset: { field1: "", field2: "" } }`
+  - Supports dot notation for nested field removal: `{ $unset: "address.zip" }`
+  - Gracefully handles non-existent fields
 - Upgraded $group accumulators to use expression evaluator
 - Added $stdDevPop, $stdDevSamp, and $mergeObjects group accumulators
 - Enhanced all existing accumulators ($sum, $avg, $min, $max, $push, $addToSet, $first, $last) to support expressions
 - Added support for $$ variable references in aggregation context
 - Fixed date operators to use UTC (MongoDB-compatible behavior)
-- Created comprehensive test suite with 53 tests in `test/test-aggregation-expressions.js`
+- Created comprehensive test suite with 60 tests in `test/test-aggregation-expressions.js`
 
 **Estimated Effort:** 10-15 days (staged implementation)  
 **Actual Progress:** 5-6 days worth completed

@@ -198,6 +198,43 @@ export class Collection {
 					modified.push(doc);
 				}
 				results = modified;
+			} else if (stageType === "$unset") {
+				// Remove fields from documents
+				const modified = [];
+				// $unset can be a string (single field), array of strings, or object
+				let fieldsToRemove = [];
+				if (typeof stageSpec === 'string') {
+					fieldsToRemove = [stageSpec];
+				} else if (Array.isArray(stageSpec)) {
+					fieldsToRemove = stageSpec;
+				} else if (typeof stageSpec === 'object') {
+					// Object form: { field1: "", field2: "" } or { field1: 1, field2: 1 }
+					fieldsToRemove = Object.keys(stageSpec);
+				}
+
+				for (let j = 0; j < results.length; j++) {
+					const doc = copy(results[j]);
+					for (let k = 0; k < fieldsToRemove.length; k++) {
+						const field = fieldsToRemove[k];
+						// Support dot notation for nested field removal
+						const pathParts = field.split('.');
+						if (pathParts.length === 1) {
+							delete doc[field];
+						} else {
+							// Navigate to parent and delete nested field
+							let parent = doc;
+							for (let m = 0; m < pathParts.length - 1; m++) {
+								if (parent == undefined || parent == null) break;
+								parent = parent[pathParts[m]];
+							}
+							if (parent != undefined && parent != null) {
+								delete parent[pathParts[pathParts.length - 1]];
+							}
+						}
+					}
+					modified.push(doc);
+				}
+				results = modified;
 			} else if (stageType === "$sort") {
 				// Sort documents
 				const sortKeys = Object.keys(stageSpec);

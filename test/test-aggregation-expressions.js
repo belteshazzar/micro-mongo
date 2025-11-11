@@ -978,4 +978,111 @@ describe('Aggregation Expression Operators', function() {
 			expect(results[1].result).to.equal(160); // a > 15, so a * b = 20 * 8
 		});
 	});
+
+	// ========================================================================
+	// $UNSET STAGE
+	// ========================================================================
+
+	describe('$unset Stage', function() {
+		beforeEach(async function() {
+			await collection.insertMany([
+				{ _id: 1, name: 'Alice', age: 30, city: 'NYC', country: 'USA', score: 95 },
+				{ _id: 2, name: 'Bob', age: 25, city: 'LA', country: 'USA', score: 88 },
+				{ _id: 3, name: 'Charlie', age: 35, city: 'Chicago', country: 'USA', score: 92 }
+			]);
+		});
+
+		it('should remove a single field using string syntax', async function() {
+			const results = await collection.aggregate([
+				{ $unset: 'score' }
+			]);
+
+			expect(results).to.have.lengthOf(3);
+			expect(results[0]).to.have.property('name');
+			expect(results[0]).to.have.property('age');
+			expect(results[0]).to.not.have.property('score');
+			expect(results[1]).to.not.have.property('score');
+			expect(results[2]).to.not.have.property('score');
+		});
+
+		it('should remove multiple fields using array syntax', async function() {
+			const results = await collection.aggregate([
+				{ $unset: ['city', 'country'] }
+			]);
+
+			expect(results).to.have.lengthOf(3);
+			expect(results[0]).to.have.property('name');
+			expect(results[0]).to.have.property('age');
+			expect(results[0]).to.have.property('score');
+			expect(results[0]).to.not.have.property('city');
+			expect(results[0]).to.not.have.property('country');
+		});
+
+		it('should remove fields using object syntax', async function() {
+			const results = await collection.aggregate([
+				{ $unset: { age: '', score: '' } }
+			]);
+
+			expect(results).to.have.lengthOf(3);
+			expect(results[0]).to.have.property('name');
+			expect(results[0]).to.have.property('city');
+			expect(results[0]).to.not.have.property('age');
+			expect(results[0]).to.not.have.property('score');
+		});
+
+		it('should work with nested documents', async function() {
+			await collection.deleteMany({});
+			await collection.insertMany([
+				{ _id: 1, name: 'Alice', address: { city: 'NYC', zip: '10001', country: 'USA' } },
+				{ _id: 2, name: 'Bob', address: { city: 'LA', zip: '90001', country: 'USA' } }
+			]);
+
+			const results = await collection.aggregate([
+				{ $unset: 'address.zip' }
+			]);
+
+			expect(results).to.have.lengthOf(2);
+			expect(results[0].address).to.have.property('city');
+			expect(results[0].address).to.have.property('country');
+			expect(results[0].address).to.not.have.property('zip');
+		});
+
+		it('should combine with other aggregation stages', async function() {
+			const results = await collection.aggregate([
+				{ $match: { age: { $gte: 30 } } },
+				{ $unset: ['city', 'country'] },
+				{ $project: { name: 1, age: 1, score: 1 } }
+			]);
+
+			expect(results).to.have.lengthOf(2);
+			expect(results[0].name).to.equal('Alice');
+			expect(results[0]).to.have.property('age');
+			expect(results[0]).to.have.property('score');
+			expect(results[0]).to.not.have.property('city');
+			expect(results[1].name).to.equal('Charlie');
+		});
+
+		it('should not error when removing non-existent fields', async function() {
+			const results = await collection.aggregate([
+				{ $unset: 'nonexistent' }
+			]);
+
+			expect(results).to.have.lengthOf(3);
+			expect(results[0]).to.have.property('name');
+		});
+
+		it('should work with $addFields and $unset together', async function() {
+			const results = await collection.aggregate([
+				{ $addFields: { fullName: '$name', total: { $add: ['$age', '$score'] } } },
+				{ $unset: ['name', 'age', 'score'] }
+			]);
+
+			expect(results).to.have.lengthOf(3);
+			expect(results[0]).to.have.property('fullName', 'Alice');
+			expect(results[0]).to.have.property('total', 125);
+			expect(results[0]).to.not.have.property('name');
+			expect(results[0]).to.not.have.property('age');
+			expect(results[0]).to.not.have.property('score');
+		});
+	});
 });
