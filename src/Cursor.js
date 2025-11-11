@@ -41,6 +41,7 @@ export class Cursor {
 		this.indexDocIds = null;
 		this.indexPos = 0;
 		this.fullScanDocIds = {}; // Track which docs we've seen to avoid duplicates
+		this.indexOnly = queryPlan && queryPlan.indexOnly; // If true, don't fall back to full scan
 
 		// If using index, get the document IDs from the query plan
 		if (this.useIndex && queryPlan.docIds) {
@@ -62,6 +63,12 @@ export class Cursor {
 				return;
 			}
 			// If doc doesn't match (shouldn't happen with good index), continue to next
+		}
+
+		// If index-only query (e.g., text search, geospatial), don't fall back to full scan
+		if (this.indexOnly) {
+			this._next = null;
+			return;
 		}
 
 		// Then fall back to full scan for remaining documents

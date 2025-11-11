@@ -10,6 +10,7 @@ class QueryPlan {
 		this.indexes = []; // Indexes to use
 		this.indexScans = []; // Array of { indexName, docIds }
 		this.estimatedCost = Infinity;
+		this.indexOnly = false; // If true, only use index results (no full scan fallback)
 	}
 }
 
@@ -175,6 +176,7 @@ export class QueryPlanner {
 					const docIds = index.search(textQuery);
 					plan.indexScans = [{ indexName, docIds }];
 					plan.estimatedCost = docIds.length;
+					plan.indexOnly = true; // Text search must use index
 					return plan;
 				}
 			}
@@ -212,6 +214,7 @@ export class QueryPlanner {
 					plan.indexes = [indexName];
 					plan.indexScans = [{ indexName, docIds }];
 					plan.estimatedCost = docIds.length;
+					plan.indexOnly = true; // Geospatial queries must use index
 					return plan;
 				}
 			}

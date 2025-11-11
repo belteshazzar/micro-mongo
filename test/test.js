@@ -2180,5 +2180,383 @@ describe("DB", function() {
 				expect(docs.length).to.equal(0);
 			});
 		});
+
+		describe('$near operator', function() {
+			const nearCollectionName = 'nearTestCollection';
+
+			beforeEach(async function() {
+				if (db[nearCollectionName]) {
+					await db[nearCollectionName].drop();
+				}
+			});
+
+			afterEach(async function() {
+				if (db[nearCollectionName]) {
+					await db[nearCollectionName].drop();
+				}
+			});
+
+			it('should find points within maxDistance using $near', async function() {
+				// Insert test locations
+				await db[nearCollectionName].insertMany([
+					{ name: 'NYC', location: { type: 'Point', coordinates: [-74.0060, 40.7128] } },
+					{ name: 'Philadelphia', location: { type: 'Point', coordinates: [-75.1652, 39.9526] } },
+					{ name: 'Boston', location: { type: 'Point', coordinates: [-71.0589, 42.3601] } },
+					{ name: 'LA', location: { type: 'Point', coordinates: [-118.2437, 34.0522] } }
+				]);
+
+				await db[nearCollectionName].createIndex({ location: '2dsphere' });
+
+				// Find points near NYC within 500km
+				const docs = await db[nearCollectionName].find({
+					location: {
+						$near: {
+							$geometry: { type: 'Point', coordinates: [-74.0060, 40.7128] },
+							$maxDistance: 500000 // 500km in meters
+						}
+					}
+				}).toArray();
+
+				// Should find NYC, Philadelphia, and Boston (all within 500km)
+				// Should NOT find LA (too far away)
+				expect(docs.length).to.equal(3);
+				
+				// Results should be sorted by distance
+				expect(docs[0].name).to.equal('NYC'); // Closest (0km)
+				expect(docs[1].name).to.equal('Philadelphia'); // ~130km
+				expect(docs[2].name).to.equal('Boston'); // ~300km
+			});
+
+			it('should return results sorted by distance with $near', async function() {
+				await db[nearCollectionName].insertMany([
+					{ name: 'Point A', location: { type: 'Point', coordinates: [0, 0] } },
+					{ name: 'Point B', location: { type: 'Point', coordinates: [1, 1] } },
+					{ name: 'Point C', location: { type: 'Point', coordinates: [0.5, 0.5] } }
+				]);
+
+				await db[nearCollectionName].createIndex({ location: '2dsphere' });
+
+				const docs = await db[nearCollectionName].find({
+					location: {
+						$near: {
+							$geometry: { type: 'Point', coordinates: [0, 0] },
+							$maxDistance: 200000 // 200km
+						}
+					}
+				}).toArray();
+
+				// Should be sorted by distance from [0,0]
+				expect(docs.length).to.equal(3);
+				expect(docs[0].name).to.equal('Point A'); // At origin
+				expect(docs[1].name).to.equal('Point C'); // Closer to origin
+				expect(docs[2].name).to.equal('Point B'); // Furthest from origin
+			});
+
+			it('should handle $near with alternative coordinate format', async function() {
+				await db[nearCollectionName].insertOne({
+					name: 'Test Location',
+					location: { type: 'Point', coordinates: [10, 20] }
+				});
+
+				await db[nearCollectionName].createIndex({ location: '2dsphere' });
+
+				// Test with direct coordinates array
+				const docs = await db[nearCollectionName].find({
+					location: {
+						$near: {
+							coordinates: [10, 20],
+							$maxDistance: 1000 // 1km
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('Test Location');
+			});
+
+			it('should return empty array when no points within maxDistance', async function() {
+				await db[nearCollectionName].insertMany([
+					{ name: 'Far Point 1', location: { type: 'Point', coordinates: [100, 50] } },
+					{ name: 'Far Point 2', location: { type: 'Point', coordinates: [110, 60] } }
+				]);
+
+				await db[nearCollectionName].createIndex({ location: '2dsphere' });
+
+				const docs = await db[nearCollectionName].find({
+					location: {
+						$near: {
+							$geometry: { type: 'Point', coordinates: [0, 0] },
+							$maxDistance: 1000 // 1km - too small
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.equal(0);
+			});
+		});
+
+		describe('$nearSphere operator', function() {
+			const nearSphereCollectionName = 'nearSphereTestCollection';
+
+			beforeEach(async function() {
+				if (db[nearSphereCollectionName]) {
+					await db[nearSphereCollectionName].drop();
+				}
+			});
+
+			afterEach(async function() {
+				if (db[nearSphereCollectionName]) {
+					await db[nearSphereCollectionName].drop();
+				}
+			});
+
+			it('should find points within maxDistance using $nearSphere', async function() {
+				await db[nearSphereCollectionName].insertMany([
+					{ name: 'London', location: { type: 'Point', coordinates: [-0.1278, 51.5074] } },
+					{ name: 'Paris', location: { type: 'Point', coordinates: [2.3522, 48.8566] } },
+					{ name: 'Berlin', location: { type: 'Point', coordinates: [13.4050, 52.5200] } },
+					{ name: 'Tokyo', location: { type: 'Point', coordinates: [139.6917, 35.6895] } }
+				]);
+
+				await db[nearSphereCollectionName].createIndex({ location: '2dsphere' });
+
+				// Find points near London within 1500km
+				const docs = await db[nearSphereCollectionName].find({
+					location: {
+						$nearSphere: {
+							$geometry: { type: 'Point', coordinates: [-0.1278, 51.5074] },
+							$maxDistance: 1500000 // 1500km in meters
+						}
+					}
+				}).toArray();
+
+				// Should find London, Paris, and Berlin (all within 1500km)
+				// Should NOT find Tokyo (too far)
+				expect(docs.length).to.equal(3);
+				expect(docs[0].name).to.equal('London'); // Closest
+				expect(docs[1].name).to.equal('Paris'); // ~340km
+				expect(docs[2].name).to.equal('Berlin'); // ~930km
+			});
+
+			it('should return results sorted by spherical distance', async function() {
+				await db[nearSphereCollectionName].insertMany([
+					{ name: 'A', location: { type: 'Point', coordinates: [0, 0] } },
+					{ name: 'B', location: { type: 'Point', coordinates: [2, 2] } },
+					{ name: 'C', location: { type: 'Point', coordinates: [1, 1] } }
+				]);
+
+				await db[nearSphereCollectionName].createIndex({ location: '2dsphere' });
+
+				const docs = await db[nearSphereCollectionName].find({
+					location: {
+						$nearSphere: {
+							$geometry: { type: 'Point', coordinates: [0, 0] },
+							$maxDistance: 500000
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.equal(3);
+				expect(docs[0].name).to.equal('A');
+				expect(docs[1].name).to.equal('C');
+				expect(docs[2].name).to.equal('B');
+			});
+
+			it('should handle $nearSphere with default maxDistance', async function() {
+				await db[nearSphereCollectionName].insertOne({
+					name: 'Test Point',
+					location: { type: 'Point', coordinates: [10, 20] }
+				});
+
+				await db[nearSphereCollectionName].createIndex({ location: '2dsphere' });
+
+				// Without specifying maxDistance, should use default (1000km)
+				const docs = await db[nearSphereCollectionName].find({
+					location: {
+						$nearSphere: {
+							$geometry: { type: 'Point', coordinates: [10.1, 20.1] }
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('Test Point');
+			});
+		});
+
+		describe('$geoIntersects operator', function() {
+			const intersectsCollectionName = 'intersectsTestCollection';
+
+			beforeEach(async function() {
+				if (db[intersectsCollectionName]) {
+					await db[intersectsCollectionName].drop();
+				}
+			});
+
+			afterEach(async function() {
+				if (db[intersectsCollectionName]) {
+					await db[intersectsCollectionName].drop();
+				}
+			});
+
+			it('should find points that intersect with a Point geometry', async function() {
+				await db[intersectsCollectionName].insertMany([
+					{ name: 'Point A', location: { type: 'Point', coordinates: [10, 20] } },
+					{ name: 'Point B', location: { type: 'Point', coordinates: [15, 25] } },
+					{ name: 'Point C', location: { type: 'Point', coordinates: [10.0001, 20.0001] } }
+				]);
+
+				await db[intersectsCollectionName].createIndex({ location: '2dsphere' });
+
+				// Find points that intersect with a specific point
+				const docs = await db[intersectsCollectionName].find({
+					location: {
+						$geoIntersects: {
+							$geometry: { type: 'Point', coordinates: [10, 20] }
+						}
+					}
+				}).toArray();
+
+				// Should find Point A and Point C (very close to the query point)
+				expect(docs.length).to.be.at.least(1);
+				const names = docs.map(d => d.name);
+				expect(names).to.include('Point A');
+			});
+
+			it('should find points inside a Polygon using $geoIntersects', async function() {
+				await db[intersectsCollectionName].insertMany([
+					{ name: 'Inside Point 1', location: { type: 'Point', coordinates: [10, 20] } },
+					{ name: 'Inside Point 2', location: { type: 'Point', coordinates: [11, 21] } },
+					{ name: 'Outside Point', location: { type: 'Point', coordinates: [50, 50] } }
+				]);
+
+				await db[intersectsCollectionName].createIndex({ location: '2dsphere' });
+
+				// Define a polygon that contains the first two points
+				const polygon = {
+					type: 'Polygon',
+					coordinates: [[
+						[9, 19],
+						[12, 19],
+						[12, 22],
+						[9, 22],
+						[9, 19]
+					]]
+				};
+
+				const docs = await db[intersectsCollectionName].find({
+					location: {
+						$geoIntersects: {
+							$geometry: polygon
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.equal(2);
+				const names = docs.map(d => d.name);
+				expect(names).to.include('Inside Point 1');
+				expect(names).to.include('Inside Point 2');
+				expect(names).to.not.include('Outside Point');
+			});
+
+			it('should handle complex polygon shapes', async function() {
+				await db[intersectsCollectionName].insertMany([
+					{ name: 'Center', location: { type: 'Point', coordinates: [0, 0] } },
+					{ name: 'Corner', location: { type: 'Point', coordinates: [5, 5] } },
+					{ name: 'Outside', location: { type: 'Point', coordinates: [10, 10] } }
+				]);
+
+				await db[intersectsCollectionName].createIndex({ location: '2dsphere' });
+
+				// L-shaped polygon
+				const lShapedPolygon = {
+					type: 'Polygon',
+					coordinates: [[
+						[-2, -2],
+						[6, -2],
+						[6, 2],
+						[2, 2],
+						[2, 6],
+						[-2, 6],
+						[-2, -2]
+					]]
+				};
+
+				const docs = await db[intersectsCollectionName].find({
+					location: {
+						$geoIntersects: {
+							$geometry: lShapedPolygon
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.be.at.least(1);
+				const names = docs.map(d => d.name);
+				expect(names).to.include('Center');
+			});
+
+			it('should return empty array when no points intersect', async function() {
+				await db[intersectsCollectionName].insertMany([
+					{ name: 'Far Point 1', location: { type: 'Point', coordinates: [100, 100] } },
+					{ name: 'Far Point 2', location: { type: 'Point', coordinates: [110, 110] } }
+				]);
+
+				await db[intersectsCollectionName].createIndex({ location: '2dsphere' });
+
+				const smallPolygon = {
+					type: 'Polygon',
+					coordinates: [[
+						[0, 0],
+						[1, 0],
+						[1, 1],
+						[0, 1],
+						[0, 0]
+					]]
+				};
+
+				const docs = await db[intersectsCollectionName].find({
+					location: {
+						$geoIntersects: {
+							$geometry: smallPolygon
+						}
+					}
+				}).toArray();
+
+				expect(docs.length).to.equal(0);
+			});
+
+			it('should handle point on polygon boundary', async function() {
+				await db[intersectsCollectionName].insertOne({
+					name: 'Boundary Point',
+					location: { type: 'Point', coordinates: [10, 20] }
+				});
+
+				await db[intersectsCollectionName].createIndex({ location: '2dsphere' });
+
+				// Polygon with point on edge
+				const polygon = {
+					type: 'Polygon',
+					coordinates: [[
+						[10, 20],
+						[15, 20],
+						[15, 25],
+						[10, 25],
+						[10, 20]
+					]]
+				};
+
+				const docs = await db[intersectsCollectionName].find({
+					location: {
+						$geoIntersects: {
+							$geometry: polygon
+						}
+					}
+				}).toArray();
+
+				// Point on boundary should be found
+				expect(docs.length).to.equal(1);
+				expect(docs[0].name).to.equal('Boundary Point');
+			});
+		});
 	});
 });

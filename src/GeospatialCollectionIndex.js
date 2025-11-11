@@ -143,14 +143,216 @@ export class GeospatialCollectionIndex extends CollectionIndex {
 			}
 		}
 
-		// Handle $near with radius (future enhancement)
-		// if (geoQuery.$near) {
-		//   const center = geoQuery.$near;
-		//   const maxDistance = geoQuery.$maxDistance || 1000; // default 1000km
-		//   // Implementation would use rtree.searchRadius
-		// }
+		// Handle $near with radius
+		if (geoQuery.$near) {
+			const nearQuery = geoQuery.$near;
+			
+			// Extract geometry from $geometry or use direct coordinates
+			let coordinates;
+			if (nearQuery.$geometry) {
+				coordinates = nearQuery.$geometry.coordinates;
+			} else if (nearQuery.coordinates) {
+				coordinates = nearQuery.coordinates;
+			} else if (Array.isArray(nearQuery)) {
+				coordinates = nearQuery;
+			} else {
+				return null;
+			}
+
+			if (!coordinates || coordinates.length < 2) {
+				return null;
+			}
+
+			const [lng, lat] = coordinates;
+			
+			// $maxDistance in meters (default to 1000km if not specified)
+			const maxDistanceMeters = nearQuery.$maxDistance || 1000000;
+			const maxDistanceKm = maxDistanceMeters / 1000;
+
+			// Use rtree.searchRadius to find points within distance
+			const results = this.rtree.searchRadius(lat, lng, maxDistanceKm);
+
+			// Calculate actual distances and sort by distance
+			const withDistances = results.map(entry => {
+				const dist = this._haversineDistance(lat, lng, entry.lat, entry.lng);
+				return {
+					_id: entry.data._id,
+					distance: dist
+				};
+			});
+
+			// Sort by distance (ascending)
+			withDistances.sort((a, b) => a.distance - b.distance);
+
+			// Return just the document IDs
+			return withDistances.map(entry => entry._id);
+		}
+
+		// Handle $nearSphere with radius (uses spherical distance, same as $near)
+		if (geoQuery.$nearSphere) {
+			const nearQuery = geoQuery.$nearSphere;
+			
+			// Extract geometry from $geometry or use direct coordinates
+			let coordinates;
+			if (nearQuery.$geometry) {
+				coordinates = nearQuery.$geometry.coordinates;
+			} else if (nearQuery.coordinates) {
+				coordinates = nearQuery.coordinates;
+			} else if (Array.isArray(nearQuery)) {
+				coordinates = nearQuery;
+			} else {
+				return null;
+			}
+
+			if (!coordinates || coordinates.length < 2) {
+				return null;
+			}
+
+			const [lng, lat] = coordinates;
+			
+			// $maxDistance in meters (default to 1000km if not specified)
+			const maxDistanceMeters = nearQuery.$maxDistance || 1000000;
+			const maxDistanceKm = maxDistanceMeters / 1000;
+
+			// Use rtree.searchRadius to find points within distance (already uses Haversine)
+			const results = this.rtree.searchRadius(lat, lng, maxDistanceKm);
+
+			// Calculate actual distances and sort by distance
+			const withDistances = results.map(entry => {
+				const dist = this._haversineDistance(lat, lng, entry.lat, entry.lng);
+				return {
+					_id: entry.data._id,
+					distance: dist
+				};
+			});
+
+			// Sort by distance (ascending)
+			withDistances.sort((a, b) => a.distance - b.distance);
+
+			// Return just the document IDs
+			return withDistances.map(entry => entry._id);
+		}
+
+		// Handle $geoIntersects
+		if (geoQuery.$geoIntersects) {
+			const intersectsQuery = geoQuery.$geoIntersects;
+			
+			// Extract geometry
+			let geometry;
+			if (intersectsQuery.$geometry) {
+				geometry = intersectsQuery.$geometry;
+			} else {
+				return null;
+			}
+
+			if (!geometry || !geometry.type) {
+				return null;
+			}
+
+			// For now, support Point and Polygon geometries
+			if (geometry.type === 'Point') {
+				const [lng, lat] = geometry.coordinates;
+				
+				// Search for points at this exact location
+				// Use a very small bounding box
+				const epsilon = 0.0001; // ~11 meters
+				const results = this.rtree.searchBBox({
+					minLat: lat - epsilon,
+					maxLat: lat + epsilon,
+					minLng: lng - epsilon,
+					maxLng: lng + epsilon
+				});
+
+				// Return document IDs
+				return results.map(entry => entry.data._id);
+			} else if (geometry.type === 'Polygon') {
+				const coordinates = geometry.coordinates;
+				if (!coordinates || coordinates.length === 0) {
+					return null;
+				}
+
+				// Get the exterior ring
+				const ring = coordinates[0];
+				if (!ring || ring.length < 3) {
+					return null;
+				}
+
+				// Calculate bounding box of the polygon
+				let minLat = Infinity, maxLat = -Infinity;
+				let minLng = Infinity, maxLng = -Infinity;
+				
+				for (const coord of ring) {
+					const [lng, lat] = coord;
+					minLat = Math.min(minLat, lat);
+					maxLat = Math.max(maxLat, lat);
+					minLng = Math.min(minLng, lng);
+					maxLng = Math.max(maxLng, lng);
+				}
+
+				// Search for points within the bounding box
+				const candidates = this.rtree.searchBBox({
+					minLat,
+					maxLat,
+					minLng,
+					maxLng
+				});
+
+				// Filter by actual point-in-polygon test
+				const results = candidates.filter(entry => {
+					return this._pointInPolygon(entry.lat, entry.lng, ring);
+				});
+
+				return results.map(entry => entry.data._id);
+			}
+
+			return null;
+		}
 
 		return null;
+	}
+
+	/**
+	 * Calculate distance between two points using Haversine formula
+	 * @param {number} lat1 - Latitude of first point
+	 * @param {number} lng1 - Longitude of first point
+	 * @param {number} lat2 - Latitude of second point
+	 * @param {number} lng2 - Longitude of second point
+	 * @returns {number} Distance in kilometers
+	 */
+	_haversineDistance(lat1, lng1, lat2, lng2) {
+		const R = 6371; // Earth's radius in kilometers
+		const dLat = (lat2 - lat1) * Math.PI / 180;
+		const dLng = (lng2 - lng1) * Math.PI / 180;
+		const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+			Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+			Math.sin(dLng / 2) * Math.sin(dLng / 2);
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+		return R * c;
+	}
+
+	/**
+	 * Test if a point is inside a polygon using ray casting algorithm
+	 * @param {number} lat - Point latitude
+	 * @param {number} lng - Point longitude
+	 * @param {Array} ring - Polygon ring as array of [lng, lat] coordinates
+	 * @returns {boolean} True if point is inside polygon
+	 */
+	_pointInPolygon(lat, lng, ring) {
+		let inside = false;
+		
+		for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+			const [xi, yi] = ring[i];
+			const [xj, yj] = ring[j];
+			
+			const intersect = ((yi > lat) !== (yj > lat)) &&
+				(lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+			
+			if (intersect) {
+				inside = !inside;
+			}
+		}
+		
+		return inside;
 	}
 
 	/**

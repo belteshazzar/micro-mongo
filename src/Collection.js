@@ -122,7 +122,8 @@ export class Collection {
 			planType: plan.type,
 			indexNames: plan.indexes,
 			docIds: docIds,
-			estimatedCost: plan.estimatedCost
+			estimatedCost: plan.estimatedCost,
+			indexOnly: plan.indexOnly || false
 		};
 	}
 

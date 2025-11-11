@@ -206,14 +206,48 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [ ] Add $expr (use aggregation expressions in queries)
 - [ ] Add $jsonSchema (JSON Schema validation in queries)
 - [ ] Add $comment (attach comments to queries)
-- [ ] Add geospatial operators: $near, $nearSphere
-- [ ] Add $geoIntersects (geospatial intersection)
+- [x] Add geospatial operators: $near, $nearSphere ✅
+- [x] Add $geoIntersects (geospatial intersection) ✅
 - [ ] Add $bitsAllClear, $bitsAllSet, $bitsAnyClear, $bitsAnySet
 - [ ] Improve dot notation support in query operators
 - [ ] Add $rand (random number for sampling)
 - [ ] Better support for querying arrays with embedded documents
 
+**Status:** 🚧 IN PROGRESS (November 10, 2025)  
+**Test Results:** 12 new geospatial operator tests passing, all 364 tests passing  
+**Changes Made:**
+- Implemented $near operator in `src/GeospatialCollectionIndex.js`:
+  - Uses RTree.searchRadius() to find points within maxDistance
+  - Supports $geometry format: `{ type: 'Point', coordinates: [lng, lat] }`
+  - Supports $maxDistance in meters
+  - Returns results sorted by distance (ascending)
+- Implemented $nearSphere operator:
+  - Similar to $near but explicitly uses spherical (Haversine) distance
+  - RTree already uses Haversine distance calculation internally
+  - Supports same query format as $near
+- Implemented $geoIntersects operator:
+  - Supports Point geometry intersection (finds points at same location)
+  - Supports Polygon geometry intersection with point-in-polygon test
+  - Uses ray-casting algorithm for polygon containment checks
+  - Optimized with bounding box pre-filtering
+- Enhanced query planner in `src/QueryPlanner.js`:
+  - Added `indexOnly` flag to QueryPlan class
+  - Marked geospatial and text queries as index-only (no fallback to full scan)
+- Updated `src/Cursor.js`:
+  - Respects `indexOnly` flag to prevent incorrect full scan fallback
+  - Fixes issue where empty index results would incorrectly return all documents
+- Updated `src/queryMatcher.js`:
+  - Added recognition for $near, $nearSphere, $geoIntersects operators
+  - These operators skip matcher validation (handled by index)
+- Added comprehensive test suite in `test/test.js`:
+  - 4 tests for $near (distance queries, sorting, alternative formats, empty results)
+  - 3 tests for $nearSphere (spherical distance, sorting, default maxDistance)
+  - 5 tests for $geoIntersects (Point/Polygon intersection, complex shapes, boundaries)
+  - Tests cover real-world coordinates (NYC, London, Paris, etc.)
+  - Tests verify proper distance calculations and sorting
+
 **Estimated Effort:** 3-4 days  
+**Completed:** Geospatial operators - 1 day  
 **Dependencies:** None
 
 ---

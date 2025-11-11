@@ -271,6 +271,12 @@ export function opMatches(doc, key, value) {
 						if (getProp(doc, key) == undefined || !text(getProp(doc, key), operand)) return false;
 					} else if (operator == "$geoWithin") {
 						if (getProp(doc, key) == undefined || !geoWithin(getProp(doc, key), operand)) return false;
+					} else if (operator == "$near" || operator == "$nearSphere" || operator == "$geoIntersects") {
+						// These operators MUST be handled by an index
+						// They should never reach the matcher level
+						// If they do, the query planner should have already filtered documents via the index
+						// So we just skip validation here - the index already did the work
+						// Don't return false, as that would exclude documents that the index already selected
 					} else if (operator == "$not") {
 						if (opMatches(doc, key, operand)) return false;
 					} else if (operator == "$all") {
