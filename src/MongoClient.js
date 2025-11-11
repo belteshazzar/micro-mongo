@@ -14,7 +14,7 @@ export class MongoClient {
 
   db(name, opts = {}) {
     // Merge client options with db-specific options
-    const dbOptions = { ...this.options, ...opts };
+    const dbOptions = { ...this.options, ...opts, dbName: name };
     return new DB(dbOptions);
   }
 

@@ -280,4 +280,80 @@ export class TextIndex {
     this.useStopWords = enabled;
     return this;
   }
+
+  /**
+   * Serialize the text index state for storage
+   * @returns {Object} Serializable state
+   */
+  serialize() {
+    // Convert Maps to plain objects for JSON serialization
+    const indexObj = {};
+    this.index.forEach((docs, term) => {
+      const docsObj = {};
+      docs.forEach((freq, docId) => {
+        docsObj[docId] = freq;
+      });
+      indexObj[term] = docsObj;
+    });
+
+    const documentTermsObj = {};
+    this.documentTerms.forEach((terms, docId) => {
+      const termsObj = {};
+      terms.forEach((freq, term) => {
+        termsObj[term] = freq;
+      });
+      documentTermsObj[docId] = termsObj;
+    });
+
+    const documentLengthsObj = {};
+    this.documentLengths.forEach((length, docId) => {
+      documentLengthsObj[docId] = length;
+    });
+
+    return {
+      index: indexObj,
+      documentTerms: documentTermsObj,
+      documentLengths: documentLengthsObj,
+      useStopWords: this.useStopWords,
+      stopWords: Array.from(this.stopWords)
+    };
+  }
+
+  /**
+   * Restore the text index state from serialized data
+   * @param {Object} state - Serialized state
+   */
+  deserialize(state) {
+    // Restore index
+    this.index = new Map();
+    for (const term in state.index) {
+      const docs = new Map();
+      for (const docId in state.index[term]) {
+        docs.set(docId, state.index[term][docId]);
+      }
+      this.index.set(term, docs);
+    }
+
+    // Restore documentTerms
+    this.documentTerms = new Map();
+    for (const docId in state.documentTerms) {
+      const terms = new Map();
+      for (const term in state.documentTerms[docId]) {
+        terms.set(term, state.documentTerms[docId][term]);
+      }
+      this.documentTerms.set(docId, terms);
+    }
+
+    // Restore documentLengths
+    this.documentLengths = new Map();
+    for (const docId in state.documentLengths) {
+      this.documentLengths.set(docId, state.documentLengths[docId]);
+    }
+
+    // Restore settings
+    this.useStopWords = state.useStopWords !== false;
+    if (state.stopWords) {
+      this.stopWords = new Set(state.stopWords);
+    }
+  }
 }

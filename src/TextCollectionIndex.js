@@ -115,4 +115,29 @@ export class TextCollectionIndex extends CollectionIndex {
 		}
 		return weights;
 	}
+
+	/**
+	 * Serialize index state for storage
+	 * @returns {Object} Serializable index state
+	 */
+	serialize() {
+		return {
+			type: 'text',
+			keys: this.keys,
+			options: this.options,
+			indexedFields: this.indexedFields,
+			textIndexState: this.textIndex.serialize()
+		};
+	}
+
+	/**
+	 * Restore index state from serialized data
+	 * @param {Object} state - Serialized index state
+	 */
+	deserialize(state) {
+		this.indexedFields = state.indexedFields || [];
+		if (state.textIndexState) {
+			this.textIndex.deserialize(state.textIndexState);
+		}
+	}
 }

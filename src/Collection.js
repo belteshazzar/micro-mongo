@@ -774,4 +774,75 @@ export class Collection {
 	}
 
 	validate() { throw "Not Implemented"; }
+
+	/**
+	 * Export collection state for storage
+	 * @returns {Object} Collection state including documents and indexes
+	 */
+	exportState() {
+		// Export all documents
+		const documents = [];
+		for (let i = 0; i < this.storage.size(); i++) {
+			const doc = this.storage.get(i);
+			if (doc) {
+				documents.push(doc);
+			}
+		}
+
+		// Export all indexes
+		const indexes = [];
+		for (const indexName in this.indexes) {
+			if (this.indexes.hasOwnProperty(indexName)) {
+				const index = this.indexes[indexName];
+				indexes.push(index.serialize());
+			}
+		}
+
+		return {
+			documents: documents,
+			indexes: indexes
+		};
+	}
+
+	/**
+	 * Import collection state from storage
+	 * @param {Object} state - Collection state including documents and indexes
+	 */
+	async importState(state) {
+		// Clear existing data
+		this.storage.clear();
+		for (const indexName in this.indexes) {
+			if (this.indexes.hasOwnProperty(indexName)) {
+				this.indexes[indexName].clear();
+			}
+		}
+		this.indexes = {};
+
+		// Import documents
+		if (state.documents && Array.isArray(state.documents)) {
+			for (const doc of state.documents) {
+				this.storage.set(doc._id, doc);
+			}
+		}
+
+		// Import indexes
+		if (state.indexes && Array.isArray(state.indexes)) {
+			for (const indexState of state.indexes) {
+				// Recreate the index based on its type
+				let index;
+				if (indexState.type === 'text') {
+					index = new TextCollectionIndex(indexState.keys, indexState.options);
+					index.deserialize(indexState);
+				} else if (indexState.type === 'geospatial') {
+					index = new GeospatialCollectionIndex(indexState.keys, indexState.options);
+					index.deserialize(indexState);
+				} else {
+					// Default to regular index
+					index = new RegularCollectionIndex(indexState.keys, indexState.options);
+					index.deserialize(indexState);
+				}
+				this.indexes[index.name] = index;
+			}
+		}
+	}
 }
