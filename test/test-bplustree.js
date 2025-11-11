@@ -1,5 +1,5 @@
 import {expect} from 'chai';
-import {BPlusTree} from '../BPlusTree.js';
+import {BPlusTree} from '../src/BPlusTree.js';
 
 describe('BPlusTree', function() {
 
