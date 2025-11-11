@@ -46,15 +46,144 @@ export function copy(o) {
 
 /**
  * Get a property from an object using dot notation
+ * Supports array element access via numeric indices (e.g., "items.0.name")
  */
 export function getProp(obj, name) {
 	var path = name.split(".");
 	var result = obj[path[0]];
 	for (var i = 1; i < path.length; i++) {
 		if (result == undefined || result == null) return result;
-		result = result[path[i]];
+		
+		// Check if this path segment is a numeric index
+		var pathSegment = path[i];
+		var numericIndex = parseInt(pathSegment, 10);
+		
+		// If it's a valid array index, use it
+		if (isArray(result) && !isNaN(numericIndex) && numericIndex >= 0 && numericIndex < result.length) {
+			result = result[numericIndex];
+		} else {
+			result = result[pathSegment];
+		}
 	}
 	return result;
+}
+
+/**
+ * Get field values for query matching, handling MongoDB-style array traversal
+ * When a path traverses an array, this returns all matching values from array elements
+ * Returns an array of values if array traversal occurred, otherwise the single value
+ * 
+ * Example:
+ *   doc = { items: [{ price: 10 }, { price: 20 }] }
+ *   getFieldValues(doc, 'items.price') -> [10, 20]
+ */
+export function getFieldValues(obj, name) {
+	var path = name.split(".");
+	var results = [obj];
+	
+	for (var i = 0; i < path.length; i++) {
+		var pathSegment = path[i];
+		var numericIndex = parseInt(pathSegment, 10);
+		var newResults = [];
+		
+		for (var j = 0; j < results.length; j++) {
+			var current = results[j];
+			if (current == undefined || current == null) continue;
+			
+			// If this is a numeric index and current is an array, access that element
+			if (isArray(current) && !isNaN(numericIndex) && numericIndex >= 0) {
+				if (numericIndex < current.length) {
+					newResults.push(current[numericIndex]);
+				}
+			}
+			// If current is an array but path segment is not numeric, traverse all elements
+			else if (isArray(current)) {
+				for (var k = 0; k < current.length; k++) {
+					if (current[k] != undefined && current[k] != null && typeof current[k] === 'object') {
+						newResults.push(current[k][pathSegment]);
+					}
+				}
+			}
+			// Otherwise, normal property access
+			else if (typeof current === 'object') {
+				newResults.push(current[pathSegment]);
+			}
+		}
+		
+		results = newResults;
+	}
+	
+	// Filter out undefined values
+	results = results.filter(function(v) { return v !== undefined; });
+	
+	// If we have multiple values, return the array
+	// If we have exactly one, return it directly
+	// If we have none, return undefined
+	if (results.length === 0) return undefined;
+	if (results.length === 1) return results[0];
+	return results;
+}
+
+/**
+ * Set a property on an object using dot notation
+ * Creates intermediate objects as needed
+ * Supports array element access via numeric indices
+ */
+export function setProp(obj, name, value) {
+	var path = name.split(".");
+	var current = obj;
+	
+	for (var i = 0; i < path.length - 1; i++) {
+		var pathSegment = path[i];
+		var numericIndex = parseInt(pathSegment, 10);
+		
+		// If this is a numeric index and current is an array
+		if (isArray(current) && !isNaN(numericIndex) && numericIndex >= 0) {
+			// Ensure the array is large enough
+			while (current.length <= numericIndex) {
+				current.push(undefined);
+			}
+			// If the element doesn't exist, create an object
+			if (current[numericIndex] == undefined || current[numericIndex] == null) {
+				// Look ahead to see if next segment is numeric (array) or not (object)
+				var nextSegment = path[i + 1];
+				var nextNumeric = parseInt(nextSegment, 10);
+				if (!isNaN(nextNumeric) && nextNumeric >= 0) {
+					current[numericIndex] = [];
+				} else {
+					current[numericIndex] = {};
+				}
+			}
+			current = current[numericIndex];
+		}
+		// Regular property access
+		else {
+			if (current[pathSegment] == undefined || current[pathSegment] == null) {
+				// Look ahead to see if next segment is numeric (array) or not (object)
+				var nextSegment = path[i + 1];
+				var nextNumeric = parseInt(nextSegment, 10);
+				if (!isNaN(nextNumeric) && nextNumeric >= 0) {
+					current[pathSegment] = [];
+				} else {
+					current[pathSegment] = {};
+				}
+			}
+			current = current[pathSegment];
+		}
+	}
+	
+	// Set the final value
+	var lastSegment = path[path.length - 1];
+	var lastNumericIndex = parseInt(lastSegment, 10);
+	
+	if (isArray(current) && !isNaN(lastNumericIndex) && lastNumericIndex >= 0) {
+		while (current.length <= lastNumericIndex) {
+			current.push(undefined);
+		}
+		current[lastNumericIndex] = value;
+	} else {
+		current[lastSegment] = value;
+	}
 }
 
 /**
@@ -157,23 +286,60 @@ export function applyProjection(projection, doc) {
 	}
 	
 	if (projection[keys[0]] || hasInclusion) {
-		// inclusion with _id (unless explicitly excluded)
+		// Inclusion projection
+		// Include _id unless explicitly excluded
 		if (projection._id !== 0) {
 			result._id = doc._id;
 		}
+		
 		for (var i = 0; i < keys.length; i++) {
 			if (keys[i] === '_id') continue;
 			if (!projection[keys[i]]) continue;
-			result[keys[i]] = doc[keys[i]];
+			
+			var fieldPath = keys[i];
+			var value = getProp(doc, fieldPath);
+			
+			if (value !== undefined) {
+				// Use setProp to create nested structure
+				setProp(result, fieldPath, value);
+			}
 		}
 	} else {
-		// exclusion
+		// Exclusion projection - start with a copy of the document
 		for (var key in doc) {
-			result[key] = doc[key];
+			if (doc.hasOwnProperty(key)) {
+				// Deep copy the value
+				var val = doc[key];
+				if (typeof val === 'object' && val !== null && !isArray(val)) {
+					result[key] = copy(val);
+				} else if (isArray(val)) {
+					result[key] = val.slice(); // shallow copy array
+				} else {
+					result[key] = val;
+				}
+			}
 		}
+		
+		// Remove excluded fields
 		for (var i = 0; i < keys.length; i++) {
-			if (projection[keys[i]]) continue;
-			delete result[keys[i]];
+			if (projection[keys[i]]) continue; // Skip if value is truthy
+			
+			var fieldPath = keys[i];
+			var pathParts = fieldPath.split('.');
+			
+			// Navigate to the parent object and delete the final property
+			if (pathParts.length === 1) {
+				delete result[fieldPath];
+			} else {
+				var parent = result;
+				for (var j = 0; j < pathParts.length - 1; j++) {
+					if (parent == undefined || parent == null) break;
+					parent = parent[pathParts[j]];
+				}
+				if (parent != undefined && parent != null) {
+					delete parent[pathParts[pathParts.length - 1]];
+				}
+			}
 		}
 	}
 	return result;

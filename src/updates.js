@@ -2,6 +2,8 @@
  * Update operations module
  */
 
+import { setProp, getProp } from './utils.js';
+
 /**
  * Apply update operators to a document
  */
@@ -15,7 +17,9 @@ export function applyUpdates(updates, doc, setOnInsert) {
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
 				var amount = value[field];
-				doc[field] = doc[field] + amount;
+				var currentValue = getProp(doc, field);
+				if (currentValue == undefined) currentValue = 0;
+				setProp(doc, field, currentValue + amount);
 			}
 		} else if (key == "$mul") {
 			var fields = Object.keys(value);
@@ -40,7 +44,8 @@ export function applyUpdates(updates, doc, setOnInsert) {
 		} else if (key == "$set") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				doc[fields[j]] = value[fields[j]];
+				var field = fields[j];
+				setProp(doc, field, value[field]);
 			}
 		} else if (key == "$unset") {
 			var fields = Object.keys(value);

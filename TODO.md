@@ -209,45 +209,52 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [x] Add geospatial operators: $near, $nearSphere ✅
 - [x] Add $geoIntersects (geospatial intersection) ✅
 - [ ] Add $bitsAllClear, $bitsAllSet, $bitsAnyClear, $bitsAnySet
-- [ ] Improve dot notation support in query operators
+- [x] Improve dot notation support in query operators ✅
 - [ ] Add $rand (random number for sampling)
 - [ ] Better support for querying arrays with embedded documents
 
 **Status:** 🚧 IN PROGRESS (November 10, 2025)  
-**Test Results:** 12 new geospatial operator tests passing, all 364 tests passing  
+**Test Results:** 391 tests passing (27 new dot notation tests added)  
 **Changes Made:**
-- Implemented $near operator in `src/GeospatialCollectionIndex.js`:
-  - Uses RTree.searchRadius() to find points within maxDistance
-  - Supports $geometry format: `{ type: 'Point', coordinates: [lng, lat] }`
-  - Supports $maxDistance in meters
-  - Returns results sorted by distance (ascending)
-- Implemented $nearSphere operator:
-  - Similar to $near but explicitly uses spherical (Haversine) distance
-  - RTree already uses Haversine distance calculation internally
-  - Supports same query format as $near
-- Implemented $geoIntersects operator:
-  - Supports Point geometry intersection (finds points at same location)
-  - Supports Polygon geometry intersection with point-in-polygon test
-  - Uses ray-casting algorithm for polygon containment checks
-  - Optimized with bounding box pre-filtering
-- Enhanced query planner in `src/QueryPlanner.js`:
-  - Added `indexOnly` flag to QueryPlan class
-  - Marked geospatial and text queries as index-only (no fallback to full scan)
-- Updated `src/Cursor.js`:
-  - Respects `indexOnly` flag to prevent incorrect full scan fallback
-  - Fixes issue where empty index results would incorrectly return all documents
-- Updated `src/queryMatcher.js`:
-  - Added recognition for $near, $nearSphere, $geoIntersects operators
-  - These operators skip matcher validation (handled by index)
-- Added comprehensive test suite in `test/test.js`:
-  - 4 tests for $near (distance queries, sorting, alternative formats, empty results)
-  - 3 tests for $nearSphere (spherical distance, sorting, default maxDistance)
-  - 5 tests for $geoIntersects (Point/Polygon intersection, complex shapes, boundaries)
-  - Tests cover real-world coordinates (NYC, London, Paris, etc.)
-  - Tests verify proper distance calculations and sorting
+- **Geospatial Operators** (completed earlier):
+  - Implemented $near, $nearSphere, $geoIntersects operators
+  - Added 12 comprehensive geospatial tests
+- **Dot Notation Improvements** (just completed):
+  - Enhanced `getProp()` in `src/utils.js`:
+    - Now supports array element access via numeric indices (e.g., "items.0.name")
+    - Arrays are detected and properly indexed
+  - Added `getFieldValues()` function in `src/utils.js`:
+    - Implements MongoDB-style array traversal
+    - When path crosses an array, returns all matching values from array elements
+    - Example: `items.price` on `[{price: 10}, {price: 20}]` returns `[10, 20]`
+  - Added `setProp()` function in `src/utils.js`:
+    - Sets nested properties using dot notation
+    - Automatically creates intermediate objects/arrays as needed
+    - Detects whether to create object or array based on next path segment
+  - Updated `src/queryMatcher.js`:
+    - Added `fieldValueMatches()` helper to check values or arrays of values
+    - Modified `opMatches()` to use `getFieldValues()` for array-aware matching
+    - All query operators now properly traverse arrays ($gt, $lt, $eq, $in, etc.)
+  - Updated `src/updates.js`:
+    - Modified `$set` operator to use `setProp()` for dot notation paths
+    - Modified `$inc` operator to use `getProp()` and `setProp()`
+    - Updates now properly create nested structures if they don't exist
+  - Updated `src/utils.js` `applyProjection()`:
+    - Inclusion projections now properly extract nested fields using dot notation
+    - Exclusion projections now properly remove nested fields using dot notation
+    - Maintains proper nested object structure in results
+  - Added comprehensive test suite in `test/test-dot-notation.js`:
+    - 3 tests for basic nested field access
+    - 9 tests for query operators with dot notation
+    - 3 tests for array element access and traversal
+    - 1 test for $elemMatch with nested fields
+    - 4 tests for update operators with dot notation
+    - 2 tests for index support on nested fields
+    - 3 tests for edge cases (null, undefined, empty objects)
+    - 2 tests for projections with dot notation
 
 **Estimated Effort:** 3-4 days  
-**Completed:** Geospatial operators - 1 day  
+**Completed:** Geospatial operators (1 day) + Dot notation improvements (0.5 days)  
 **Dependencies:** None
 
 ---
@@ -480,7 +487,7 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [ ] Support $slice in projections (limit array elements returned)
 - [ ] Support $meta in projections (for text search scores, sort keys)
 - [ ] Support computed fields with aggregation expressions
-- [ ] Support nested document projections with dot notation
+- [x] Support nested document projections with dot notation ✅
 - [ ] Better handling of _id inclusion/exclusion
 - [ ] Add projection validation
 - [ ] Optimize projection application

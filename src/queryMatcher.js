@@ -1,4 +1,4 @@
-import { getProp, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
+import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
 import { TextIndex } from './TextIndex.js';
 import { ObjectId } from './ObjectId.js';
 
@@ -46,6 +46,25 @@ function compareValues(a, b, operator) {
 		case '<=': return aVal <= bVal;
 		default: return false;
 	}
+}
+
+/**
+ * Check if a field value (possibly from array traversal) matches a condition
+ * Handles both single values and arrays of values (from array traversal)
+ */
+function fieldValueMatches(fieldValue, checkFn) {
+	if (fieldValue == undefined) return false;
+	
+	// If fieldValue is an array (from array traversal), check if ANY element matches
+	if (isArray(fieldValue)) {
+		for (var i = 0; i < fieldValue.length; i++) {
+			if (checkFn(fieldValue[i])) return true;
+		}
+		return false;
+	}
+	
+	// Otherwise check the single value
+	return checkFn(fieldValue);
 }
 
 /**
@@ -229,13 +248,16 @@ export function tlMatches(doc, query) {
  * Operator match function
  */
 export function opMatches(doc, key, value) {
-	if (typeof (value) == "string") return valuesEqual(getProp(doc, key), value);
-	else if (typeof (value) == "number") return valuesEqual(getProp(doc, key), value);
-	else if (typeof (value) == "boolean") return valuesEqual(getProp(doc, key), value);
-	else if (value instanceof ObjectId) return valuesEqual(getProp(doc, key), value);
+	// Get field value using array-aware traversal
+	var fieldValue = getFieldValues(doc, key);
+	
+	if (typeof (value) == "string") return fieldValueMatches(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (typeof (value) == "number") return fieldValueMatches(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (typeof (value) == "boolean") return fieldValueMatches(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (value instanceof ObjectId) return fieldValueMatches(fieldValue, function(v) { return valuesEqual(v, value); });
 	else if (typeof (value) == "object") {
-		if (value instanceof RegExp) return getProp(doc, key) && getProp(doc, key).match(value);
-		else if (isArray(value)) return getProp(doc, key) && arrayMatches(getProp(doc, key), value);
+		if (value instanceof RegExp) return fieldValue != undefined && fieldValueMatches(fieldValue, function(v) { return v && v.match(value); });
+		else if (isArray(value)) return fieldValue != undefined && fieldValueMatches(fieldValue, function(v) { return v && arrayMatches(v, value); });
 		else {
 			var keys = Object.keys(value);
 			if (keys[0].charAt(0) == "$") {
@@ -243,34 +265,37 @@ export function opMatches(doc, key, value) {
 					var operator = Object.keys(value)[i];
 					var operand = value[operator];
 					if (operator == "$eq") {
-						if (getProp(doc, key) == undefined || !valuesEqual(getProp(doc, key), operand)) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return valuesEqual(v, operand); })) return false;
 					} else if (operator == "$gt") {
-						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '>')) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return compareValues(v, operand, '>'); })) return false;
 					} else if (operator == "$gte") {
-						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '>=')) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return compareValues(v, operand, '>='); })) return false;
 					} else if (operator == "$lt") {
-						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '<')) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return compareValues(v, operand, '<'); })) return false;
 					} else if (operator == "$lte") {
-						if (getProp(doc, key) == undefined || !compareValues(getProp(doc, key), operand, '<=')) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return compareValues(v, operand, '<='); })) return false;
 					} else if (operator == "$ne") {
-						if (getProp(doc, key) == undefined || !(!valuesEqual(getProp(doc, key), operand))) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return !valuesEqual(v, operand); })) return false;
 					} else if (operator == "$in") {
-						if (getProp(doc, key) == undefined || !isIn(getProp(doc, key), operand)) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return isIn(v, operand); })) return false;
 					} else if (operator == "$nin") {
-						if (getProp(doc, key) == undefined || isIn(getProp(doc, key), operand)) return false;
+						if (fieldValueMatches(fieldValue, function(v) { return isIn(v, operand); })) return false;
 					} else if (operator == "$exists") {
-						if (operand ? getProp(doc, key) == undefined : getProp(doc, key) != undefined) return false;
+						// For $exists, we need to use getProp which returns undefined if field doesn't exist
+						// getFieldValues might return an array which would be truthy
+						var rawValue = getProp(doc, key);
+						if (operand ? rawValue == undefined : rawValue != undefined) return false;
 					} else if (operator == "$type") {
-						if (typeof (getProp(doc, key)) != operand) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return typeof(v) == operand; })) return false;
 					} else if (operator == "$mod") {
 						if (operand.length != 2) throw { $err: "Can't canonicalize query: BadValue malformed mod, not enough elements", code: 17287 };
-						if (getProp(doc, key) == undefined || (getProp(doc, key) % operand[0] != operand[1])) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && (v % operand[0] == operand[1]); })) return false;
 					} else if (operator == "$regex") {
-						if (getProp(doc, key) == undefined || !getProp(doc, key).match(operand)) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && v.match(operand); })) return false;
 					} else if (operator == "$text") {
-						if (getProp(doc, key) == undefined || !text(getProp(doc, key), operand)) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && text(v, operand); })) return false;
 					} else if (operator == "$geoWithin") {
-						if (getProp(doc, key) == undefined || !geoWithin(getProp(doc, key), operand)) return false;
+						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && geoWithin(v, operand); })) return false;
 					} else if (operator == "$near" || operator == "$nearSphere" || operator == "$geoIntersects") {
 						// These operators MUST be handled by an index
 						// They should never reach the matcher level
@@ -280,17 +305,19 @@ export function opMatches(doc, key, value) {
 					} else if (operator == "$not") {
 						if (opMatches(doc, key, operand)) return false;
 					} else if (operator == "$all") {
-						var fieldValue = getProp(doc, key);
-						if (fieldValue == undefined || !isArray(fieldValue)) return false;
+						// $all requires the field to be an array, use getProp not getFieldValues
+						var arrayFieldValue = getProp(doc, key);
+						if (arrayFieldValue == undefined || !isArray(arrayFieldValue)) return false;
 						for (var j = 0; j < operand.length; j++) {
-							if (!isIn(operand[j], fieldValue)) return false;
+							if (!isIn(operand[j], arrayFieldValue)) return false;
 						}
 					} else if (operator == "$elemMatch") {
-						var fieldValue = getProp(doc, key);
-						if (fieldValue == undefined || !isArray(fieldValue)) return false;
+						// $elemMatch requires the field to be an array, use getProp not getFieldValues
+						var arrayFieldValue = getProp(doc, key);
+						if (arrayFieldValue == undefined || !isArray(arrayFieldValue)) return false;
 						var found = false;
-						for (var j = 0; j < fieldValue.length; j++) {
-							var element = fieldValue[j];
+						for (var j = 0; j < arrayFieldValue.length; j++) {
+							var element = arrayFieldValue[j];
 							// Check if element matches the query
 							if (typeof element === 'object' && !isArray(element)) {
 								// For objects, use matches
@@ -322,9 +349,9 @@ export function opMatches(doc, key, value) {
 						}
 						if (!found) return false;
 					} else if (operator == "$size") {
-						var fieldValue = getProp(doc, key);
-						if (fieldValue == undefined || !isArray(fieldValue)) return false;
-						if (fieldValue.length != operand) return false;
+						var sizeFieldValue = getProp(doc, key);
+						if (sizeFieldValue == undefined || !isArray(sizeFieldValue)) return false;
+						if (sizeFieldValue.length != operand) return false;
 					} else {
 						throw { $err: "Can't canonicalize query: BadValue unknown operator: " + operator, code: 17287 };
 					}
