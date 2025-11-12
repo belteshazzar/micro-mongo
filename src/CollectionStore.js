@@ -45,7 +45,6 @@ export class CollectionStore {
 	 * @returns {Object} The document storage object
 	 */
 	getStore() {
-    throw new Error("Getting underlying document store");
 		return this.documents.getStore();
 	}
 
@@ -83,11 +82,11 @@ export class CollectionStore {
 	 * @param {string} indexName - Name of the index
 	 * @returns {Object} Index data object (or creates empty one if doesn't exist)
 	 */
-	createIndexStorage(indexName) {
-		if (!this.indexes[indexName]) {
-			this.indexes[indexName] = new IndexStore();
+	createIndexStorage(name,type,keys) {
+		if (!this.indexes[name]) {
+			this.indexes[name] = new IndexStore(name,type,keys);
 		}
-		return this.indexes[indexName];
+		return this.indexes[name];
 	}
 
 	// /**

@@ -7,8 +7,8 @@ import { getProp } from './utils.js';
  * Supports full-text search on one or more fields
  */
 export class TextCollectionIndex extends Index {
-	constructor(keys, storage, options = {}) {
-		super(keys, storage, options);
+	constructor(name, keys, storage, options = {}) {
+		super(name, keys, storage, options);
 		// Create the underlying TextIndex
 		this.textIndex = new TextIndex(options);
 		// Track which fields are indexed

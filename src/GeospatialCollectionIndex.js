@@ -7,8 +7,8 @@ import { getProp } from './utils.js';
  * Supports geospatial queries on GeoJSON fields
  */
 export class GeospatialCollectionIndex extends Index {
-	constructor(keys, storage, options = {}) {
-		super(keys, storage, options);
+	constructor(name, keys, storage, options = {}) {
+		super(name, keys, storage, options);
 		// Create the underlying RTree
 		this.rtree = new RTree();
 		// Track which field is the geospatial field
@@ -114,6 +114,7 @@ export class GeospatialCollectionIndex extends Index {
 	 * @returns {Array|null} Array of document IDs or null if query is not a geospatial query
 	 */
 	query(query) {
+    console.log("GeospatialCollectionIndex query", query);
 		// Check if this is a geospatial query on our indexed field
 		if (!query[this.geoField]) {
 			return null;

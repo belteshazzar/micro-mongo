@@ -19,7 +19,7 @@ class QueryPlan {
  */
 export class QueryPlanner {
 	constructor(indexes) {
-		this.indexes = indexes;
+		this.indexes = indexes; // Map<string, CollectionIndex>
 	}
 
 	/**
@@ -164,8 +164,7 @@ export class QueryPlanner {
 	 */
 	_planTextSearch(query, analysis) {
 		// Find text index
-		for (const indexName in this.indexes) {
-			const index = this.indexes[indexName];
+		for (const [indexName,index] of this.indexes) {
 			if (index instanceof TextCollectionIndex) {
 				// Look for $text operator in query
 				const textQuery = this._extractTextQuery(query);
@@ -204,8 +203,7 @@ export class QueryPlanner {
 	 */
 	_planGeoQuery(query, analysis) {
 		// Find geospatial index
-		for (const indexName in this.indexes) {
-			const index = this.indexes[indexName];
+		for (const [indexName,index] of this.indexes) {
 			if (index instanceof GeospatialCollectionIndex) {
 				const docIds = index.query(query);
 				if (docIds !== null) {
@@ -319,8 +317,7 @@ export class QueryPlanner {
 		}
 
 		// Try each index
-		for (const indexName in this.indexes) {
-			const index = this.indexes[indexName];
+		for (const [indexName,index] of this.indexes) {
 
 			// Skip special index types (they have their own planning)
 			if (index instanceof TextCollectionIndex || index instanceof GeospatialCollectionIndex) {

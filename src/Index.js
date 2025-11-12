@@ -3,24 +3,11 @@
  * Provides a common interface for different types of indexes (e.g., regular, text, geo)
  */
 export class Index {
-	constructor(keys, storage, options = {}) {
+	constructor(name, keys, storage, options = {}) {
+		this.name = name;
 		this.keys = keys;
 		this.storage = storage;
 		this.options = options;
-		this.name = options.name || this.generateIndexName(keys);
-	}
-
-	/**
-	 * Generate index name from keys
-	 */
-	generateIndexName(keys) {
-		const parts = [];
-		for (const field in keys) {
-			if (keys.hasOwnProperty(field)) {
-				parts.push(field + '_' + keys[field]);
-			}
-		}
-		return parts.join('_');
 	}
 
 	/**

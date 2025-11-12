@@ -4,7 +4,10 @@
  * Simple key-value store using a plain JavaScript object
  */
 export class IndexStore {
-	constructor() {
+	constructor(name, type, keys) {
+    this.name = name;
+    this.type = type;
+    this.keys = keys;
 		this.data = {};
 	}
 

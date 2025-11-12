@@ -21,7 +21,19 @@ export class Collection {
 		this.indexes = new Map(); // Index storage - map of index name to index structure
 		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
 		this.isCollection = true; // TODO used by dropDatabase, ugly
-    // TODO: load collection indexes if the exist in storage
+
+    for (const [indexName, indexStore] of Object.entries(this.storage.indexes)) {
+      let index;
+      if (indexStore.type === 'text') {
+        index = new TextCollectionIndex(indexName, indexStore.keys, indexStore);
+      } else if (indexStore.type === 'geospatial') {
+        index = new GeospatialCollectionIndex(indexName, indexStore.keys, indexStore);
+      } else {
+        // Default to regular index
+        index = new RegularCollectionIndex(indexName, indexStore.keys, indexStore);
+      }
+      this.indexes.set(index.name, index);
+		}
 	}
 
 	/**
@@ -69,11 +81,11 @@ export class Collection {
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
-			index = new TextCollectionIndex(keys, this.storage.createIndexStorage(indexName), { ...options, name: indexName });
+			index = new TextCollectionIndex(indexName, keys, this.storage.createIndexStorage(indexName, 'text', keys), { ...options, name: indexName });
 		} else if (this.isGeospatialIndex(keys)) {
-			index = new GeospatialCollectionIndex(keys, this.storage.createIndexStorage(indexName), { ...options, name: indexName });
+			index = new GeospatialCollectionIndex(indexName, keys, this.storage.createIndexStorage(indexName, 'geospatial', keys), { ...options, name: indexName });
 		} else {
-			index = new RegularCollectionIndex(keys, this.storage.createIndexStorage(indexName), { ...options, name: indexName });
+			index = new RegularCollectionIndex(indexName, keys, this.storage.createIndexStorage(indexName, 'regular', keys), { ...options, name: indexName });
 		}
 
 		// Build index by scanning all documents
@@ -543,7 +555,6 @@ export class Collection {
 	}
 
 	drop() {
-    console.error("Dropping collection:", this.storage);
 		this.storage.clear();
 		// Clear all indexes
 		for (const [indexName, index] of this.indexes) {
@@ -797,71 +808,6 @@ export class Collection {
 
 	validate() { throw "Not Implemented"; }
 
-	/**
-	 * Export collection state for storage
-	 * @returns {Object} Collection state including documents and indexes
-	 */
-	exportState() {
-		// Export all documents
-		const documents = [];
-		for (let i = 0; i < this.storage.size(); i++) {
-			const doc = this.storage.get(i);
-			if (doc) {
-				documents.push(doc);
-			}
-		}
-
-		// Export all indexes
-		const indexes = [];
-		for (const [indexName, index] of this.indexes) {
-			indexes.push(index.serialize());
-		}
-
-		return {
-			documents: documents,
-			indexes: indexes
-		};
-	}
-
-	/**
-	 * Import collection state from storage
-	 * @param {Object} state - Collection state including documents and indexes
-	 */
-	async importState(state) {
-		// Clear existing data
-		this.storage.clear();
-		for (const [indexName, index] of this.indexes) {
-			index.clear();
-		}
-		this.indexes.clear();
-
-		// Import documents
-		if (state.documents && Array.isArray(state.documents)) {
-			for (const doc of state.documents) {
-				this.storage.set(doc._id, doc);
-			}
-		}
-
-		// Import indexes
-		if (state.indexes && Array.isArray(state.indexes)) {
-			for (const indexState of state.indexes) {
-				// Recreate the index based on its type
-				let index;
-				if (indexState.type === 'text') {
-					index = new TextCollectionIndex(indexState.keys, indexState.options);
-					index.deserialize(indexState);
-				} else if (indexState.type === 'geospatial') {
-					index = new GeospatialCollectionIndex(indexState.keys, indexState.options);
-					index.deserialize(indexState);
-				} else {
-					// Default to regular index
-					index = new RegularCollectionIndex(indexState.keys, indexState.options);
-					index.deserialize(indexState);
-				}
-				this.indexes.set(index.name, index);
-			}
-		}
-	}
 }
 
 /**

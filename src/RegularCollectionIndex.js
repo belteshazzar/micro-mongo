@@ -6,8 +6,8 @@ import { BPlusTree } from './BPlusTree.js';
  * Uses B+ tree for efficient storage and range queries
  */
 export class RegularCollectionIndex extends Index {
-	constructor(keys, storage, options = {}) {
-		super(keys, storage, options);
+	constructor(name, keys, storage, options = {}) {
+		super(name, keys, storage, options);
 		// B+ tree mapping index key to array of document _ids
 		// Order 50 provides good balance between node size and tree height
 		this.data = new BPlusTree(50);
