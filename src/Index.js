@@ -2,9 +2,10 @@
  * Base class for collection indexes
  * Provides a common interface for different types of indexes (e.g., regular, text, geo)
  */
-export class CollectionIndex {
-	constructor(keys, options = {}) {
+export class Index {
+	constructor(keys, storage, options = {}) {
 		this.keys = keys;
+		this.storage = storage;
 		this.options = options;
 		this.name = options.name || this.generateIndexName(keys);
 	}

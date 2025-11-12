@@ -13,13 +13,15 @@ import { evaluateExpression } from './aggregationExpressions.js';
  * Collection class
  */
 export class Collection {
-	constructor(db, storage, idGenerator) {
+	constructor(db, name, storage, idGenerator) {
 		this.db = db;
+		this.name = name;
 		this.storage = storage;
 		this.idGenerator = idGenerator;
-		this.indexes = {}; // Index storage - map of index name to index structure
+		this.indexes = new Map(); // Index storage - map of index name to index structure
 		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
 		this.isCollection = true; // TODO used by dropDatabase, ugly
+    // TODO: load collection indexes if the exist in storage
 	}
 
 	/**
@@ -67,11 +69,11 @@ export class Collection {
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
-			index = new TextCollectionIndex(keys, { ...options, name: indexName });
+			index = new TextCollectionIndex(keys, this.storage.createIndexStorage(indexName), { ...options, name: indexName });
 		} else if (this.isGeospatialIndex(keys)) {
-			index = new GeospatialCollectionIndex(keys, { ...options, name: indexName });
+			index = new GeospatialCollectionIndex(keys, this.storage.createIndexStorage(indexName), { ...options, name: indexName });
 		} else {
-			index = new RegularCollectionIndex(keys, { ...options, name: indexName });
+			index = new RegularCollectionIndex(keys, this.storage.createIndexStorage(indexName), { ...options, name: indexName });
 		}
 
 		// Build index by scanning all documents
@@ -82,7 +84,7 @@ export class Collection {
 			}
 		}
 
-		this.indexes[indexName] = index;
+		this.indexes.set(indexName, index);
 		return index;
 	}
 
@@ -90,11 +92,8 @@ export class Collection {
 	 * Update indexes when a document is inserted
 	 */
 	updateIndexesOnInsert(doc) {
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				const index = this.indexes[indexName];
-				index.add(doc);
-			}
+		for (const [indexName, index] of this.indexes) {
+			index.add(doc);
 		}
 	}
 
@@ -102,11 +101,8 @@ export class Collection {
 	 * Update indexes when a document is deleted
 	 */
 	updateIndexesOnDelete(doc) {
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				const index = this.indexes[indexName];
-				index.remove(doc);
-			}
+		for (const [indexName, index] of this.indexes) {
+			index.remove(doc);
 		}
 	}
 
@@ -133,14 +129,11 @@ export class Collection {
 	 * @returns {TextCollectionIndex|null} The text index or null if not found
 	 */
 	getTextIndex(field) {
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				const index = this.indexes[indexName];
-				if (index instanceof TextCollectionIndex) {
-					// Check if this field is indexed
-					if (index.indexedFields.includes(field)) {
-						return index;
-					}
+		for (const [indexName, index] of this.indexes) {
+			if (index instanceof TextCollectionIndex) {
+				// Check if this field is indexed
+				if (index.indexedFields.includes(field)) {
+					return index;
 				}
 			}
 		}
@@ -489,9 +482,9 @@ export class Collection {
 		const indexName = (options && options.name) ? options.name : this.generateIndexName(keys);
 
 		// Check if index already exists
-		if (this.indexes[indexName]) {
+		if (this.indexes.has(indexName)) {
 			// MongoDB checks for key specification conflicts
-			const existingIndex = this.indexes[indexName];
+			const existingIndex = this.indexes.get(indexName);
 			const existingKeys = JSON.stringify(existingIndex.keys);
 			const newKeys = JSON.stringify(keys);
 			if (existingKeys !== newKeys) {
@@ -550,32 +543,29 @@ export class Collection {
 	}
 
 	drop() {
+    console.error("Dropping collection:", this.storage);
 		this.storage.clear();
 		// Clear all indexes
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				this.indexes[indexName].clear();
-			}
+		for (const [indexName, index] of this.indexes) {
+			index.clear();
 		}
 	}
 
 	dropIndex(indexName) {
-		if (!this.indexes[indexName]) {
+		if (!this.indexes.has(indexName)) {
 			throw { $err: "Index not found with name: " + indexName, code: 27 };
 		}
-		this.indexes[indexName].clear();
-		delete this.indexes[indexName];
-		return { nIndexesWas: Object.keys(this.indexes).length + 1, ok: 1 };
+		this.indexes.get(indexName).clear();
+		this.indexes.delete(indexName);
+		return { nIndexesWas: this.indexes.size + 1, ok: 1 };
 	}
 
 	dropIndexes() {
-		const count = Object.keys(this.indexes).length;
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				this.indexes[indexName].clear();
-			}
+		const count = this.indexes.size;
+		for (const [indexName, index] of this.indexes) {
+			index.clear();
 		}
-		this.indexes = {};
+		this.indexes.clear();
 		return { nIndexesWas: count, msg: "non-_id indexes dropped", ok: 1 };
 	}
 	ensureIndex() { throw "Not Implemented"; }
@@ -651,10 +641,8 @@ export class Collection {
 	getIndexes() {
 		// Return array of index specifications
 		const result = [];
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				result.push(this.indexes[indexName].getSpec());
-			}
+		for (const [indexName, index] of this.indexes) {
+			result.push(index.getSpec());
 		}
 		return result;
 	}
@@ -825,11 +813,8 @@ export class Collection {
 
 		// Export all indexes
 		const indexes = [];
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				const index = this.indexes[indexName];
-				indexes.push(index.serialize());
-			}
+		for (const [indexName, index] of this.indexes) {
+			indexes.push(index.serialize());
 		}
 
 		return {
@@ -845,12 +830,10 @@ export class Collection {
 	async importState(state) {
 		// Clear existing data
 		this.storage.clear();
-		for (const indexName in this.indexes) {
-			if (this.indexes.hasOwnProperty(indexName)) {
-				this.indexes[indexName].clear();
-			}
+		for (const [indexName, index] of this.indexes) {
+			index.clear();
 		}
-		this.indexes = {};
+		this.indexes.clear();
 
 		// Import documents
 		if (state.documents && Array.isArray(state.documents)) {
@@ -875,7 +858,7 @@ export class Collection {
 					index = new RegularCollectionIndex(indexState.keys, indexState.options);
 					index.deserialize(indexState);
 				}
-				this.indexes[index.name] = index;
+				this.indexes.set(index.name, index);
 			}
 		}
 	}

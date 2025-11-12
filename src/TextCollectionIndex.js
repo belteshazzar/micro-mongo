@@ -1,4 +1,4 @@
-import { CollectionIndex } from './CollectionIndex.js';
+import { Index } from './Index.js';
 import { TextIndex } from './TextIndex.js';
 import { getProp } from './utils.js';
 
@@ -6,9 +6,9 @@ import { getProp } from './utils.js';
  * Text index implementation using TextIndex
  * Supports full-text search on one or more fields
  */
-export class TextCollectionIndex extends CollectionIndex {
-	constructor(keys, options = {}) {
-		super(keys, options);
+export class TextCollectionIndex extends Index {
+	constructor(keys, storage, options = {}) {
+		super(keys, storage, options);
 		// Create the underlying TextIndex
 		this.textIndex = new TextIndex(options);
 		// Track which fields are indexed

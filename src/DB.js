@@ -1,5 +1,5 @@
 import { Collection } from './Collection.js';
-import { MemoryStore } from './MemoryStore.js';
+import { StorageEngine } from './StorageEngine.js';
 import { ObjectId } from './ObjectId.js';
 
 /**
@@ -9,9 +9,9 @@ export class DB {
 	constructor(options) {
 		this.options = options || {};
 		this.dbName = this.options.dbName || 'default';
-		
-		// Initialize storage engine if provided
-		this.storageEngine = this.options.storageEngine || null;
+			
+		// StorageEngine
+		this.storageEngine = this.options.storageEngine || new StorageEngine();
 
 		// Return a Proxy to enable dynamic collection creation
 		return new Proxy(this, {
@@ -26,17 +26,18 @@ export class DB {
 					return undefined;
 				}
 
-			// For collection names, create the collection if it doesn't exist
-			// Only auto-create if it's a valid collection name and doesn't already exist
-			if (typeof property === 'string') {
-				// Don't auto-create if property was explicitly deleted
-				if (Object.prototype.hasOwnProperty.call(target, property)) {
-					return target[property];
-				}
-				// Auto-create the collection
-				target.createCollection(property);
-				return target[property];
-			}				return undefined;
+        // For collection names, create the collection if it doesn't exist
+        // Only auto-create if it's a valid collection name and doesn't already exist
+        if (typeof property === 'string') {
+          // Don't auto-create if property was explicitly deleted
+          if (Object.prototype.hasOwnProperty.call(target, property)) {
+            return target[property];
+          }
+          // Auto-create the collection
+          target.createCollection(property);
+          return target[property];
+        }
+        return undefined;
 			}
 		});
 	}
@@ -67,7 +68,8 @@ export class DB {
 		if (!name) return;
 		this[name] = new Collection(
 			this,
-			new MemoryStore(),
+      name,
+			this.storageEngine.createCollectionStore(name),
 			this._id.bind(this)
 		);
 	}
@@ -140,118 +142,4 @@ export class DB {
 	version() { throw "Not Implemented"; }
 	upgradeCheck() { throw "Not Implemented"; }
 	upgradeCheckAllDBs() { throw "Not Implemented"; }
-
-	/**
-	 * Save database state to storage engine
-	 * @returns {Promise<void>}
-	 */
-	async saveToStorage() {
-		if (!this.storageEngine) {
-			throw new Error('No storage engine configured. Pass a storageEngine option when creating the DB.');
-		}
-
-		// Initialize storage engine if needed
-		if (this.storageEngine.initialize) {
-			await this.storageEngine.initialize();
-		}
-
-		// Collect all collections and their states
-		const collections = {};
-		for (const key in this) {
-			if (this[key] != null && this[key].isCollection) {
-				collections[key] = this[key].exportState();
-			}
-		}
-
-		// Save to storage engine
-		await this.storageEngine.saveDatabase({
-			name: this.dbName,
-			collections: collections
-		});
-	}
-
-	/**
-	 * Load database state from storage engine
-	 * @returns {Promise<void>}
-	 */
-	async loadFromStorage() {
-		if (!this.storageEngine) {
-			throw new Error('No storage engine configured. Pass a storageEngine option when creating the DB.');
-		}
-
-		// Initialize storage engine if needed
-		if (this.storageEngine.initialize) {
-			await this.storageEngine.initialize();
-		}
-
-		// Load from storage engine
-		const dbState = await this.storageEngine.loadDatabase(this.dbName);
-		
-		if (!dbState || !dbState.collections) {
-			return; // No saved state
-		}
-
-		// Drop existing collections
-		this.dropDatabase();
-
-		// Restore collections
-		for (const collectionName in dbState.collections) {
-			if (dbState.collections.hasOwnProperty(collectionName)) {
-				this.createCollection(collectionName);
-				await this[collectionName].importState(dbState.collections[collectionName]);
-			}
-		}
-	}
-
-	/**
-	 * Save a specific collection to storage engine
-	 * @param {string} collectionName - Name of the collection to save
-	 * @returns {Promise<void>}
-	 */
-	async saveCollection(collectionName) {
-		if (!this.storageEngine) {
-			throw new Error('No storage engine configured. Pass a storageEngine option when creating the DB.');
-		}
-
-		if (!this[collectionName] || !this[collectionName].isCollection) {
-			throw new Error(`Collection '${collectionName}' does not exist`);
-		}
-
-		// Initialize storage engine if needed
-		if (this.storageEngine.initialize) {
-			await this.storageEngine.initialize();
-		}
-
-		const collectionState = this[collectionName].exportState();
-		await this.storageEngine.saveCollection(this.dbName, collectionName, collectionState);
-	}
-
-	/**
-	 * Load a specific collection from storage engine
-	 * @param {string} collectionName - Name of the collection to load
-	 * @returns {Promise<void>}
-	 */
-	async loadCollection(collectionName) {
-		if (!this.storageEngine) {
-			throw new Error('No storage engine configured. Pass a storageEngine option when creating the DB.');
-		}
-
-		// Initialize storage engine if needed
-		if (this.storageEngine.initialize) {
-			await this.storageEngine.initialize();
-		}
-
-		const collectionState = await this.storageEngine.loadCollection(this.dbName, collectionName);
-		
-		if (!collectionState) {
-			return; // No saved state for this collection
-		}
-
-		// Create or recreate the collection
-		if (!this[collectionName]) {
-			this.createCollection(collectionName);
-		}
-
-		await this[collectionName].importState(collectionState);
-	}
 }

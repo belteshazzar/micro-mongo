@@ -1,8 +1,9 @@
 /**
- * MemoryStore - In-memory document storage for collections
+ * IndexStore - In-memory index storage for collections
+ * 
  * Simple key-value store using a plain JavaScript object
  */
-export class MemoryStore {
+export class IndexStore {
 	constructor() {
 		this.data = {};
 	}

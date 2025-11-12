@@ -1,6 +1,6 @@
 
 import { DB } from './DB.js'
-// https://mongodb.github.io/node-mongodb-native/6.20/classes/MongoClient.html
+
 export class MongoClient {
 
   constructor(uri, options = {}) {
