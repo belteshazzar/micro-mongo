@@ -11,6 +11,44 @@ export class RegularCollectionIndex extends Index {
 		// B+ tree mapping index key to array of document _ids
 		// Order 50 provides good balance between node size and tree height
 		this.data = new BPlusTree(50);
+		
+		// Load existing data from storage if present
+		this._loadFromStorage();
+	}
+
+	/**
+	 * Load index data from IndexStore
+	 * @private
+	 */
+	_loadFromStorage() {
+		if (!this.storage || !this.storage.data) return;
+		
+		// IndexStore data is a Map, iterate and load into B+ tree
+		for (const [key, value] of this.storage.data) {
+			if (key !== '_meta') {
+				this.data.add(key, value);
+			}
+		}
+	}
+
+	/**
+	 * Save a key-value pair to storage
+	 * @private
+	 */
+	_saveToStorage(key, value) {
+		if (this.storage) {
+			this.storage.set(key, value);
+		}
+	}
+
+	/**
+	 * Remove a key from storage
+	 * @private
+	 */
+	_removeFromStorage(key) {
+		if (this.storage) {
+			this.storage.remove(key);
+		}
 	}
 
 	/**
@@ -55,6 +93,8 @@ export class RegularCollectionIndex extends Index {
 			}
 			idArray.push(doc._id);
 			this.data.add(indexKey, idArray);
+			// Persist to storage
+			this._saveToStorage(indexKey, idArray);
 		}
 	}
 
@@ -74,8 +114,12 @@ export class RegularCollectionIndex extends Index {
 				}
 				if (idArray.length === 0) {
 					this.data.delete(indexKey);
+					// Remove from storage
+					this._removeFromStorage(indexKey);
 				} else {
 					this.data.add(indexKey, idArray);
+					// Update storage
+					this._saveToStorage(indexKey, idArray);
 				}
 			}
 		}
@@ -245,6 +289,10 @@ export class RegularCollectionIndex extends Index {
 	 */
 	clear() {
 		this.data.clear();
+		// Clear storage
+		if (this.storage) {
+			this.storage.clear();
+		}
 	}
 
 	/**
@@ -253,18 +301,11 @@ export class RegularCollectionIndex extends Index {
 	 * @returns {Object} Serializable index state
 	 */
 	serialize() {
-		// Convert B+ tree to plain object for serialization
-		const dataObj = {};
-		const entries = this.data.toArray();
-		for (const {key, value} of entries) {
-			dataObj[key] = value;
-		}
-		
+		// Data is already in IndexStore, no need to serialize separately
 		return {
 			type: 'regular',
 			keys: this.keys,
-			options: this.options,
-			data: dataObj
+			options: this.options
 		};
 	}
 
@@ -274,11 +315,7 @@ export class RegularCollectionIndex extends Index {
 	 * @param {Object} state - Serialized index state
 	 */
 	deserialize(state) {
-		// Rebuild B+ tree from plain object
-		this.data.clear();
-		const dataObj = state.data || {};
-		for (const key in dataObj) {
-			this.data.add(key, dataObj[key]);
-		}
+		// Data is loaded from IndexStore in constructor
+		// This method is kept for compatibility but doesn't need to do anything
 	}
 }

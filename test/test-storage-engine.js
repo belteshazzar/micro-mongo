@@ -28,20 +28,24 @@ describe("Storage Engine", function() {
 		await db.users.insertOne({ name: 'Bob', age: 25 });
 		await db.posts.insertOne({ title: 'Hello World', content: 'First post' });
 
-    console.log(storageEngine.getCollectionStore('users').documents);
-    console.log(storageEngine.getCollectionStore('posts').documents);
+    expect(storageEngine.getCollectionStore('users').size()).to.equal(2);
+    expect(storageEngine.getCollectionStore('posts').size()).to.equal(1);
 
-    expect(storageEngine.getCollectionStore('users').documentsCount()).to.equal(2);
-    expect(storageEngine.getCollectionStore('posts').documentsCount()).to.equal(1);
+    // double check by using a temp storage engine
+    let emptyStorage = new mongo.StorageEngine();
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: emptyStorage
+		});
+		db = client.db('testdb');
+		expect(db.getCollectionNames().length).to.equal(0);
+  
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
-		// expect(db.getCollectionNames().length).to.equal(0);
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
-		// Load from storage
-		// await db.loadFromStorage();
-
-		// Verify data was restored
 		expect(db.getCollectionNames().length).to.equal(2);
 		
 		const users = await db.users.find({}).toArray();
@@ -65,14 +69,12 @@ describe("Storage Engine", function() {
 		expect(indexesBefore.length).to.equal(1);
 		expect(indexesBefore[0].key.age).to.equal(1);
 
-		// Save to storage
-		// await db.saveToStorage();
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
-
-		// Load from storage
-		// await db.loadFromStorage();
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
 		// Verify index was restored
 		const indexesAfter = db.users.getIndexes();
@@ -91,14 +93,13 @@ describe("Storage Engine", function() {
 		await db.articles.insertOne({ title: 'Advanced Python', content: 'Python is also a programming language' });
 		await db.articles.createIndex({ title: 'text', content: 'text' });
 
-		// // Save to storage
-		// await db.saveToStorage();
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
-		// // Load from storage
-		// await db.loadFromStorage();
 
 		// Verify text index was restored and works
 		const indexesAfter = db.articles.getIndexes();
@@ -123,19 +124,17 @@ describe("Storage Engine", function() {
 		});
 		await db.places.createIndex({ location: '2dsphere' });
 
-		// Save to storage
-		// await db.saveToStorage();
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
-
-		// Load from storage
-		// await db.loadFromStorage();
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
 		// Verify geospatial index was restored and works
-		// const indexesAfter = db.places.getIndexes();
-		// expect(indexesAfter.length).to.equal(1);
-		// expect(indexesAfter[0].key.location).to.equal('2dsphere');
+		const indexesAfter = db.places.getIndexes();
+		expect(indexesAfter.length).to.equal(1);
+		expect(indexesAfter[0].key.location).to.equal('2dsphere');
 
 		// Test geospatial query
 		const results = await db.places.find({
@@ -146,39 +145,159 @@ describe("Storage Engine", function() {
 		expect(results.length).to.equal(2);
 	});
 
+	it('should persist regular index data across reloads', async function() {
+		// Create a fresh storage engine and populate it
+		const testStorage = new mongo.StorageEngine();
+		let testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: testStorage
+		});
+		let testDb = testClient.db('testdb');
+		
+		// Insert many documents
+		for (let i = 0; i < 100; i++) {
+			await testDb.products.insertOne({ sku: `PROD-${i}`, price: i * 10 });
+		}
+		
+		// Create index
+		await testDb.products.createIndex({ price: 1 });
+		
+		// Query using index
+		const beforeResults = await testDb.products.find({ price: { $gte: 500, $lte: 600 } }).toArray();
+		expect(beforeResults.length).to.equal(11); // 50-60 inclusive
+		
+		await testClient.close();
+		
+		// Reload with same storage engine
+		testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: testStorage
+		});
+		testDb = testClient.db('testdb');
+		
+		// Verify index still works with same data
+		const afterResults = await testDb.products.find({ price: { $gte: 500, $lte: 600 } }).toArray();
+		expect(afterResults.length).to.equal(11);
+		expect(afterResults[0].sku).to.match(/^PROD-/);
+		
+		await testClient.close();
+	});
+
+	it('should persist text index data across reloads', async function() {
+		// Create a fresh storage engine and populate it
+		const testStorage = new mongo.StorageEngine();
+		let testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: testStorage
+		});
+		let testDb = testClient.db('testdb');
+		
+		// Insert documents with text content
+		await testDb.articles.insertOne({ title: 'MongoDB Tutorial', body: 'Learn about NoSQL databases' });
+		await testDb.articles.insertOne({ title: 'JavaScript Basics', body: 'Introduction to JavaScript programming' });
+		await testDb.articles.insertOne({ title: 'Node.js Guide', body: 'Building servers with Node.js' });
+		await testDb.articles.insertOne({ title: 'React Tutorial', body: 'Frontend development with React' });
+		
+		// Create text index
+		await testDb.articles.createIndex({ title: 'text', body: 'text' });
+		
+		// Search before reload
+		const beforeResults = await testDb.articles.find({ title: { $text: 'JavaScript' } }).toArray();
+		expect(beforeResults.length).to.equal(1);
+		expect(beforeResults[0].title).to.equal('JavaScript Basics');
+		
+		await testClient.close();
+		
+		// Reload with same storage engine
+		testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: testStorage
+		});
+		testDb = testClient.db('testdb');
+		
+		// Verify text index still works
+		const afterResults = await testDb.articles.find({ title: { $text: 'JavaScript' } }).toArray();
+		expect(afterResults.length).to.equal(1);
+		expect(afterResults[0].title).to.equal('JavaScript Basics');
+		
+		// Test different search
+		const nodeResults = await testDb.articles.find({ body: { $text: 'servers' } }).toArray();
+		expect(nodeResults.length).to.equal(1);
+		expect(nodeResults[0].title).to.equal('Node.js Guide');
+		
+		await testClient.close();
+	});
+
+	it('should persist geospatial index data across reloads', async function() {
+		// Create a fresh storage engine and populate it
+		const testStorage = new mongo.StorageEngine();
+		let testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: testStorage
+		});
+		let testDb = testClient.db('testdb');
+		
+		// Insert locations
+		await testDb.locations.insertOne({ 
+			name: 'Empire State Building',
+			location: { type: 'Point', coordinates: [-73.9857, 40.7484] }
+		});
+		await testDb.locations.insertOne({ 
+			name: 'Statue of Liberty',
+			location: { type: 'Point', coordinates: [-74.0445, 40.6892] }
+		});
+		await testDb.locations.insertOne({ 
+			name: 'Brooklyn Bridge',
+			location: { type: 'Point', coordinates: [-73.9969, 40.7061] }
+		});
+		
+		// Create geospatial index
+		await testDb.locations.createIndex({ location: '2dsphere' });
+		
+		// Query before reload
+		const beforeResults = await testDb.locations.find({
+			location: {
+				$geoWithin: [[-74.1, 40.8], [-73.9, 40.6]]
+			}
+		}).toArray();
+		expect(beforeResults.length).to.equal(3);
+		
+		await testClient.close();
+		
+		// Reload with same storage engine
+		testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: testStorage
+		});
+		testDb = testClient.db('testdb');
+		
+		// Verify geospatial index still works
+		const afterResults = await testDb.locations.find({
+			location: {
+				$geoWithin: [[-74.1, 40.8], [-73.9, 40.6]]
+			}
+		}).toArray();
+		expect(afterResults.length).to.equal(3);
+		expect(afterResults.map(r => r.name).sort()).to.deep.equal([
+			'Brooklyn Bridge',
+			'Empire State Building',
+			'Statue of Liberty'
+		]);
+		
+		await testClient.close();
+	});
+
 	it('should save individual collection', async function() {
 		// Insert documents into multiple collections
 		await db.users.insertOne({ name: 'Alice', age: 30 });
 		await db.posts.insertOne({ title: 'Hello World' });
 
-		// Save only users collection
-		// await db.saveCollection('users');
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
-
-		// Load only users collection
-		// await db.loadCollection('users');
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
 		// Verify only users was restored
-		// const users = await db.users.find({}).toArray();
-		// expect(users.length).to.equal(1);
-		// expect(users[0].name).to.equal('Alice');
+		const users = await db.users.find({}).toArray();
+		expect(users.length).to.equal(1);
+		expect(users[0].name).to.equal('Alice');
 
-		// posts collection should not exist (or be empty if auto-created)
-		// const posts = await db.posts.find({}).toArray();
-		// expect(posts.length).to.equal(0);
-	});
-
-	it('should handle empty database', async function() {
-		// // Save empty database
-		// await db.saveToStorage();
-
-		// // Load from storage
-		// await db.loadFromStorage();
-
-		// Verify no collections exist
-		expect(db.getCollectionNames().length).to.equal(0);
 	});
 
 	it('should handle loading non-existent database', async function() {
@@ -188,9 +307,6 @@ describe("Storage Engine", function() {
 			storageEngine: freshStorage
 		});
 		const freshDb = freshClient.db('nonexistent');
-
-		// // Should not throw error
-		// await freshDb.loadFromStorage();
 
 		// Should have no collections
 		expect(freshDb.getCollectionNames().length).to.equal(0);
@@ -205,14 +321,12 @@ describe("Storage Engine", function() {
 		await db.docs.insertOne({ _id: id1, name: 'Doc1' });
 		await db.docs.insertOne({ _id: id2, name: 'Doc2' });
 
-		// // Save to storage
-		// await db.saveToStorage();
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
-
-		// // Load from storage
-		// await db.loadFromStorage();
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
 		// Verify ObjectIds are preserved
 		const docs = await db.docs.find({}).toArray();
@@ -236,14 +350,12 @@ describe("Storage Engine", function() {
 			tags: ['tag1', 'tag2']
 		});
 
-		// // Save to storage
-		// await db.saveToStorage();
+		// Load with previous storage engine
 
-		// Clear the database
-		// db.dropDatabase();
-
-		// // Load from storage
-		// await db.loadFromStorage();
+    client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
+			storageEngine: storageEngine
+		});
+		db = client.db('testdb');
 
 		// Verify complex structure is preserved
 		const docs = await db.complex.find({}).toArray();

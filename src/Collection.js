@@ -22,17 +22,20 @@ export class Collection {
 		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
 		this.isCollection = true; // TODO used by dropDatabase, ugly
 
-    for (const [indexName, indexStore] of Object.entries(this.storage.indexes)) {
-      let index;
-      if (indexStore.type === 'text') {
-        index = new TextCollectionIndex(indexName, indexStore.keys, indexStore);
-      } else if (indexStore.type === 'geospatial') {
-        index = new GeospatialCollectionIndex(indexName, indexStore.keys, indexStore);
-      } else {
-        // Default to regular index
-        index = new RegularCollectionIndex(indexName, indexStore.keys, indexStore);
-      }
-      this.indexes.set(index.name, index);
+		// Load existing indexes from storage
+		for (const [indexName, indexStore] of this.storage.indexes) {
+			let index;
+			if (indexStore.meta && indexStore.meta.type === 'text') {
+				index = new TextCollectionIndex(indexName, indexStore.meta.keys, indexStore);
+			} else if (indexStore.meta && indexStore.meta.type === 'geospatial') {
+				index = new GeospatialCollectionIndex(indexName, indexStore.meta.keys, indexStore);
+			} else if (indexStore.meta && indexStore.meta.type === 'regular') {
+				// Default to regular index
+				index = new RegularCollectionIndex(indexName, indexStore.meta.keys, indexStore);
+			}
+			if (index) {
+				this.indexes.set(index.name, index);
+			}
 		}
 	}
 
@@ -81,16 +84,19 @@ export class Collection {
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
-			index = new TextCollectionIndex(indexName, keys, this.storage.createIndexStorage(indexName, 'text', keys), { ...options, name: indexName });
+			const meta = { type: 'text', keys };
+			index = new TextCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
 		} else if (this.isGeospatialIndex(keys)) {
-			index = new GeospatialCollectionIndex(indexName, keys, this.storage.createIndexStorage(indexName, 'geospatial', keys), { ...options, name: indexName });
+			const meta = { type: 'geospatial', keys };
+			index = new GeospatialCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
 		} else {
-			index = new RegularCollectionIndex(indexName, keys, this.storage.createIndexStorage(indexName, 'regular', keys), { ...options, name: indexName });
+			const meta = { type: 'regular', keys };
+			index = new RegularCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
 		}
 
 		// Build index by scanning all documents
-		for (let i = 0; i < this.storage.size(); i++) {
-			const doc = this.storage.get(i);
+		const allDocs = this.storage.getAllDocuments();
+		for (const doc of allDocs) {
 			if (doc) {
 				index.add(doc);
 			}
@@ -518,7 +524,7 @@ export class Collection {
 		const doc = await this.findOne(query);
 		if (doc) {
 			this.updateIndexesOnDelete(doc);
-			this.storage.remove(doc._id);
+			this.storage.remove(doc._id.toString());
 			return { deletedCount: 1 };
 		} else {
 			return { deletedCount: 0 };
@@ -537,7 +543,7 @@ export class Collection {
 		const deletedCount = ids.length;
 		for (let i = 0; i < ids.length; i++) {
 			this.updateIndexesOnDelete(docs[i]);
-			this.storage.remove(ids[i]);
+			this.storage.remove(ids[i].toString());
 		}
 		return { deletedCount: deletedCount };
 	}
@@ -555,11 +561,11 @@ export class Collection {
 	}
 
 	drop() {
-		this.storage.clear();
 		// Clear all indexes
 		for (const [indexName, index] of this.indexes) {
 			index.clear();
 		}
+		this.storage.clear();
 	}
 
 	dropIndex(indexName) {
@@ -583,14 +589,41 @@ export class Collection {
 	explain() { throw "Not Implemented"; }
 
 	find(query, projection) {
+		const normalizedQuery = query == undefined ? {} : query;
+		
+		// Get query plan
+		const queryPlan = this.planQuery(normalizedQuery);
+		const documents = [];
+		const seen = {}; // Track which docs we've seen to avoid duplicates
+		
+		// If using index, get documents by ID
+		if (queryPlan.useIndex && queryPlan.docIds) {
+			for (const docId of queryPlan.docIds) {
+				const doc = this.storage.get(docId.toString());
+				if (doc && matches(doc, normalizedQuery)) {
+					seen[doc._id] = true;
+					documents.push(doc);
+				}
+			}
+		}
+		
+		// If not index-only query, do full scan for remaining documents
+		// This handles complex queries where index only partially matches
+		if (!queryPlan.indexOnly) {
+			const allDocs = this.storage.getAllDocuments();
+			for (const doc of allDocs) {
+				if (!seen[doc._id] && matches(doc, normalizedQuery)) {
+					seen[doc._id] = true;
+					documents.push(doc);
+				}
+			}
+		}
+		
 		return new Cursor(
 			this,
-			(query == undefined ? {} : query),
+			normalizedQuery,
 			projection,
-			matches,
-			this.storage,
-			this.indexes,
-			this.planQuery.bind(this),
+			documents,
 			SortedCursor
 		);
 	}
@@ -611,7 +644,7 @@ export class Collection {
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
 		const doc = c.next();
-		this.storage.remove(doc._id);
+		this.storage.remove(doc._id.toString());
 		if (options && options.projection) return applyProjection(options.projection, doc);
 		else return doc;
 	}
@@ -622,7 +655,7 @@ export class Collection {
 		if (!c.hasNext()) return null;
 		const doc = c.next();
 		replacement._id = doc._id;
-		this.storage.set(doc._id, replacement);
+		this.storage.set(doc._id.toString(), replacement);
 		if (options && options.returnNewDocument) {
 			if (options && options.projection) return applyProjection(options.projection, replacement);
 			else return replacement;
@@ -639,7 +672,7 @@ export class Collection {
 		const doc = c.next();
 		const clone = Object.assign({}, doc);
 		applyUpdates(update, clone);
-		this.storage.set(doc._id, clone);
+		this.storage.set(doc._id.toString(), clone);
 		if (options && options.returnNewDocument) {
 			if (options && options.projection) return applyProjection(options.projection, clone);
 			else return clone;
@@ -678,7 +711,7 @@ export class Collection {
 
 	async insertOne(doc) {
 		if (doc._id == undefined) doc._id = this.idGenerator();
-		this.storage.updateDocumentStorage(doc._id.toString(), doc);
+		this.storage.set(doc._id.toString(), doc);
 		this.updateIndexesOnInsert(doc);
 		return { insertedId: doc._id };
 	}
@@ -706,7 +739,7 @@ export class Collection {
 			if (options && options.upsert) {
 				const newDoc = replacement;
 				newDoc._id = this.idGenerator();
-				this.storage.set(newDoc._id, newDoc);
+				this.storage.set(newDoc._id.toString(), newDoc);
 				result.upsertedId = newDoc._id;
 			}
 		} else {
@@ -714,7 +747,7 @@ export class Collection {
 			const doc = c.next();
 			this.updateIndexesOnDelete(doc);
 			replacement._id = doc._id;
-			this.storage.set(doc._id, replacement);
+			this.storage.set(doc._id.toString(), replacement);
 			this.updateIndexesOnInsert(replacement);
 		}
 		return result;
@@ -726,12 +759,12 @@ export class Collection {
 		if (options === true || (options && options.justOne)) {
 			const doc = c.next();
 			this.updateIndexesOnDelete(doc);
-			this.storage.remove(doc._id);
+			this.storage.remove(doc._id.toString());
 		} else {
 			while (c.hasNext()) {
 				const doc = c.next();
 				this.updateIndexesOnDelete(doc);
-				this.storage.remove(doc._id);
+				this.storage.remove(doc._id.toString());
 			}
 		}
 	}
@@ -751,20 +784,20 @@ export class Collection {
 					const doc = c.next();
 					this.updateIndexesOnDelete(doc);
 					applyUpdates(updates, doc);
-					this.storage.set(doc._id, doc);
+					this.storage.set(doc._id.toString(), doc);
 					this.updateIndexesOnInsert(doc);
 				}
 			} else {
 				const doc = c.next();
 				this.updateIndexesOnDelete(doc);
 				applyUpdates(updates, doc);
-				this.storage.set(doc._id, doc);
+				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
 			}
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-				this.storage.set(newDoc._id, newDoc);
+				this.storage.set(newDoc._id.toString(), newDoc);
 				this.updateIndexesOnInsert(newDoc);
 			}
 		}
@@ -776,12 +809,12 @@ export class Collection {
 			const doc = c.next();
 			this.updateIndexesOnDelete(doc);
 			applyUpdates(updates, doc);
-			this.storage.set(doc._id, doc);
+			this.storage.set(doc._id.toString(), doc);
 			this.updateIndexesOnInsert(doc);
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-				this.storage.set(newDoc._id, newDoc);
+				this.storage.set(newDoc._id.toString(), newDoc);
 				this.updateIndexesOnInsert(newDoc);
 			}
 		}
@@ -794,13 +827,13 @@ export class Collection {
 				const doc = c.next();
 				this.updateIndexesOnDelete(doc);
 				applyUpdates(updates, doc);
-				this.storage.set(doc._id, doc);
+				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
 			}
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-				this.storage.set(newDoc._id, newDoc);
+				this.storage.set(newDoc._id.toString(), newDoc);
 				this.updateIndexesOnInsert(newDoc);
 			}
 		}

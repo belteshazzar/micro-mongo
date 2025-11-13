@@ -22,6 +22,39 @@ export class GeospatialCollectionIndex extends Index {
 		if (!this.geoField) {
 			throw new Error('Geospatial index must have at least one field with type "2dsphere" or "2d"');
 		}
+		
+		// Load existing data from storage if present
+		this._loadFromStorage();
+	}
+
+	/**
+	 * Load index data from IndexStore
+	 * @private
+	 */
+	_loadFromStorage() {
+		if (!this.storage || !this.storage.data) return;
+		
+		const storedData = this.storage.get('_rtreeData');
+		if (storedData) {
+			this.rtree.deserialize(storedData);
+		}
+		
+		const storedField = this.storage.get('_geoField');
+		if (storedField) {
+			this.geoField = storedField;
+		}
+	}
+
+	/**
+	 * Save index data to IndexStore
+	 * @private
+	 */
+	_saveToStorage() {
+		if (!this.storage) return;
+		
+		const serialized = this.rtree.serialize();
+		this.storage.set('_rtreeData', serialized);
+		this.storage.set('_geoField', this.geoField);
 	}
 
 	/**
@@ -87,6 +120,8 @@ export class GeospatialCollectionIndex extends Index {
 				_id: doc._id, 
 				geoJson: geoValue 
 			});
+			// Persist to storage
+			this._saveToStorage();
 		}
 	}
 
@@ -105,6 +140,8 @@ export class GeospatialCollectionIndex extends Index {
 				_id: doc._id, 
 				geoJson: geoValue 
 			});
+			// Persist to storage
+			this._saveToStorage();
 		}
 	}
 
@@ -361,6 +398,10 @@ export class GeospatialCollectionIndex extends Index {
 	 */
 	clear() {
 		this.rtree.clear();
+		// Clear storage
+		if (this.storage) {
+			this.storage.clear();
+		}
 	}
 
 	/**
@@ -379,12 +420,12 @@ export class GeospatialCollectionIndex extends Index {
 	 * @returns {Object} Serializable index state
 	 */
 	serialize() {
+		// Data is already in IndexStore, no need to serialize separately
 		return {
 			type: 'geospatial',
 			keys: this.keys,
 			options: this.options,
-			geoField: this.geoField,
-			rtreeState: this.rtree.serialize()
+			geoField: this.geoField
 		};
 	}
 
@@ -393,9 +434,7 @@ export class GeospatialCollectionIndex extends Index {
 	 * @param {Object} state - Serialized index state
 	 */
 	deserialize(state) {
-		this.geoField = state.geoField;
-		if (state.rtreeState) {
-			this.rtree.deserialize(state.rtreeState);
-		}
+		// Data is loaded from IndexStore in constructor
+		// This method is kept for compatibility but doesn't need to do anything
 	}
 }

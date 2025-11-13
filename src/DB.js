@@ -13,6 +13,9 @@ export class DB {
 		// StorageEngine
 		this.storageEngine = this.options.storageEngine || new StorageEngine();
 
+		// Load existing collections from storage engine
+		this._loadExistingCollections();
+
 		// Return a Proxy to enable dynamic collection creation
 		return new Proxy(this, {
 			get(target, property, receiver) {
@@ -58,6 +61,24 @@ export class DB {
 		else return new ObjectId();
 	}
 
+	/**
+	 * Load existing collections from storage engine
+	 * @private
+	 */
+	_loadExistingCollections() {
+		// Iterate through all collection stores in the storage engine
+		for (const collectionName of this.storageEngine.collectionStoreKeys()) {
+			const collectionStore = this.storageEngine.getCollectionStore(collectionName);
+			// Create Collection instance for each existing collection
+			this[collectionName] = new Collection(
+				this,
+				collectionName,
+				collectionStore,
+				this._id.bind(this)
+			);
+		}
+	}
+
 	// DB Methods
 	cloneCollection() { throw "Not Implemented"; }
 	cloneDatabase() { throw "Not Implemented"; }
@@ -77,11 +98,15 @@ export class DB {
 	currentOp() { throw "Not Implemented"; }
 
 	dropDatabase() {
-		for (const key in this) {
-			if (this[key] != null && this[key].isCollection) {
-				this[key].drop(); // drop the contents
-				delete this[key];
-			}
+		// Get all collection names
+		const collectionNames = this.getCollectionNames();
+		
+		// Drop each collection
+		for (const name of collectionNames) {
+			// Remove from storage engine
+			this.storageEngine.removeCollectionStore(name);
+			// Delete the collection property from DB
+			delete this[name];
 		}
 	}
 

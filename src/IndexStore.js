@@ -4,7 +4,8 @@
  * Simple key-value store using a plain JavaScript object
  */
 export class IndexStore {
-	constructor() {
+	constructor(meta) {
+    this.meta = meta || {};
 		this.data = new Map();
 	}
 

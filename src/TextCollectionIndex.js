@@ -21,6 +21,39 @@ export class TextCollectionIndex extends Index {
 		if (this.indexedFields.length === 0) {
 			throw new Error('Text index must have at least one field with type "text"');
 		}
+		
+		// Load existing data from storage if present
+		this._loadFromStorage();
+	}
+
+	/**
+	 * Load index data from IndexStore
+	 * @private
+	 */
+	_loadFromStorage() {
+		if (!this.storage || !this.storage.data) return;
+		
+		const storedData = this.storage.get('_textIndexData');
+		if (storedData) {
+			this.textIndex.deserialize(storedData);
+		}
+		
+		const storedFields = this.storage.get('_indexedFields');
+		if (storedFields) {
+			this.indexedFields = storedFields;
+		}
+	}
+
+	/**
+	 * Save index data to IndexStore
+	 * @private
+	 */
+	_saveToStorage() {
+		if (!this.storage) return;
+		
+		const serialized = this.textIndex.serialize();
+		this.storage.set('_textIndexData', serialized);
+		this.storage.set('_indexedFields', this.indexedFields);
 	}
 
 	/**
@@ -50,6 +83,8 @@ export class TextCollectionIndex extends Index {
 		const text = this._extractText(doc);
 		if (text) {
 			this.textIndex.add(String(doc._id), text);
+			// Persist to storage
+			this._saveToStorage();
 		}
 	}
 
@@ -62,6 +97,8 @@ export class TextCollectionIndex extends Index {
 			return;
 		}
 		this.textIndex.remove(String(doc._id));
+		// Persist to storage
+		this._saveToStorage();
 	}
 
 	/**
@@ -91,6 +128,10 @@ export class TextCollectionIndex extends Index {
 	 */
 	clear() {
 		this.textIndex.clear();
+		// Clear storage
+		if (this.storage) {
+			this.storage.clear();
+		}
 	}
 
 	/**
@@ -121,12 +162,12 @@ export class TextCollectionIndex extends Index {
 	 * @returns {Object} Serializable index state
 	 */
 	serialize() {
+		// Data is already in IndexStore, no need to serialize separately
 		return {
 			type: 'text',
 			keys: this.keys,
 			options: this.options,
-			indexedFields: this.indexedFields,
-			textIndexState: this.textIndex.serialize()
+			indexedFields: this.indexedFields
 		};
 	}
 
@@ -135,9 +176,7 @@ export class TextCollectionIndex extends Index {
 	 * @param {Object} state - Serialized index state
 	 */
 	deserialize(state) {
-		this.indexedFields = state.indexedFields || [];
-		if (state.textIndexState) {
-			this.textIndex.deserialize(state.textIndexState);
-		}
+		// Data is loaded from IndexStore in constructor
+		// This method is kept for compatibility but doesn't need to do anything
 	}
 }

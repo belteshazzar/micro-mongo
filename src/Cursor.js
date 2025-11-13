@@ -2,16 +2,14 @@ import { applyProjection } from './utils.js';
 
 /**
  * Cursor class for iterating over query results
+ * Now a simple iterator over pre-filtered documents
  */
 export class Cursor {
-	constructor(collection, query, projection, matches, storage, indexes, planQuery, SortedCursor) {
+	constructor(collection, query, projection, documents, SortedCursor) {
 		this.collection = collection;
 		this.query = query;
 		this.projection = projection;
-		this.matches = matches;
-		this.storage = storage;
-		this.indexes = indexes;
-		this.planQuery = planQuery;
+		this.documents = documents; // Pre-filtered array of documents
 		this.SortedCursor = SortedCursor;
 
 		// Validate projection if provided
@@ -32,57 +30,6 @@ export class Cursor {
 		
 		this.pos = 0;
 		this.max = 0;
-		this._next = false; // false == unknown, null == no more, !null == next
-		
-		// Query planning - check if we can use an index
-		const queryPlan = this.planQuery(this.query);
-		this.useIndex = queryPlan && queryPlan.useIndex;
-		this.planType = queryPlan ? queryPlan.planType : 'full_scan';
-		this.indexDocIds = null;
-		this.indexPos = 0;
-		this.fullScanDocIds = {}; // Track which docs we've seen to avoid duplicates
-		this.indexOnly = queryPlan && queryPlan.indexOnly; // If true, don't fall back to full scan
-
-		// If using index, get the document IDs from the query plan
-		if (this.useIndex && queryPlan.docIds) {
-			this.indexDocIds = queryPlan.docIds.slice();
-		}
-		
-		// Initialize by finding first document
-		this._findNext();
-	}
-
-	_findNext() {
-		// First, try to get documents from index
-		while (this.indexDocIds !== null && this.indexPos < this.indexDocIds.length) {
-			const docId = this.indexDocIds[this.indexPos++];
-			const doc = this.storage.getDocumentStorage(docId);
-			if (doc && this.matches(doc, this.query)) {
-				this.fullScanDocIds[doc._id] = true;
-				this._next = doc;
-				return;
-			}
-			// If doc doesn't match (shouldn't happen with good index), continue to next
-		}
-
-		// If index-only query (e.g., text search, geospatial), don't fall back to full scan
-		if (this.indexOnly) {
-			this._next = null;
-			return;
-		}
-
-		// Then fall back to full scan for remaining documents
-		// This handles complex queries where index only partially matches
-		while (this.pos < this.storage.documentsCount() && (this.max == 0 || this.pos < this.max)) {
-			const cur = this.storage.getDocumentStorage(this.pos++);
-			// Skip docs we already returned from index
-			if (cur && !this.fullScanDocIds[cur._id] && this.matches(cur, this.query)) {
-				this.fullScanDocIds[cur._id] = true;
-				this._next = cur;
-				return;
-			}
-		}
-		this._next = null;
 	}
 
 	batchSize() { throw "Not Implemented"; }
@@ -90,13 +37,8 @@ export class Cursor {
 	comment() { throw "Not Implemented"; }
 	
 	count() {
-		let num = 0;
-		const c = new Cursor(this.collection, this.query, null, this.matches, this.storage, this.indexes, this.planQuery, this.SortedCursor);
-		while (c.hasNext()) {
-			num++;
-			c.next();
-		}
-		return num;
+		// Return total count without considering skip/limit applied to this cursor
+		return this.documents.length;
 	}
 	
 	explain() { throw "Not Implemented"; }
@@ -108,8 +50,8 @@ export class Cursor {
 	}
 	
 	hasNext() {
-		if (this._next === false) this._findNext();
-		return this._next != null;
+		const effectiveMax = this.max > 0 ? Math.min(this.max, this.documents.length) : this.documents.length;
+		return this.pos < effectiveMax;
 	}
 	
 	hint() { throw "Not Implemented"; }
@@ -134,11 +76,14 @@ export class Cursor {
 	min() { throw "Not Implemented"; }
 	
 	next() {
-		if (this._next == null) throw "Error: error hasNext: false";
-		const result = this._next;
-		this._findNext();
-		if (this.projection) return applyProjection(this.projection, result);
-		else return result;
+		if (!this.hasNext()) {
+			throw "Error: error hasNext: false";
+		}
+		const result = this.documents[this.pos++];
+		if (this.projection) {
+			return applyProjection(this.projection, result);
+		}
+		return result;
 	}
 	
 	noCursorTimeout() { throw "Not Implemented"; }
@@ -151,10 +96,7 @@ export class Cursor {
 	size() { throw "Not Implemented"; }
 	
 	skip(num) {
-		while (num > 0) {
-			this.next();
-			num--;
-		}
+		this.pos = Math.min(this.pos + num, this.documents.length);
 		return this;
 	}
 	
