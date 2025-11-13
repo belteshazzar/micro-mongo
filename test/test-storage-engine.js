@@ -28,8 +28,11 @@ describe("Storage Engine", function() {
 		await db.users.insertOne({ name: 'Bob', age: 25 });
 		await db.posts.insertOne({ title: 'Hello World', content: 'First post' });
 
-		// Save to storage
-		// await db.saveToStorage();
+    console.log(storageEngine.getCollectionStore('users').documents);
+    console.log(storageEngine.getCollectionStore('posts').documents);
+
+    expect(storageEngine.getCollectionStore('users').documentsCount()).to.equal(2);
+    expect(storageEngine.getCollectionStore('posts').documentsCount()).to.equal(1);
 
 		// Clear the database
 		// db.dropDatabase();

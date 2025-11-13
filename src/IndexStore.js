@@ -4,34 +4,31 @@
  * Simple key-value store using a plain JavaScript object
  */
 export class IndexStore {
-	constructor(name, type, keys) {
-    this.name = name;
-    this.type = type;
-    this.keys = keys;
-		this.data = {};
+	constructor() {
+		this.data = new Map();
 	}
 
 	clear() {
-		this.data = {};
+		this.data.clear();
 	}
+
+  keys() {
+    return this.data.keys();
+  }
 
 	get(index) {
-		return this.data[Object.keys(this.data)[index]];
-	}
-
-	getStore() {
-		return this.data;
+		return this.data.get(index);
 	}
 
 	remove(key) {
-		delete this.data[key];
+		this.data.delete(key);
 	}
 
 	set(key, value) {
-		this.data[key] = value;
+		this.data.set(key, value);
 	}
 
 	size() {
-		return Object.keys(this.data).length;
+		return this.data.size;
 	}
 }

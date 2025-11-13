@@ -2,33 +2,37 @@ import { CollectionStore } from './CollectionStore.js';
 
 /**
  * In-memory storage engine (default)
- * Does not persist data between sessions
  */
 export class StorageEngine {
 	constructor() {
 		this.collections = new Map();
 	}
 
-	/**
-	 * Initialize the storage engine
-	 * @returns {Promise<void>}
-	 */
-	initialize() {
-		// No initialization needed for in-memory storage
-	}
+  collectionsCount() {
+    return this.collections.size;
+  }
+  
+  /**
+   * 
+   * @returns {[string]} list of collection names
+   */
+  collectionStoreKeys() {
+    return this.collections.keys();
+  }
 
-	/**
-	 * Save the entire database state
-	 * @returns {Promise<void>}
-	 */
-	saveDatabase() {
-		// In-memory storage does not persist data
-	}
+  /**
+   * 
+   * @param {*} collectionName 
+   * @returns 
+   */
+  getCollectionStore(collectionName) {
+    return this.collections.get(collectionName);
+  }
 
 	/**
 	 * Create a collection's state
 	 * @param {string} collectionName - The collection name
-	 * @returns {Promise<CollectionStore>} The collection store
+	 * @returns {CollectionStore} The collection store
 	 */
 	createCollectionStore(collectionName) {
     if (this.collections.has(collectionName)) {
@@ -41,21 +45,18 @@ export class StorageEngine {
 
 	/**
 	 * Delete a collection
-	 * @param {string} dbName - The database name
 	 * @param {string} collectionName - The collection name
-	 * @returns {Promise<void>}
 	 */
-	deleteCollectionStore(collectionName) {
-		if (this.collections.has(collectionName)) {
-			this.collections.delete(collectionName);
-		}
+	removeCollectionStore(collectionName) {
+    this.collections.delete(collectionName);
 	}
 
 	/**
-	 * Close/cleanup the storage engine
+	 * Save the entire database state
 	 * @returns {Promise<void>}
 	 */
-	close() {
-		// No cleanup needed for in-memory storage
+	save() {
+		// In-memory storage does not persist data
 	}
+
 }

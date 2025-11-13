@@ -678,7 +678,7 @@ export class Collection {
 
 	async insertOne(doc) {
 		if (doc._id == undefined) doc._id = this.idGenerator();
-		this.storage.set(doc._id, doc);
+		this.storage.updateDocumentStorage(doc._id.toString(), doc);
 		this.updateIndexesOnInsert(doc);
 		return { insertedId: doc._id };
 	}

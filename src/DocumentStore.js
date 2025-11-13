@@ -4,30 +4,30 @@
  */
 export class DocumentStore {
 	constructor() {
-		this.data = {};
+		this.data = new Map();
 	}
 
 	clear() {
-		this.data = {};
+		this.data = new Map();
 	}
+
+  keys() {
+    return this.data.keys();
+  }
 
 	get(index) {
-		return this.data[Object.keys(this.data)[index]];
-	}
-
-	getStore() {
-		return this.data;
+		return this.data.get(index);
 	}
 
 	remove(key) {
-		delete this.data[key];
+		this.data.delete(key);
 	}
 
 	set(key, value) {
-		this.data[key] = value;
+		this.data.set(key, value);
 	}
 
 	size() {
-		return Object.keys(this.data).length;
+		return this.data.size;
 	}
 }

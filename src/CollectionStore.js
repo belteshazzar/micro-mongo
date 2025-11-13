@@ -11,12 +11,13 @@ import { IndexStore } from './IndexStore.js';
  */
 export class CollectionStore {
 	constructor() {
+
 		// Document storage - uses DocumentStore for document CRUD operations
 		this.documents = new DocumentStore();
 		
 		// Index storage - plain object to store index data
 		// Structure: { indexName: indexDataObject }
-		this.indexes = {};
+		this.indexes = new Map();
 	}
 
 	// ==========================================
@@ -25,51 +26,64 @@ export class CollectionStore {
 	// ==========================================
 
 	/**
-	 * Clear all documents
+	 * Clear all documents and indexes
 	 */
 	clear() {
 		this.documents.clear();
+    this.indexes.clear();
 	}
 
+  documentsCount() {
+    return this.documents.size();
+  }
+
+  /**
+   * Get all document keys
+   * @returns {[string]} Array of document keys
+   */
+  documentKeys() {
+    return this.documents.keys();
+  }
+
 	/**
-	 * Get document by index position
-	 * @param {number} index - Position in storage
+	 * Get document by key position
+	 * @param {*} key - Document ID
 	 * @returns {Object} Document at that position
 	 */
-	get(index) {
-		return this.documents.get(index);
-	}
-
-	/**
-	 * Get the underlying document store
-	 * @returns {Object} The document storage object
-	 */
-	getStore() {
-		return this.documents.getStore();
+	getDocumentStorage(key) {
+    if (typeof key !== 'string') throw new Error("Document key must be a string");
+		return this.documents.get(key);
 	}
 
 	/**
 	 * Remove a document by key (_id)
 	 * @param {*} key - Document ID
 	 */
-	remove(key) {
+	removeDocumentStorage(key) {
+    if (typeof key !== 'string') throw new Error("Document key must be a string");
 		this.documents.remove(key);
 	}
 
 	/**
-	 * Set/add a document
+	 * Add a document
 	 * @param {*} key - Document ID
 	 * @param {Object} value - Document to store
 	 */
-	set(key, value) {
+	addDocumentStorage(key, value) {
+    if (typeof key !== 'string') throw new Error("Document key must be a string");
 		this.documents.set(key, value);
 	}
+
+  updateDocumentStorage(key, value) {
+    if (typeof key !== 'string') throw new Error("Document key must be a string");
+    this.documents.set(key, value);
+  }
 
 	/**
 	 * Get the number of documents
 	 * @returns {number} Document count
 	 */
-	size() {
+	documentsCount() {
 		return this.documents.size();
 	}
 
@@ -77,16 +91,24 @@ export class CollectionStore {
 	// Index Storage Interface
 	// ==========================================
 
+  indexesCount() {
+    return this.indexes.size;
+  }
+
+  indexKeys() {
+    return this.indexes.keys();
+  }
+
 	/**
 	 * Get index data for a specific index
 	 * @param {string} indexName - Name of the index
 	 * @returns {Object} Index data object (or creates empty one if doesn't exist)
 	 */
-	createIndexStorage(name,type,keys) {
-		if (!this.indexes[name]) {
-			this.indexes[name] = new IndexStore(name,type,keys);
+	createIndexStore(name) {
+		if (!this.indexes.has(name)) {
+			this.indexes.set(name, new IndexStore());
 		}
-		return this.indexes[name];
+		return this.indexes.get(name);
 	}
 
 	// /**

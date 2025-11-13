@@ -13,7 +13,7 @@ export class Cursor {
 		this.indexes = indexes;
 		this.planQuery = planQuery;
 		this.SortedCursor = SortedCursor;
-		
+
 		// Validate projection if provided
 		if (projection && Object.keys(projection).length > 0) {
 			const keys = Object.keys(projection);
@@ -56,7 +56,7 @@ export class Cursor {
 		// First, try to get documents from index
 		while (this.indexDocIds !== null && this.indexPos < this.indexDocIds.length) {
 			const docId = this.indexDocIds[this.indexPos++];
-			const doc = this.storage.getStore()[docId];
+			const doc = this.storage.getDocumentStorage(docId);
 			if (doc && this.matches(doc, this.query)) {
 				this.fullScanDocIds[doc._id] = true;
 				this._next = doc;
@@ -73,8 +73,8 @@ export class Cursor {
 
 		// Then fall back to full scan for remaining documents
 		// This handles complex queries where index only partially matches
-		while (this.pos < this.storage.size() && (this.max == 0 || this.pos < this.max)) {
-			const cur = this.storage.get(this.pos++);
+		while (this.pos < this.storage.documentsCount() && (this.max == 0 || this.pos < this.max)) {
+			const cur = this.storage.getDocumentStorage(this.pos++);
 			// Skip docs we already returned from index
 			if (cur && !this.fullScanDocIds[cur._id] && this.matches(cur, this.query)) {
 				this.fullScanDocIds[cur._id] = true;
