@@ -26,26 +26,63 @@ class BPlusTreeNode {
    * Creates a new B+ tree node
    * @param {boolean} isLeaf - Whether this node is a leaf node
    */
-  constructor(isLeaf = false, indexStore) {
-    if (!indexStore) {
+  constructor(isLeaf, indexStore, nodeCache) {
+    if (!(indexStore instanceof IndexStore)) {
       throw new Error('IndexStore is required to create BPlusTreeNode');
     }
-    this._data = {
-      id: indexStore.meta.nextId++,
-      keys: [],      // Array of keys
-      values: [],    // Array of values (only used in leaf nodes)
-      children: [],  // Array of child nodes (only used in internal nodes)
-      isLeaf: isLeaf,
-      next : null,    // Pointer to next leaf node (only used in leaf nodes)
-    };
-    indexStore.set(this._data.id, this._data);
-    this.id = this._data.id;
-    this.keys = this._data.keys;
-    this.values = this._data.values;
-    this.children = [];
-    this.isLeaf = this._data.isLeaf;
-    this.next = null;
 
+    if (typeof isLeaf === 'object') {
+      // Load existing node from indexStore
+      this._data = isLeaf;
+      this.id = this._data.id;
+      this.keys = [...this._data.keys];
+      this.values = this._data.isLeaf ? [...this._data.values] : [];
+      this.children = [];
+      for (const childId of this._data.children) {
+        if (nodeCache.has(childId)) {
+          this.children.push(nodeCache.get(childId));
+          continue;
+        }
+        const childData = indexStore.get(childId);
+        if (!childData) {
+          throw new Error(`BPlusTreeNode: Child node with id ${childId} not found in IndexStore`);
+        }
+        const childNode = new BPlusTreeNode(childData, indexStore, nodeCache);
+        this.children.push(childNode);
+        nodeCache.set(childId, childNode);
+      }
+      this.isLeaf = this._data.isLeaf;
+      if (this._data.next) {
+        if (nodeCache.has(this._data.next)) {
+          this.next = nodeCache.get(this._data.next);
+        } else {
+          const nextData = indexStore.get(this._data.next);
+          if (!nextData) {
+            throw new Error(`BPlusTreeNode: Next leaf node with id ${this._data.next} not found in IndexStore`);
+          }
+          this.next = new BPlusTreeNode(nextData, indexStore, nodeCache);
+          nodeCache.set(this.next.id, this.next);
+        }
+      } else {
+        this.next = null;
+      }
+    } else {
+      this._data = {
+        id: indexStore.meta.nextId++,
+        keys: [],      // Array of keys
+        values: [],    // Array of values (only used in leaf nodes)
+        children: [],  // Array of child nodes (only used in internal nodes)
+        isLeaf: isLeaf,
+        next : null,    // Pointer to next leaf node (only used in leaf nodes)
+      };
+      indexStore.set(this._data.id, this._data);
+      this.id = this._data.id;
+      this.keys = [...this._data.keys];
+      this.values = [...this._data.values];
+      this.children = [];
+      this.isLeaf = this._data.isLeaf;
+      this.next = null;
+    }
     const self = this;
 
     return new Proxy(this, {
@@ -79,8 +116,6 @@ class BPlusTreeNode {
                       throw new Error('BPlusTreeNode: children array can only store BPlusTreeNode instances',args[2]);
                     }
                   };
-                } else {
-                  console.log(`Getting non-numeric property:`,property);
                 }
               }
               // Custom logic for getting properties
@@ -137,34 +172,41 @@ export class BPlusTree {
     if (order < 3) {
       throw new Error('B+ tree order must be at least 3');
     }
-    const minKeys = Math.ceil(order / 2) - 1;
+    this.order = order;
+    this.minKeys = Math.ceil(order / 2) - 1;
     this.indexStore = indexStore;
   
     if (Object.hasOwn(indexStore.meta,'order')) {
-      if (indexStore.meta.order !== order) {
+      if (indexStore.meta.order !== this.order) {
         throw new Error(`B+ tree order does not match stored index metadata ${indexStore.meta.order} != ${order}`);
       }
-      if (indexStore.meta.minKeys != minKeys) {
-        throw new Error(`B+ tree minKeys does not match stored index metadata ${indexStore.meta.minKeys} != ${minKeys}`);
+      if (indexStore.meta.minKeys != this.minKeys) {
+        throw new Error(`B+ tree minKeys does not match stored index metadata ${indexStore.meta.minKeys} != ${this.minKeys}`);
       }
 
-      this.root = this._buildTreeFromStorage();
+      this._buildTreeFromStorage();
+
     } else {
       this.indexStore.meta.order = order;
       this.indexStore.meta.minKeys = Math.ceil(order / 2) - 1;
       this.indexStore.meta.nextId = 1;
-      this.root = new BPlusTreeNode(true,this.indexStore);
+      this.root = new BPlusTreeNode(true, this.indexStore);
       this.indexStore.meta.rootId = this.root.id;
     }
   }
 
-    _buildTreeFromStorage() {
-      // Implement logic to rebuild the tree from the indexStore
-      // This is a placeholder and needs to be implemented
-      throw new Error('BPlusTree: _buildTreeFromStorage not implemented');
-      // console.error(this.indexStore);
-      // return new BPlusTreeNode(true, this.indexStore);
+  /**
+   * Builds the B+ tree from existing data in the IndexStore
+   * @private
+   */
+  _buildTreeFromStorage() {
+    const nodeCache = new Map();
+    const rootData = this.indexStore.get(this.indexStore.meta.rootId);
+    if (!rootData) {
+      throw new Error('BPlusTree: Root node not found in IndexStore');
     }
+    this.root = new BPlusTreeNode(rootData,this.indexStore, nodeCache);
+  }
 
     /**
      * Searches for a value by key in the B+ tree
@@ -213,7 +255,7 @@ export class BPlusTree {
 
         // If root is full, split it
         if (root.keys.length === this.indexStore.meta.order - 1) {
-            const newRoot = new BPlusTreeNode(false,this.indexStore);
+            const newRoot = new BPlusTreeNode(false, this.indexStore);
             newRoot.children.push(this.root);
             this._splitChild(newRoot, 0);
             this.root = newRoot;
@@ -283,7 +325,7 @@ export class BPlusTree {
      */
     _splitChild(parent, index) {
         const fullChild = parent.children[index];
-        const newChild = new BPlusTreeNode(fullChild.isLeaf,this.indexStore);
+        const newChild = new BPlusTreeNode(fullChild.isLeaf, this.indexStore);
         const midIndex = Math.floor((this.indexStore.meta.order - 1) / 2);
 
         if (fullChild.isLeaf) {
@@ -551,7 +593,7 @@ export class BPlusTree {
      */
     clear() {
       this.indexStore.clear();
-      this.root = new BPlusTreeNode(true,this.indexStore);
+      this.root = new BPlusTreeNode(true, this.indexStore);
       this.indexStore.meta.rootId = this.root.id;
     }
 
