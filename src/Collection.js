@@ -25,13 +25,13 @@ export class Collection {
 		// Load existing indexes from storage
 		for (const [indexName, indexStore] of this.storage.indexes) {
 			let index;
-			if (indexStore.meta && indexStore.meta.type === 'text') {
-				index = new TextCollectionIndex(indexName, indexStore.meta.keys, indexStore);
-			} else if (indexStore.meta && indexStore.meta.type === 'geospatial') {
-				index = new GeospatialCollectionIndex(indexName, indexStore.meta.keys, indexStore);
-			} else if (indexStore.meta && indexStore.meta.type === 'regular') {
+			if (indexStore.getMeta('type') === 'text') {
+				index = new TextCollectionIndex(indexName, indexStore.getMeta('keys'), indexStore);
+			} else if (indexStore.getMeta('type') === 'geospatial') {
+				index = new GeospatialCollectionIndex(indexName, indexStore.getMeta('keys'), indexStore);
+			} else if (indexStore.getMeta('type') === 'regular') {
 				// Default to regular index
-				index = new RegularCollectionIndex(indexName, indexStore.meta.keys, indexStore);
+				index = new RegularCollectionIndex(indexName, indexStore.getMeta('keys'), indexStore);
 			}
 			if (index) {
 				this.indexes.set(index.name, index);

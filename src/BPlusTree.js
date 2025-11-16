@@ -68,13 +68,14 @@ class BPlusTreeNode {
       }
     } else {
       this._data = {
-        id: indexStore.meta.nextId++,
+        id: indexStore.getMeta('nextId'),
         keys: [],      // Array of keys
         values: [],    // Array of values (only used in leaf nodes)
         children: [],  // Array of child nodes (only used in internal nodes)
         isLeaf: isLeaf,
         next : null,    // Pointer to next leaf node (only used in leaf nodes)
       };
+      indexStore.setMeta('nextId', this._data.id + 1);
       indexStore.set(this._data.id, this._data);
       this.id = this._data.id;
       this.keys = [...this._data.keys];
@@ -98,6 +99,7 @@ class BPlusTreeNode {
                     if (args.length == 3) {
                       if (args[2] instanceof BPlusTreeNode) {
                         self._data.children.splice(args[0], args[1], args[2].id);
+                        indexStore.set(self._data.id, self._data);
                       } else {
                         throw new Error('BPlusTreeNode: children array can only store BPlusTreeNode instances',args[2]);
                       }
@@ -111,6 +113,7 @@ class BPlusTreeNode {
                     }
                     if (args[0] instanceof BPlusTreeNode) {
                       self._data.children.push(args[0].id);
+                      indexStore.set(self._data.id, self._data);
                       return self.children.push(args[0]);
                     } else {
                       throw new Error('BPlusTreeNode: children array can only store BPlusTreeNode instances',args[2]);
@@ -127,6 +130,7 @@ class BPlusTreeNode {
               } else {
                 Reflect.set(self._data.children, property, value, receiver);
               }
+              indexStore.set(self._data.id, self._data);
               return Reflect.set(target, property, value, receiver); // Forward the operation to the original array
             }
           });
@@ -138,21 +142,26 @@ class BPlusTreeNode {
             if (value instanceof BPlusTreeNode) {
               target.next = value;
               target._data.next = value.id;
+              indexStore.set(target._data.id, target._data);
             } else if (value === null) {
               target.next = null;
               target._data.next = null;
+              indexStore.set(target._data.id, target._data);
             } else {
               throw new Error('BPlusTreeNode: next pointer must be a BPlusTreeNode or null');
             }
           } else if (prop === 'isLeaf') {
             target.isLeaf = value;
             target._data.isLeaf = value;
+            indexStore.set(target._data.id, target._data);
           } else if (prop === 'children') {
             target.children = value;
             target._data.children = value.map(child => child.id);
+            indexStore.set(target._data.id, target._data);
           } else {
             target[prop] = value;
             target._data[prop] = value;
+            indexStore.set(target._data.id, target._data);
           }
         return true;
       }
@@ -176,22 +185,22 @@ export class BPlusTree {
     this.minKeys = Math.ceil(order / 2) - 1;
     this.indexStore = indexStore;
   
-    if (Object.hasOwn(indexStore.meta,'order')) {
-      if (indexStore.meta.order !== this.order) {
-        throw new Error(`B+ tree order does not match stored index metadata ${indexStore.meta.order} != ${order}`);
+    if (indexStore.hasMeta('order')) {
+      if (indexStore.getMeta('order') !== this.order) {
+        throw new Error(`B+ tree order does not match stored index metadata ${indexStore.getMeta('order')} != ${this.order}`);
       }
-      if (indexStore.meta.minKeys != this.minKeys) {
-        throw new Error(`B+ tree minKeys does not match stored index metadata ${indexStore.meta.minKeys} != ${this.minKeys}`);
+      if (indexStore.getMeta('minKeys') != this.minKeys) {
+        throw new Error(`B+ tree minKeys does not match stored index metadata ${indexStore.getMeta('minKeys')} != ${this.minKeys}`);
       }
 
       this._buildTreeFromStorage();
 
     } else {
-      this.indexStore.meta.order = order;
-      this.indexStore.meta.minKeys = Math.ceil(order / 2) - 1;
-      this.indexStore.meta.nextId = 1;
+      this.indexStore.setMeta('order', this.order);
+      this.indexStore.setMeta('minKeys', this.minKeys);
+      this.indexStore.setMeta('nextId', 1);
       this.root = new BPlusTreeNode(true, this.indexStore);
-      this.indexStore.meta.rootId = this.root.id;
+      this.indexStore.setMeta('rootId', this.root.id);
     }
   }
 
@@ -201,7 +210,7 @@ export class BPlusTree {
    */
   _buildTreeFromStorage() {
     const nodeCache = new Map();
-    const rootData = this.indexStore.get(this.indexStore.meta.rootId);
+    const rootData = this.indexStore.get(this.indexStore.getMeta('rootId'));
     if (!rootData) {
       throw new Error('BPlusTree: Root node not found in IndexStore');
     }
@@ -254,12 +263,12 @@ export class BPlusTree {
         const root = this.root;
 
         // If root is full, split it
-        if (root.keys.length === this.indexStore.meta.order - 1) {
+        if (root.keys.length === this.indexStore.getMeta('order') - 1) {
             const newRoot = new BPlusTreeNode(false, this.indexStore);
             newRoot.children.push(this.root);
             this._splitChild(newRoot, 0);
             this.root = newRoot;
-            this.indexStore.meta.rootId = this.root.id;
+            this.indexStore.setMeta('rootId', this.root.id);
         }
 
         this._insertNonFull(this.root, key, value);
@@ -305,7 +314,7 @@ export class BPlusTree {
             }
 
             // If child is full, split it
-            if (node.children[i].keys.length === this.indexStore.meta.order - 1) {
+            if (node.children[i].keys.length === this.indexStore.getMeta('order') - 1) {
                 this._splitChild(node, i);
                 // After split, re-check which child to insert into
                 if (key >= node.keys[i]) {
@@ -326,7 +335,7 @@ export class BPlusTree {
     _splitChild(parent, index) {
         const fullChild = parent.children[index];
         const newChild = new BPlusTreeNode(fullChild.isLeaf, this.indexStore);
-        const midIndex = Math.floor((this.indexStore.meta.order - 1) / 2);
+        const midIndex = Math.floor((this.indexStore.getMeta('order') - 1) / 2);
 
         if (fullChild.isLeaf) {
             // For leaf nodes, copy the upper half to new node
@@ -364,7 +373,7 @@ export class BPlusTree {
         if (this.root.keys.length === 0) {
             if (!this.root.isLeaf && this.root.children.length > 0) {
                 this.root = this.root.children[0];
-                this.indexStore.meta.rootId = this.root.id;
+                this.indexStore.setMeta('rootId', this.root.id);
             }
         }
 
@@ -418,14 +427,14 @@ export class BPlusTree {
         const child = parent.children[index];
 
         // If child has enough keys, no rebalancing needed
-        if (child.keys.length >= this.indexStore.meta.minKeys) {
+        if (child.keys.length >= this.indexStore.getMeta('minKeys')) {
             return;
         }
 
         // Try to borrow from left sibling
         if (index > 0) {
             const leftSibling = parent.children[index - 1];
-            if (leftSibling.keys.length > this.indexStore.meta.minKeys) {
+            if (leftSibling.keys.length > this.indexStore.getMeta('minKeys')) {
                 this._borrowFromLeft(parent, index);
                 return;
             }
@@ -434,7 +443,7 @@ export class BPlusTree {
         // Try to borrow from right sibling
         if (index < parent.children.length - 1) {
             const rightSibling = parent.children[index + 1];
-            if (rightSibling.keys.length > this.indexStore.meta.minKeys) {
+            if (rightSibling.keys.length > this.indexStore.getMeta('minKeys')) {
                 this._borrowFromRight(parent, index);
                 return;
             }
@@ -594,7 +603,7 @@ export class BPlusTree {
     clear() {
       this.indexStore.clear();
       this.root = new BPlusTreeNode(true, this.indexStore);
-      this.indexStore.meta.rootId = this.root.id;
+      this.indexStore.setMeta('rootId', this.root.id);
     }
 
     /**
