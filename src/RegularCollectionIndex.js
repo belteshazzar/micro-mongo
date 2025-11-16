@@ -10,7 +10,7 @@ export class RegularCollectionIndex extends Index {
 		super(name, keys, storage, options);
 		// B+ tree mapping index key to array of document _ids
 		// Order 50 provides good balance between node size and tree height
-		this.data = new BPlusTree(50);
+		this.data = new BPlusTree(50,storage);
 		
 		// Load existing data from storage if present
 		this._loadFromStorage();
