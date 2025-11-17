@@ -272,14 +272,31 @@ This document tracks the features needed to make micro-mongo more compatible wit
 - [ ] Add $pull with query conditions (not just value matching)
 - [ ] Add $[] (update all array elements)
 - [ ] Add $[<identifier>] (filtered positional operator)
-- [ ] Add $.$ (update first matching array element)
+- [x] Add $ (update first matching array element) ✅
 - [ ] Properly implement $each, $position, $slice, $sort for $push
 - [ ] Add pipeline-based updates (MongoDB 4.2+)
 - [ ] Add $setOnInsert proper isolation (only on insert during upsert)
 - [ ] Improve $addToSet to check for duplicates properly
 - [ ] Add field update validators
 
+**Status:** 🚧 IN PROGRESS (November 18, 2025)  
+**Test Results:** 644 tests passing (11 new $ positional operator tests added)  
+**Latest Update:** Implemented $ positional operator for updating first matching array element  
+**Changes Made:**
+- Added `matchWithArrayIndices()` function to `src/queryMatcher.js` that tracks which array element matched during query evaluation
+- Created `replacePositionalOperator()` helper in `src/updates.js` to replace $ with matched array index
+- Modified `applyUpdates()` to accept arrayFilters parameter and use it for $ replacement in field paths
+- Updated Collection methods (updateOne, updateMany, update, findOneAndUpdate) to use the enhanced matching
+- Added comprehensive test suite in `test/test-positional-operator.js` with 11 tests covering:
+  - Basic $ operator functionality with $set and $inc
+  - Nested field updates in array elements
+  - Exact match queries and $elemMatch support
+  - Multiple fields update in same array element
+  - Edge cases (no match, nested arrays, empty arrays)
+  - updateMany integration
+
 **Estimated Effort:** 3-4 days  
+**Completed So Far:** $ positional operator (0.5 days)  
 **Dependencies:** None
 
 ---
@@ -769,8 +786,11 @@ If you'd like to contribute to any of these features:
 - ✅ Geospatial Operators (November 10, 2025)
 - ✅ Change Streams (November 18, 2025)
 - ✅ Better Error Handling (November 18, 2025)
+- ✅ $ Positional Operator (November 18, 2025)
 
-**Current Test Status:** 498 tests passing (100% pass rate)
+**Current Test Status:** 644 tests passing (100% pass rate)
+
+**Latest Update (November 18, 2025):** Implemented $ positional operator for updating the first matching array element. This allows updates like `{ $set: { "grades.$": 100 } }` where `$` is replaced with the index of the first array element that matched the query condition. Added 11 comprehensive tests covering basic functionality, nested fields, $elemMatch integration, and edge cases.
 
 **Latest Update (November 18, 2025):** Implemented comprehensive MongoDB-compatible error handling system with 15+ specialized error classes, 40+ error codes, and full context tracking. Replaced all string throws across Collection.js (24), Cursor.js (22), and DB.js (43) with proper error classes. Added backward compatibility with `$err` property for existing tests.
 
