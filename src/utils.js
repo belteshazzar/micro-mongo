@@ -206,7 +206,7 @@ function setPropWithAllPositional(obj, name, value) {
 		
 		if (pathSegment === '$[]') {
 			// Current should be an array - update all elements
-			if (!isArray(current)) {
+			if (!Array.isArray(current)) {
 				throw new Error("The positional operator did not find the match needed from the query.");
 			}
 			

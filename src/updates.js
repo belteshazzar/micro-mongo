@@ -92,10 +92,11 @@ export function applyUpdates(updates, doc, setOnInsert) {
 				
 				if (hasAllPositional(field)) {
 					applyToAllPositional(doc, field, function(currentValue) {
-						if (currentValue == undefined) currentValue = 0;
+						if (currentValue == undefined || currentValue == null) currentValue = 0;
 						return currentValue * amount;
 					});
 				} else {
+					if (doc[field] == undefined || doc[field] == null) doc[field] = 0;
 					doc[field] = doc[field] * amount;
 				}
 			}
@@ -131,10 +132,15 @@ export function applyUpdates(updates, doc, setOnInsert) {
 				
 				if (hasAllPositional(field)) {
 					applyToAllPositional(doc, field, function(currentValue) {
+						if (currentValue == undefined || currentValue == null) return amount;
 						return Math.min(currentValue, amount);
 					});
 				} else {
-					doc[field] = Math.min(doc[field], amount);
+					if (doc[field] == undefined || doc[field] == null) {
+						doc[field] = amount;
+					} else {
+						doc[field] = Math.min(doc[field], amount);
+					}
 				}
 			}
 		} else if (key == "$max") {
@@ -145,10 +151,15 @@ export function applyUpdates(updates, doc, setOnInsert) {
 				
 				if (hasAllPositional(field)) {
 					applyToAllPositional(doc, field, function(currentValue) {
+						if (currentValue == undefined || currentValue == null) return amount;
 						return Math.max(currentValue, amount);
 					});
 				} else {
-					doc[field] = Math.max(doc[field], amount);
+					if (doc[field] == undefined || doc[field] == null) {
+						doc[field] = amount;
+					} else {
+						doc[field] = Math.max(doc[field], amount);
+					}
 				}
 			}
 		} else if (key == "$currentDate") {  // TODO not the same as mongo
