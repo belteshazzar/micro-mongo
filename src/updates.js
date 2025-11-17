@@ -3,6 +3,46 @@
  */
 
 import { setProp, getProp } from './utils.js';
+import { opMatches, matches } from './queryMatcher.js';
+
+/**
+ * Deep equality check for objects
+ */
+function objectEquals(a, b) {
+	if (a === b) return true;
+	if (a == null || b == null) return false;
+	if (typeof a !== 'object' || typeof b !== 'object') return false;
+	
+	// Handle arrays
+	if (Array.isArray(a) && Array.isArray(b)) {
+		if (a.length !== b.length) return false;
+		for (var i = 0; i < a.length; i++) {
+			if (!objectEquals(a[i], b[i])) return false;
+		}
+		return true;
+	}
+	
+	// Handle dates
+	if (a instanceof Date && b instanceof Date) {
+		return a.getTime() === b.getTime();
+	}
+	
+	// One is array, the other is not
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	
+	var keysA = Object.keys(a);
+	var keysB = Object.keys(b);
+	
+	if (keysA.length !== keysB.length) return false;
+	
+	for (var i = 0; i < keysA.length; i++) {
+		var key = keysA[i];
+		if (!keysB.includes(key)) return false;
+		if (!objectEquals(a[key], b[key])) return false;
+	}
+	
+	return true;
+}
 
 /**
  * Apply update operators to a document
@@ -88,6 +128,67 @@ export function applyUpdates(updates, doc, setOnInsert) {
 				} else if (value == -1) {
 					doc[field].shift();
 				}
+			}
+		} else if (key == "$pull") {
+			var fields = Object.keys(value);
+			for (var j = 0; j < fields.length; j++) {
+				var field = fields[j];
+				var condition = value[field];
+				var src = getProp(doc, field);
+				
+				// Skip if field doesn't exist or is not an array
+				if (src == undefined || !Array.isArray(src)) continue;
+				
+				var notRemoved = [];
+				for (var k = 0; k < src.length; k++) {
+					var element = src[k];
+					var shouldRemove = false;
+					
+					// Check if condition is a query object with operators or just a value/object to match
+					if (typeof condition === 'object' && condition !== null && !Array.isArray(condition)) {
+						// Check if ANY key contains query operators
+						var hasOperators = false;
+						var conditionKeys = Object.keys(condition);
+						for (var m = 0; m < conditionKeys.length; m++) {
+							var condKey = conditionKeys[m];
+							// If the key starts with $, it's an operator
+							if (condKey.charAt(0) == "$") {
+								hasOperators = true;
+								break;
+							}
+							// If the value is an object with operator keys, it's a nested query
+							if (typeof condition[condKey] === 'object' && condition[condKey] !== null) {
+								var nestedKeys = Object.keys(condition[condKey]);
+								if (nestedKeys.length > 0 && nestedKeys[0].charAt(0) == "$") {
+									hasOperators = true;
+									break;
+								}
+							}
+						}
+						
+						if (hasOperators) {
+							// Use query matching - treat the element as a document
+							// and the condition as a query
+							if (typeof element === 'object' && element !== null && !Array.isArray(element)) {
+								// For objects, use matches function
+								shouldRemove = matches(element, condition);
+							} else {
+								// For primitives with operators like {$gte: 5}
+								var tempDoc = { __temp: element };
+								shouldRemove = opMatches(tempDoc, "__temp", condition);
+							}
+						} else {
+							// For plain objects without operators, do deep equality check
+							shouldRemove = objectEquals(element, condition);
+						}
+					} else {
+						// For simple values (string, number, boolean, etc.), do direct comparison
+						shouldRemove = element == condition;
+					}
+					
+					if (!shouldRemove) notRemoved.push(element);
+				}
+				setProp(doc, field, notRemoved);
 			}
 		} else if (key == "$pullAll") {
 			var fields = Object.keys(value);

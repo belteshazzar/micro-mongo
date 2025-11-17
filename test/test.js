@@ -1105,6 +1105,77 @@ describe("DB", function() {
 			});
 
 			it('should testUpdate_Op_Pull', async function() {
+				// Test 1: Simple value matching
+				await db[collectionName].insert({ me: 1, nums: [1, 2, 3, 4, 5] });
+				db[collectionName].update({me:1},{ $pull : {nums: 3} });
+				var doc = await db[collectionName].findOne({me:1});
+				if (doc.nums.length!=4) throw "Test 1: incorrect length";
+				if (doc.nums.includes(3)) throw "Test 1: should have removed 3";
+				if (doc.nums[0]!=1 || doc.nums[1]!=2 || doc.nums[2]!=4 || doc.nums[3]!=5) throw "Test 1: wrong values";
+				
+				// Test 2: Query condition with $gte
+				await db[collectionName].insert({ me: 2, nums: [1, 2, 3, 4, 5, 6] });
+				db[collectionName].update({me:2},{ $pull : {nums: {$gte: 5}} });
+				doc = await db[collectionName].findOne({me:2});
+				if (doc.nums.length!=4) throw "Test 2: incorrect length, got " + doc.nums.length;
+				if (doc.nums.includes(5) || doc.nums.includes(6)) throw "Test 2: should have removed values >= 5";
+				if (doc.nums[0]!=1 || doc.nums[1]!=2 || doc.nums[2]!=3 || doc.nums[3]!=4) throw "Test 2: wrong remaining values";
+				
+				// Test 3: Query condition with $lt
+				await db[collectionName].insert({ me: 3, nums: [1, 2, 3, 4, 5] });
+				db[collectionName].update({me:3},{ $pull : {nums: {$lt: 3}} });
+				doc = await db[collectionName].findOne({me:3});
+				if (doc.nums.length!=3) throw "Test 3: incorrect length";
+				if (doc.nums.includes(1) || doc.nums.includes(2)) throw "Test 3: should have removed values < 3";
+				
+				// Test 4: Nested object matching with query conditions
+				await db[collectionName].insert({ 
+					me: 4, 
+					items: [
+						{name: "apple", price: 10},
+						{name: "banana", price: 5},
+						{name: "cherry", price: 15},
+						{name: "date", price: 8}
+					]
+				});
+				db[collectionName].update({me:4},{ $pull : {items: {price: {$gte: 10}}} });
+				doc = await db[collectionName].findOne({me:4});
+				if (doc.items.length!=2) throw "Test 4: incorrect length, got " + doc.items.length;
+				if (doc.items.some(item => item.price >= 10)) throw "Test 4: should have removed items with price >= 10";
+				
+				// Test 5: Plain object matching (exact match)
+				await db[collectionName].insert({ 
+					me: 5, 
+					items: [
+						{name: "apple", price: 10},
+						{name: "banana", price: 5},
+						{name: "apple", price: 10}
+					]
+				});
+				db[collectionName].update({me:5},{ $pull : {items: {name: "apple", price: 10}} });
+				doc = await db[collectionName].findOne({me:5});
+				if (doc.items.length!=1) throw "Test 5: incorrect length, got " + doc.items.length;
+				if (doc.items[0].name != "banana" || doc.items[0].price != 5) throw "Test 5: wrong remaining item";
+				
+				// Test 6: Multiple values matching same condition
+				await db[collectionName].insert({ me: 6, nums: [3, 5, 3, 7, 3] });
+				db[collectionName].update({me:6},{ $pull : {nums: 3} });
+				doc = await db[collectionName].findOne({me:6});
+				if (doc.nums.length!=2) throw "Test 6: incorrect length";
+				if (doc.nums.includes(3)) throw "Test 6: should have removed all 3s";
+				if (doc.nums[0]!=5 || doc.nums[1]!=7) throw "Test 6: wrong values";
+				
+				// Test 7: No matches (array unchanged)
+				await db[collectionName].insert({ me: 7, nums: [1, 2, 3] });
+				db[collectionName].update({me:7},{ $pull : {nums: 10} });
+				doc = await db[collectionName].findOne({me:7});
+				if (doc.nums.length!=3) throw "Test 7: incorrect length";
+				
+				// Test 8: Empty array after pull
+				await db[collectionName].insert({ me: 8, nums: [5, 5, 5] });
+				db[collectionName].update({me:8},{ $pull : {nums: 5} });
+				doc = await db[collectionName].findOne({me:8});
+				if (doc.nums.length!=0) throw "Test 8: should be empty array";
 			});
 
 			it('should testUpdate_Op_PushAll', async function() {
