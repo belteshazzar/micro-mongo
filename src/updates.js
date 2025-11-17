@@ -5,6 +5,61 @@
 import { setProp, getProp } from './utils.js';
 
 /**
+ * Check if a field path contains the $[] positional operator
+ */
+function hasAllPositional(field) {
+	return field.indexOf('$[]') !== -1;
+}
+
+/**
+ * Apply an update function to all elements matching $[] operator
+ * This is used for operators like $inc, $mul that need to read-modify-write
+ */
+function applyToAllPositional(doc, field, updateFn) {
+	var path = field.split(".");
+	var current = doc;
+	
+	// Navigate to the first $[] operator
+	for (var i = 0; i < path.length; i++) {
+		var pathSegment = path[i];
+		
+		if (pathSegment === '$[]') {
+			// Current should be an array
+			if (!Array.isArray(current)) {
+				return; // Skip if not an array
+			}
+			
+			// Build the remaining path after this $[]
+			var remainingPath = path.slice(i + 1).join('.');
+			
+			// Process each array element
+			for (var j = 0; j < current.length; j++) {
+				if (remainingPath) {
+					// There's more path after $[], recursively apply
+					if (remainingPath.indexOf('$[]') !== -1) {
+						// Nested $[] operator
+						applyToAllPositional(current[j], remainingPath, updateFn);
+					} else {
+						// No more $[], apply the update function
+						var currentValue = getProp(current[j], remainingPath);
+						var newValue = updateFn(currentValue);
+						setProp(current[j], remainingPath, newValue);
+					}
+				} else {
+					// $[] is the last segment, apply to each element directly
+					current[j] = updateFn(current[j]);
+				}
+			}
+			return;
+		}
+		
+		// Navigate to next level
+		if (current == null || current == undefined) return;
+		current = current[pathSegment];
+	}
+}
+
+/**
  * Apply update operators to a document
  */
 export function applyUpdates(updates, doc, setOnInsert) {
@@ -17,16 +72,32 @@ export function applyUpdates(updates, doc, setOnInsert) {
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
 				var amount = value[field];
-				var currentValue = getProp(doc, field);
-				if (currentValue == undefined) currentValue = 0;
-				setProp(doc, field, currentValue + amount);
+				
+				if (hasAllPositional(field)) {
+					applyToAllPositional(doc, field, function(currentValue) {
+						if (currentValue == undefined) currentValue = 0;
+						return currentValue + amount;
+					});
+				} else {
+					var currentValue = getProp(doc, field);
+					if (currentValue == undefined) currentValue = 0;
+					setProp(doc, field, currentValue + amount);
+				}
 			}
 		} else if (key == "$mul") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
 				var amount = value[field];
-				doc[field] = doc[field] * amount;
+				
+				if (hasAllPositional(field)) {
+					applyToAllPositional(doc, field, function(currentValue) {
+						if (currentValue == undefined) currentValue = 0;
+						return currentValue * amount;
+					});
+				} else {
+					doc[field] = doc[field] * amount;
+				}
 			}
 		} else if (key == "$rename") {
 			var fields = Object.keys(value);
