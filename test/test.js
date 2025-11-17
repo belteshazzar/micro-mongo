@@ -1152,6 +1152,27 @@ describe("DB", function() {
 				if (doc.items[1].quantity != 5) throw "items[1].quantity should be 5";
 				if (doc.items[2].quantity != 5) throw "items[2].quantity should be 5";
 				
+				// Test with $mul operator
+				db[collectionName].update({ me: 8 }, { $mul: { "items.$[].quantity": 2 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 10) throw "items[0].quantity should be 10";
+				if (doc.items[1].quantity != 10) throw "items[1].quantity should be 10";
+				if (doc.items[2].quantity != 10) throw "items[2].quantity should be 10";
+				
+				// Test with $min operator
+				db[collectionName].update({ me: 8 }, { $min: { "items.$[].quantity": 7 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 7) throw "items[0].quantity should be 7";
+				if (doc.items[1].quantity != 7) throw "items[1].quantity should be 7";
+				if (doc.items[2].quantity != 7) throw "items[2].quantity should be 7";
+				
+				// Test with $max operator
+				db[collectionName].update({ me: 8 }, { $max: { "items.$[].quantity": 12 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 12) throw "items[0].quantity should be 12";
+				if (doc.items[1].quantity != 12) throw "items[1].quantity should be 12";
+				if (doc.items[2].quantity != 12) throw "items[2].quantity should be 12";
+				
 				// Test simple array update
 				await db[collectionName].insert({ me: 9, scores: [10, 20, 30] });
 				db[collectionName].update({ me: 9 }, { $set: { "scores.$[]": 100 } });

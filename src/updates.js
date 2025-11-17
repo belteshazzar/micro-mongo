@@ -128,14 +128,28 @@ export function applyUpdates(updates, doc, setOnInsert) {
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
 				var amount = value[field];
-				doc[field] = Math.min(doc[field], amount);
+				
+				if (hasAllPositional(field)) {
+					applyToAllPositional(doc, field, function(currentValue) {
+						return Math.min(currentValue, amount);
+					});
+				} else {
+					doc[field] = Math.min(doc[field], amount);
+				}
 			}
 		} else if (key == "$max") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
 				var amount = value[field];
-				doc[field] = Math.max(doc[field], amount);
+				
+				if (hasAllPositional(field)) {
+					applyToAllPositional(doc, field, function(currentValue) {
+						return Math.max(currentValue, amount);
+					});
+				} else {
+					doc[field] = Math.max(doc[field], amount);
+				}
 			}
 		} else if (key == "$currentDate") {  // TODO not the same as mongo
 			var fields = Object.keys(value);
