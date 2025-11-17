@@ -4,7 +4,7 @@
   "description": "mongo api interface to localStorage and plain js objects",
   "main": "main.js",
   "scripts": {
-    "test": "mocha --reporter spec test/test.js test/test-advanced-indexes.js test/test-objectid.js test/test-text-index.js test/test-storage-engine.js test/test-aggregation-expressions.js test/test-dot-notation.js test/test-bplustree.js test/test-immutable-bplustree.js test/test-change-streams.js",
+    "test": "mocha --reporter spec test/test.js test/test-advanced-indexes.js test/test-objectid.js test/test-text-index.js test/test-storage-engine.js test/test-aggregation-expressions.js test/test-dot-notation.js test/test-bplustree.js test/test-immutable-bplustree.js test/test-change-streams.js test/test-queryoperators.js test/test-errors.js",
     "test:browser": "mocha --reporter spec test/test-browser.js",
     "test:all": "npm test && npm run test:browser",
     "cover": "c8 --reporter=html --reporter=text npm test",

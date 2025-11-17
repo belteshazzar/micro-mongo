@@ -33,6 +33,7 @@ export const ErrorCodes = {
 	PATH_NOT_VIABLE: 28,
 	CANNOT_CREATE_INDEX: 67,
 	INDEX_ALREADY_EXISTS: 68,
+	INDEX_EXISTS: 68,
 	COMMAND_NOT_FOUND: 59,
 	NAMESPACE_EXISTS: 48,
 	INVALID_NAMESPACE: 73,
@@ -91,20 +92,73 @@ export class MongoError extends Error {
 	}
 	
 	_getCodeName(code) {
-		const entry = Object.entries(ErrorCodes).find(([_, value]) => value === code);
-		return entry ? entry[0] : 'UnknownError';
+		const codeToName = {
+			0: 'OK',
+			1: 'InternalError',
+			2: 'BadValue',
+			4: 'NoSuchKey',
+			5: 'GraphContainsCycle',
+			6: 'HostUnreachable',
+			7: 'HostNotFound',
+			8: 'UnknownError',
+			10: 'CannotMutateObject',
+			11: 'UserNotFound',
+			12: 'UnsupportedFormat',
+			13: 'Unauthorized',
+			14: 'TypeMismatch',
+			15: 'Overflow',
+			16: 'InvalidLength',
+			17: 'ProtocolError',
+			18: 'AuthenticationFailed',
+			20: 'IllegalOperation',
+			26: 'NamespaceNotFound',
+			27: 'IndexNotFound',
+			28: 'PathNotViable',
+			43: 'CursorNotFound',
+			48: 'NamespaceExists',
+			59: 'CommandNotFound',
+			67: 'CannotCreateIndex',
+			68: 'IndexExists',
+			73: 'InvalidNamespace',
+			85: 'IndexOptionsConflict',
+			112: 'WriteConflict',
+			121: 'DocumentValidationFailure',
+			171: 'CannotIndexParallelArrays',
+			197: 'InvalidIndexSpecificationOption',
+			998: 'OperationNotSupported',
+			999: 'NotImplemented',
+			11000: 'DuplicateKey',
+			11001: 'DuplicateKeyUpdate',
+			17287: 'FailedToParse'
+		};
+		return codeToName[code] || 'UnknownError';
 	}
 	
 	toJSON() {
-		return {
+		const json = {
 			name: this.name,
 			message: this.message,
 			code: this.code,
-			codeName: this.codeName,
-			collection: this.collection,
-			database: this.database,
-			operation: this.operation
+			codeName: this.codeName
 		};
+		
+		// Include all enumerable properties
+		if (this.collection) json.collection = this.collection;
+		if (this.database) json.database = this.database;
+		if (this.operation) json.operation = this.operation;
+		if (this.index) json.index = this.index;
+		if (this.indexName) json.indexName = this.indexName;
+		if (this.field) json.field = this.field;
+		if (this.query) json.query = this.query;
+		if (this.document) json.document = this.document;
+		if (this.namespace) json.namespace = this.namespace;
+		if (this.cursorId) json.cursorId = this.cursorId;
+		if (this.feature) json.feature = this.feature;
+		if (this.keyPattern) json.keyPattern = this.keyPattern;
+		if (this.keyValue) json.keyValue = this.keyValue;
+		if (this.writeErrors) json.writeErrors = this.writeErrors;
+		
+		return json;
 	}
 }
 
@@ -145,7 +199,8 @@ export class WriteError extends MongoError {
  */
 export class DuplicateKeyError extends WriteError {
 	constructor(key, options = {}) {
-		const message = `E11000 duplicate key error${options.collection ? ` collection: ${options.collection}` : ''}`;
+		const keyStr = JSON.stringify(key);
+		const message = `E11000 duplicate key error${options.collection ? ` collection: ${options.collection}` : ''} index: ${keyStr} dup key: ${keyStr}`;
 		super(message, { ...options, code: ErrorCodes.DUPLICATE_KEY });
 		this.name = 'DuplicateKeyError';
 		this.keyPattern = key;
@@ -182,7 +237,7 @@ export class IndexExistsError extends IndexError {
 	constructor(indexName, options = {}) {
 		super(`Index with name '${indexName}' already exists`, {
 			...options,
-			code: ErrorCodes.INDEX_ALREADY_EXISTS
+			code: ErrorCodes.INDEX_EXISTS
 		});
 		this.name = 'IndexExistsError';
 		this.indexName = indexName;
@@ -196,7 +251,8 @@ export class IndexNotFoundError extends IndexError {
 	constructor(indexName, options = {}) {
 		super(`Index '${indexName}' not found`, {
 			...options,
-			code: ErrorCodes.INDEX_NOT_FOUND
+			code: ErrorCodes.INDEX_NOT_FOUND,
+			index: indexName
 		});
 		this.name = 'IndexNotFoundError';
 		this.indexName = indexName;
@@ -271,7 +327,13 @@ export class NamespaceNotFoundError extends NamespaceError {
  */
 export class InvalidNamespaceError extends NamespaceError {
 	constructor(namespace, reason, options = {}) {
-		super(`Invalid namespace '${namespace}': ${reason}`, {
+		// Handle case where reason is actually options
+		if (typeof reason === 'object' && !options) {
+			options = reason;
+			reason = undefined;
+		}
+		const msg = reason ? `Invalid namespace '${namespace}': ${reason}` : `Invalid namespace '${namespace}'`;
+		super(msg, {
 			...options,
 			code: ErrorCodes.INVALID_NAMESPACE
 		});
@@ -323,7 +385,13 @@ export class NotImplementedError extends MongoError {
  */
 export class OperationNotSupportedError extends MongoError {
 	constructor(operation, reason, options = {}) {
-		super(`Operation '${operation}' is not supported: ${reason}`, {
+		// Handle case where reason is actually options
+		if (typeof reason === 'object' && !options) {
+			options = reason;
+			reason = undefined;
+		}
+		const msg = reason ? `Operation '${operation}' is not supported: ${reason}` : `Operation '${operation}' is not supported`;
+		super(msg, {
 			...options,
 			code: ErrorCodes.OPERATION_NOT_SUPPORTED,
 			operation
@@ -351,7 +419,8 @@ export class BadValueError extends MongoError {
  * Bulk write error
  */
 export class BulkWriteError extends MongoError {
-	constructor(message, writeErrors = [], options = {}) {
+	constructor(writeErrors = [], options = {}) {
+		const message = `Bulk write operation error: ${writeErrors.length} error(s)`;
 		super(message, options);
 		this.name = 'BulkWriteError';
 		this.writeErrors = writeErrors;

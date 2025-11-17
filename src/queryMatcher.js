@@ -1,6 +1,170 @@
 import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
 import { TextIndex } from './TextIndex.js';
 import { ObjectId } from './ObjectId.js';
+import { evaluateExpression } from './aggregationExpressions.js';
+
+/**
+ * BSON type mappings for $type operator
+ */
+const BSON_TYPES = {
+	1: 'double',
+	2: 'string',
+	3: 'object',
+	4: 'array',
+	5: 'binData',
+	6: 'undefined',
+	7: 'objectId',
+	8: 'bool',
+	9: 'date',
+	10: 'null',
+	11: 'regex',
+	13: 'javascript',
+	15: 'javascriptWithScope',
+	16: 'int',
+	17: 'timestamp',
+	18: 'long',
+	19: 'decimal',
+	127: 'maxKey',
+	'-1': 'minKey'
+};
+
+// Reverse mapping from alias to code
+const TYPE_ALIASES = Object.entries(BSON_TYPES).reduce((acc, [code, name]) => {
+	acc[name] = parseInt(code);
+	return acc;
+}, {});
+
+/**
+ * Check if a value matches a BSON type or type code
+ */
+function matchesType(value, typeSpec) {
+	// Handle array of types
+	if (isArray(typeSpec)) {
+		for (let i = 0; i < typeSpec.length; i++) {
+			if (matchesType(value, typeSpec[i])) return true;
+		}
+		return false;
+	}
+	
+	// Get type code from spec (can be number or string alias)
+	const typeCode = typeof typeSpec === 'number' ? typeSpec : TYPE_ALIASES[typeSpec];
+	const typeName = BSON_TYPES[typeCode] || typeSpec;
+	
+	// Check value type
+	if (value === null) return typeName === 'null' || typeCode === 10;
+	if (value === undefined) return typeName === 'undefined' || typeCode === 6;
+	if (typeof value === 'number') {
+		if (Number.isInteger(value)) return typeName === 'int' || typeCode === 16;
+		return typeName === 'double' || typeCode === 1;
+	}
+	if (typeof value === 'string') return typeName === 'string' || typeCode === 2;
+	if (typeof value === 'boolean') return typeName === 'bool' || typeCode === 8;
+	if (value instanceof Date) return typeName === 'date' || typeCode === 9;
+	if (value instanceof ObjectId) return typeName === 'objectId' || typeCode === 7;
+	if (value instanceof RegExp) return typeName === 'regex' || typeCode === 11;
+	if (isArray(value)) return typeName === 'array' || typeCode === 4;
+	if (typeof value === 'object') return typeName === 'object' || typeCode === 3;
+	
+	// Fallback to simple type check
+	return typeof value === typeSpec;
+}
+
+/**
+ * Bit query operator helpers
+ */
+function toBitMask(positions) {
+	if (isArray(positions)) {
+		// Array of bit positions
+		let mask = 0;
+		for (let i = 0; i < positions.length; i++) {
+			mask |= (1 << positions[i]);
+		}
+		return mask;
+	} else if (typeof positions === 'number') {
+		// Bitmask directly
+		return positions;
+	}
+	return 0;
+}
+
+function matchesBitsAllSet(value, positions) {
+	if (typeof value !== 'number') return false;
+	const mask = toBitMask(positions);
+	return (value & mask) === mask;
+}
+
+function matchesBitsAllClear(value, positions) {
+	if (typeof value !== 'number') return false;
+	const mask = toBitMask(positions);
+	return (value & mask) === 0;
+}
+
+function matchesBitsAnySet(value, positions) {
+	if (typeof value !== 'number') return false;
+	const mask = toBitMask(positions);
+	return (value & mask) !== 0;
+}
+
+function matchesBitsAnyClear(value, positions) {
+	if (typeof value !== 'number') return false;
+	const mask = toBitMask(positions);
+	return (value & mask) !== mask;
+}
+
+/**
+ * JSON Schema validator (simplified)
+ */
+function validateJsonSchema(doc, schema) {
+	// Basic JSON Schema validation
+	if (schema.type) {
+		const docType = isArray(doc) ? 'array' : (doc === null ? 'null' : typeof doc);
+		if (schema.type !== docType) return false;
+	}
+	
+	if (schema.required && isArray(schema.required)) {
+		for (let i = 0; i < schema.required.length; i++) {
+			if (!(schema.required[i] in doc)) return false;
+		}
+	}
+	
+	if (schema.properties) {
+		for (const key in schema.properties) {
+			// When using $jsonSchema as a query operator, properties must exist to match
+			// (This is different from standard JSON Schema validation where properties are optional)
+			if (!(key in doc)) return false;
+			
+			const propSchema = schema.properties[key];
+			if (!validateJsonSchema(doc[key], propSchema)) return false;
+		}
+	}
+	
+	if (schema.minimum !== undefined && typeof doc === 'number') {
+		if (doc < schema.minimum) return false;
+	}
+	
+	if (schema.maximum !== undefined && typeof doc === 'number') {
+		if (doc > schema.maximum) return false;
+	}
+	
+	if (schema.minLength !== undefined && typeof doc === 'string') {
+		if (doc.length < schema.minLength) return false;
+	}
+	
+	if (schema.maxLength !== undefined && typeof doc === 'string') {
+		if (doc.length > schema.maxLength) return false;
+	}
+	
+	if (schema.pattern && typeof doc === 'string') {
+		const regex = new RegExp(schema.pattern);
+		if (!regex.test(doc)) return false;
+	}
+	
+	if (schema.enum && isArray(schema.enum)) {
+		if (!schema.enum.includes(doc)) return false;
+	}
+	
+	return true;
+}
 
 /**
  * Compare two values for equality, handling ObjectId instances
@@ -53,7 +217,11 @@ function compareValues(a, b, operator) {
  * Handles both single values and arrays of values (from array traversal)
  */
 function fieldValueMatches(fieldValue, checkFn) {
-	if (fieldValue == undefined) return false;
+	// Use strict equality to allow null values through
+	if (fieldValue === undefined) return false;
+	
+	// Check for null before isArray to avoid crash
+	if (fieldValue === null) return checkFn(fieldValue);
 	
 	// If fieldValue is an array (from array traversal), check if ANY element matches
 	if (isArray(fieldValue)) {
@@ -238,6 +406,16 @@ export function tlMatches(doc, query) {
 		else if (key == "$not") return not(doc, value);
 		else if (key == "$nor") return nor(doc, value);
 		else if (key == "$where") return where(doc, value);
+		else if (key == "$comment") return true; // $comment is metadata, doesn't filter
+		else if (key == "$jsonSchema") return validateJsonSchema(doc, value); // Top-level schema validation
+		else if (key == "$expr") {
+			// Handle $expr at top level
+			try {
+				return evaluateExpression(value, doc);
+			} catch (e) {
+				return false;
+			}
+		}
 		else throw { $err: "Can't canonicalize query: BadValue unknown top level operator: " + key, code: 17287 };
 	} else {
 		return opMatches(doc, key, value);
@@ -283,18 +461,42 @@ export function opMatches(doc, key, value) {
 					} else if (operator == "$exists") {
 						// For $exists, we need to use getProp which returns undefined if field doesn't exist
 						// getFieldValues might return an array which would be truthy
-						var rawValue = getProp(doc, key);
-						if (operand ? rawValue == undefined : rawValue != undefined) return false;
-					} else if (operator == "$type") {
-						if (!fieldValueMatches(fieldValue, function(v) { return typeof(v) == operand; })) return false;
-					} else if (operator == "$mod") {
-						if (operand.length != 2) throw { $err: "Can't canonicalize query: BadValue malformed mod, not enough elements", code: 17287 };
-						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && (v % operand[0] == operand[1]); })) return false;
-					} else if (operator == "$regex") {
-						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && v.match(operand); })) return false;
-					} else if (operator == "$text") {
-						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && text(v, operand); })) return false;
-					} else if (operator == "$geoWithin") {
+					var rawValue = getProp(doc, key);
+					if (operand ? rawValue == undefined : rawValue != undefined) return false;
+				} else if (operator == "$type") {
+					// Support both BSON type codes and aliases
+					// Note: $type checks the field value itself, not array elements
+					// If field doesn't exist (undefined), it can only match type 'undefined' (6)
+					if (fieldValue === undefined) {
+						const expectedTypeCode = typeof operand === 'number' ? operand : TYPE_ALIASES[operand];
+						if (expectedTypeCode !== 6) return false;
+					} else {
+						if (!matchesType(fieldValue, operand)) return false;
+					}
+				} else if (operator == "$mod") {
+					if (operand.length != 2) throw { $err: "Can't canonicalize query: BadValue malformed mod, not enough elements", code: 17287 };
+					if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && (v % operand[0] == operand[1]); })) return false;
+				} else if (operator == "$regex") {
+					// Support string pattern with optional $options
+					var pattern = operand;
+					var flags = value.$options || '';
+					var regex = (typeof pattern === 'string') ? new RegExp(pattern, flags) : pattern;
+					if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && regex.test(v); })) return false;
+				} else if (operator == "$options") {
+					// $options is handled with $regex, skip here
+					continue;
+				} else if (operator == "$text") {
+					if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && text(v, operand); })) return false;
+				} else if (operator == "$expr") {
+					// Evaluate aggregation expression against the document
+					try {
+						const result = evaluateExpression(operand, doc);
+						if (!result) return false;
+					} catch (e) {
+						// If expression evaluation fails, don't match
+						return false;
+					}
+				} else if (operator == "$geoWithin") {
 						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && geoWithin(v, operand); })) return false;
 					} else if (operator == "$near" || operator == "$nearSphere" || operator == "$geoIntersects") {
 						// These operators MUST be handled by an index
@@ -348,11 +550,19 @@ export function opMatches(doc, key, value) {
 							}
 						}
 						if (!found) return false;
-					} else if (operator == "$size") {
-						var sizeFieldValue = getProp(doc, key);
-						if (sizeFieldValue == undefined || !isArray(sizeFieldValue)) return false;
-						if (sizeFieldValue.length != operand) return false;
-					} else {
+				} else if (operator == "$size") {
+					var sizeFieldValue = getProp(doc, key);
+					if (sizeFieldValue == undefined || !isArray(sizeFieldValue)) return false;
+					if (sizeFieldValue.length != operand) return false;
+				} else if (operator == "$bitsAllSet") {
+					if (!fieldValueMatches(fieldValue, function(v) { return matchesBitsAllSet(v, operand); })) return false;
+				} else if (operator == "$bitsAllClear") {
+					if (!fieldValueMatches(fieldValue, function(v) { return matchesBitsAllClear(v, operand); })) return false;
+				} else if (operator == "$bitsAnySet") {
+					if (!fieldValueMatches(fieldValue, function(v) { return matchesBitsAnySet(v, operand); })) return false;
+				} else if (operator == "$bitsAnyClear") {
+					if (!fieldValueMatches(fieldValue, function(v) { return matchesBitsAnyClear(v, operand); })) return false;
+				} else {
 						throw { $err: "Can't canonicalize query: BadValue unknown operator: " + operator, code: 17287 };
 					}
 				}
