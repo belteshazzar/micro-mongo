@@ -117,6 +117,15 @@ export class DB {
 
 	currentOp() { throw new NotImplementedError('currentOp', { database: this.dbName }); }
 
+	dropCollection(collectionName) {
+		if (this[collectionName]) {
+			// Remove from storage engine
+			this.storageEngine.removeCollectionStore(collectionName);
+			// Delete the collection property from DB
+			delete this[collectionName];
+		}
+	}
+
 	dropDatabase() {
 		// Get all collection names
 		const collectionNames = this.getCollectionNames();

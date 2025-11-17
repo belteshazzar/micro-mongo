@@ -26,6 +26,10 @@ export function evaluateExpression(expr, doc) {
 	// Field reference ($fieldName) or variable reference ($$variableName)
 	if (typeof expr === 'string') {
 		if (expr.startsWith('$$')) {
+			// Special system variables for $redact
+			if (expr === '$$KEEP' || expr === '$$PRUNE' || expr === '$$DESCEND') {
+				return expr;
+			}
 			// Variable reference ($$var)
 			return getProp(doc, expr.substring(2));
 		} else if (expr.charAt(0) === '$') {
@@ -49,10 +53,20 @@ export function evaluateExpression(expr, doc) {
 		}
 		
 		const operator = keys[0];
-		const operand = expr[operator];
 		
-		// Evaluate the expression based on operator
-		return evaluateOperator(operator, operand, doc);
+		// Check if this is an operator (starts with $) or an object literal
+		if (operator.charAt(0) === '$') {
+			// This is an expression operator
+			const operand = expr[operator];
+			return evaluateOperator(operator, operand, doc);
+		} else {
+			// This is an object literal - evaluate each field
+			const result = {};
+			for (const key of keys) {
+				result[key] = evaluateExpression(expr[key], doc);
+			}
+			return result;
+		}
 	}
 	
 	return expr;

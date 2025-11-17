@@ -477,6 +477,840 @@ export class Collection extends EventEmitter {
 	// MongoDB's default behavior: skip documents where field is missing, null, empty array, or not an array
 }
 results = unwound;
+} else if (stageType === "$sortByCount") {
+	// Group by expression value and count occurrences, sorted descending by count
+	const groups = {};
+	
+	for (let j = 0; j < results.length; j++) {
+		const doc = results[j];
+		const value = evaluateExpression(stageSpec, doc);
+		const key = JSON.stringify(value);
+		
+		if (!groups[key]) {
+			groups[key] = {
+				_id: value,
+				count: 0
+			};
+		}
+		groups[key].count++;
+	}
+	
+	// Convert to array and sort by count descending
+	results = Object.values(groups).sort((a, b) => b.count - a.count);
+} else if (stageType === "$replaceRoot" || stageType === "$replaceWith") {
+	// Replace root document with specified document
+	const modified = [];
+	const newRootSpec = stageType === "$replaceRoot" ? stageSpec.newRoot : stageSpec;
+	
+	for (let j = 0; j < results.length; j++) {
+		const newRoot = evaluateExpression(newRootSpec, results[j]);
+		if (typeof newRoot === 'object' && newRoot !== null && !Array.isArray(newRoot)) {
+			modified.push(newRoot);
+		} else {
+			throw new QueryError('$replaceRoot expression must evaluate to an object', {
+				collection: this.name,
+				code: ErrorCodes.FAILED_TO_PARSE
+			});
+		}
+	}
+	results = modified;
+} else if (stageType === "$sample") {
+	// Random sampling of documents
+	const size = stageSpec.size || 1;
+	if (typeof size !== 'number' || size < 0) {
+		throw new QueryError('$sample size must be a non-negative number', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	// Shuffle using Fisher-Yates algorithm and take first 'size' elements
+	const shuffled = [...results];
+	for (let j = shuffled.length - 1; j > 0; j--) {
+		const k = Math.floor(Math.random() * (j + 1));
+		[shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+	}
+	results = shuffled.slice(0, Math.min(size, shuffled.length));
+} else if (stageType === "$bucket") {
+	// Categorize documents into buckets based on boundaries
+	if (!stageSpec.groupBy || !stageSpec.boundaries) {
+		throw new QueryError('$bucket requires groupBy and boundaries', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	const boundaries = stageSpec.boundaries;
+	const defaultBucket = stageSpec.default;
+	const output = stageSpec.output || { count: { $sum: 1 } };
+	
+	// Initialize buckets
+	const buckets = {};
+	for (let j = 0; j < boundaries.length - 1; j++) {
+		const key = JSON.stringify(boundaries[j]);
+		buckets[key] = {
+			_id: boundaries[j],
+			docs: []
+		};
+	}
+	if (defaultBucket !== undefined) {
+		buckets['default'] = {
+			_id: defaultBucket,
+			docs: []
+		};
+	}
+	
+	// Categorize documents into buckets
+	for (let j = 0; j < results.length; j++) {
+		const doc = results[j];
+		const value = evaluateExpression(stageSpec.groupBy, doc);
+		
+		let placed = false;
+		for (let k = 0; k < boundaries.length - 1; k++) {
+			if (value >= boundaries[k] && value < boundaries[k + 1]) {
+				const key = JSON.stringify(boundaries[k]);
+				buckets[key].docs.push(doc);
+				placed = true;
+				break;
+			}
+		}
+		
+		if (!placed && defaultBucket !== undefined) {
+			buckets['default'].docs.push(doc);
+		}
+	}
+	
+	// Apply output accumulators
+	const bucketed = [];
+	for (const bucketKey in buckets) {
+		const bucket = buckets[bucketKey];
+		if (bucket.docs.length === 0) continue; // Skip empty buckets
+		
+		const result = { _id: bucket._id };
+		
+		for (const field in output) {
+			const accumulator = output[field];
+			const accKeys = Object.keys(accumulator);
+			if (accKeys.length !== 1) continue;
+			
+			const accType = accKeys[0];
+			const accExpr = accumulator[accType];
+			
+			// Apply accumulator (reuse $group logic)
+			if (accType === '$sum') {
+				let sum = 0;
+				for (let k = 0; k < bucket.docs.length; k++) {
+					const val = evaluateExpression(accExpr, bucket.docs[k]);
+					if (typeof val === 'number') {
+						sum += val;
+					} else if (val !== null && val !== undefined) {
+						sum += Number(val) || 0;
+					}
+				}
+				result[field] = sum;
+			} else if (accType === '$avg') {
+				let sum = 0;
+				let count = 0;
+				for (let k = 0; k < bucket.docs.length; k++) {
+					const val = evaluateExpression(accExpr, bucket.docs[k]);
+					if (val !== undefined && val !== null) {
+						sum += Number(val) || 0;
+						count++;
+					}
+				}
+				result[field] = count > 0 ? sum / count : 0;
+			} else if (accType === '$push') {
+				const arr = [];
+				for (let k = 0; k < bucket.docs.length; k++) {
+					const val = evaluateExpression(accExpr, bucket.docs[k]);
+					arr.push(val);
+				}
+				result[field] = arr;
+			} else if (accType === '$addToSet') {
+				const set = {};
+				for (let k = 0; k < bucket.docs.length; k++) {
+					const val = evaluateExpression(accExpr, bucket.docs[k]);
+					set[JSON.stringify(val)] = val;
+				}
+				result[field] = Object.values(set);
+			}
+		}
+		
+		bucketed.push(result);
+	}
+	
+	// Sort by _id (bucket boundary)
+	results = bucketed.sort((a, b) => {
+		if (a._id < b._id) return -1;
+		if (a._id > b._id) return 1;
+		return 0;
+	});
+} else if (stageType === "$bucketAuto") {
+	// Auto-calculate bucket boundaries and categorize documents
+	if (!stageSpec.groupBy || !stageSpec.buckets) {
+		throw new QueryError('$bucketAuto requires groupBy and buckets', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	const numBuckets = stageSpec.buckets;
+	const output = stageSpec.output || { count: { $sum: 1 } };
+	
+	if (results.length === 0) {
+		results = [];
+	} else {
+		// Extract and sort values
+		const values = results.map(doc => ({
+			value: evaluateExpression(stageSpec.groupBy, doc),
+			doc: doc
+		})).sort((a, b) => {
+			if (a.value < b.value) return -1;
+			if (a.value > b.value) return 1;
+			return 0;
+		});
+		
+		// Calculate bucket size
+		const bucketSize = Math.ceil(values.length / numBuckets);
+		const buckets = [];
+		
+		for (let j = 0; j < numBuckets && j * bucketSize < values.length; j++) {
+			const startIdx = j * bucketSize;
+			const endIdx = Math.min((j + 1) * bucketSize, values.length);
+			const bucketDocs = values.slice(startIdx, endIdx);
+			
+			if (bucketDocs.length === 0) continue;
+			
+			const bucket = {
+				_id: {
+					min: bucketDocs[0].value,
+					max: endIdx < values.length ? bucketDocs[bucketDocs.length - 1].value : bucketDocs[bucketDocs.length - 1].value
+				},
+				docs: bucketDocs.map(v => v.doc)
+			};
+			buckets.push(bucket);
+		}
+		
+		// Apply output accumulators
+		const bucketed = [];
+		for (let j = 0; j < buckets.length; j++) {
+			const bucket = buckets[j];
+			const result = { _id: bucket._id };
+			
+			for (const field in output) {
+				const accumulator = output[field];
+				const accKeys = Object.keys(accumulator);
+				if (accKeys.length !== 1) continue;
+				
+				const accType = accKeys[0];
+				const accExpr = accumulator[accType];
+				
+				if (accType === '$sum') {
+					let sum = 0;
+					for (let k = 0; k < bucket.docs.length; k++) {
+						const val = evaluateExpression(accExpr, bucket.docs[k]);
+						if (typeof val === 'number') {
+							sum += val;
+						} else if (val !== null && val !== undefined) {
+							sum += Number(val) || 0;
+						}
+					}
+					result[field] = sum;
+				} else if (accType === '$avg') {
+					let sum = 0;
+					let count = 0;
+					for (let k = 0; k < bucket.docs.length; k++) {
+						const val = evaluateExpression(accExpr, bucket.docs[k]);
+						if (val !== undefined && val !== null) {
+							sum += Number(val) || 0;
+							count++;
+						}
+					}
+					result[field] = count > 0 ? sum / count : 0;
+				} else if (accType === '$push') {
+					const arr = [];
+					for (let k = 0; k < bucket.docs.length; k++) {
+						const val = evaluateExpression(accExpr, bucket.docs[k]);
+						arr.push(val);
+					}
+					result[field] = arr;
+				}
+			}
+			
+			bucketed.push(result);
+		}
+		
+		results = bucketed;
+	}
+} else if (stageType === "$out") {
+	// Output results to a collection (replaces existing collection)
+	const targetCollectionName = stageSpec;
+	
+	if (typeof targetCollectionName !== 'string') {
+		throw new QueryError('$out requires a string collection name', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	// Drop and recreate target collection
+	if (this.db[targetCollectionName]) {
+		this.db.dropCollection(targetCollectionName);
+	}
+	this.db.createCollection(targetCollectionName);
+	
+	const targetCollection = this.db[targetCollectionName];
+	
+	// Insert all results into target collection
+	for (let j = 0; j < results.length; j++) {
+		const doc = results[j];
+		const docId = doc._id;
+		const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
+		targetCollection.storage.set(key, doc);
+	}
+	
+	// $out returns empty results (MongoDB behavior)
+	results = [];
+} else if (stageType === "$merge") {
+	// Merge results into a collection (MongoDB 4.2+)
+	let targetCollectionName;
+	let on = '_id';
+	let whenMatched = 'merge';
+	let whenNotMatched = 'insert';
+	
+	if (typeof stageSpec === 'string') {
+		targetCollectionName = stageSpec;
+	} else if (typeof stageSpec === 'object') {
+		targetCollectionName = stageSpec.into;
+		on = stageSpec.on || on;
+		whenMatched = stageSpec.whenMatched || whenMatched;
+		whenNotMatched = stageSpec.whenNotMatched || whenNotMatched;
+	}
+	
+	if (!targetCollectionName) {
+		throw new QueryError('$merge requires a target collection', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	// Create target collection if it doesn't exist
+	if (!this.db[targetCollectionName]) {
+		this.db.createCollection(targetCollectionName);
+	}
+	
+	const targetCollection = this.db[targetCollectionName];
+	
+	// Merge documents
+	for (let j = 0; j < results.length; j++) {
+		const doc = results[j];
+		const matchField = typeof on === 'string' ? on : on[0];
+		const matchValue = getProp(doc, matchField);
+		
+		// Find existing document
+		const existingCursor = targetCollection.find({ [matchField]: matchValue });
+		const existing = existingCursor.hasNext() ? existingCursor.next() : null;
+		
+		if (existing) {
+			if (whenMatched === 'replace') {
+				const docId = doc._id;
+				const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
+				targetCollection.storage.set(key, doc);
+			} else if (whenMatched === 'merge') {
+				const merged = Object.assign({}, existing, doc);
+				const docId = merged._id;
+				const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
+				targetCollection.storage.set(key, merged);
+			} else if (whenMatched === 'keepExisting') {
+				// Do nothing
+			} else if (whenMatched === 'fail') {
+				throw new QueryError('$merge failed: duplicate key', {
+					collection: this.name,
+					code: ErrorCodes.DUPLICATE_KEY
+				});
+			}
+		} else {
+			if (whenNotMatched === 'insert') {
+				const docId = doc._id;
+				const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
+				targetCollection.storage.set(key, doc);
+			} else if (whenNotMatched === 'discard') {
+				// Do nothing
+			} else if (whenNotMatched === 'fail') {
+				throw new QueryError('$merge failed: document not found', {
+					collection: this.name,
+					code: ErrorCodes.FAILED_TO_PARSE
+				});
+			}
+		}
+	}
+	
+	// $merge returns empty results (MongoDB behavior)
+	results = [];
+} else if (stageType === "$lookup") {
+	// Left outer join with another collection
+	if (!stageSpec.from || !stageSpec.localField || !stageSpec.foreignField || !stageSpec.as) {
+		throw new QueryError('$lookup requires from, localField, foreignField, and as', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	// Check if collection exists without triggering auto-creation
+	const collectionNames = this.db.getCollectionNames();
+	if (!collectionNames.includes(stageSpec.from)) {
+		throw new QueryError('$lookup: collection not found: ' + stageSpec.from, {
+			collection: this.name,
+			code: ErrorCodes.NAMESPACE_NOT_FOUND
+		});
+	}
+	
+	const fromCollection = this.db[stageSpec.from];
+	
+	const joined = [];
+	for (let j = 0; j < results.length; j++) {
+		const doc = copy(results[j]);
+		const localValue = getProp(doc, stageSpec.localField);
+		
+		// Find matching documents in foreign collection
+		const matches = [];
+		const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+		while (foreignCursor.hasNext()) {
+			matches.push(foreignCursor.next());
+		}
+		
+		doc[stageSpec.as] = matches;
+		joined.push(doc);
+	}
+	results = joined;
+} else if (stageType === "$graphLookup") {
+	// Recursive graph lookup
+	if (!stageSpec.from || !stageSpec.startWith || !stageSpec.connectFromField || 
+	    !stageSpec.connectToField || !stageSpec.as) {
+		throw new QueryError('$graphLookup requires from, startWith, connectFromField, connectToField, and as', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	// Check if collection exists without triggering auto-creation
+	const collectionNames = this.db.getCollectionNames();
+	if (!collectionNames.includes(stageSpec.from)) {
+		throw new QueryError('$graphLookup: collection not found: ' + stageSpec.from, {
+			collection: this.name,
+			code: ErrorCodes.NAMESPACE_NOT_FOUND
+		});
+	}
+	
+	const fromCollection = this.db[stageSpec.from];
+	
+	const maxDepth = stageSpec.maxDepth !== undefined ? stageSpec.maxDepth : Number.MAX_SAFE_INTEGER;
+	const depthField = stageSpec.depthField;
+	const restrictSearchWithMatch = stageSpec.restrictSearchWithMatch;
+	
+	const graphed = [];
+	for (let j = 0; j < results.length; j++) {
+		const doc = copy(results[j]);
+		const startValue = evaluateExpression(stageSpec.startWith, results[j]);
+		
+		// Recursive lookup
+		const visited = new Set();
+		const matches = [];
+		const queue = [{ value: startValue, depth: 0 }];
+		
+		while (queue.length > 0) {
+			const { value, depth } = queue.shift();
+			if (depth > maxDepth) continue;
+			
+			const valueKey = JSON.stringify(value);
+			if (visited.has(valueKey)) continue;
+			visited.add(valueKey);
+			
+			// Find matching documents
+			let query = { [stageSpec.connectToField]: value };
+			if (restrictSearchWithMatch) {
+				query = { $and: [query, restrictSearchWithMatch] };
+			}
+			
+			const cursor = fromCollection.find(query);
+			while (cursor.hasNext()) {
+				const match = cursor.next();
+				const matchCopy = copy(match);
+				
+				if (depthField) {
+					matchCopy[depthField] = depth;
+				}
+				
+				matches.push(matchCopy);
+				
+				// Add connected value to queue for next iteration
+				const nextValue = getProp(match, stageSpec.connectFromField);
+				if (nextValue !== undefined && nextValue !== null) {
+					queue.push({ value: nextValue, depth: depth + 1 });
+				}
+			}
+		}
+		
+		doc[stageSpec.as] = matches;
+		graphed.push(doc);
+	}
+	results = graphed;
+} else if (stageType === "$facet") {
+	// Multiple parallel pipelines
+	if (typeof stageSpec !== 'object' || Array.isArray(stageSpec)) {
+		throw new QueryError('$facet requires an object with pipeline definitions', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	const facetResult = {};
+	
+	for (const facetName in stageSpec) {
+		const facetPipeline = stageSpec[facetName];
+		
+		if (!Array.isArray(facetPipeline)) {
+			throw new QueryError('$facet pipeline must be an array', {
+				collection: this.name,
+				code: ErrorCodes.FAILED_TO_PARSE
+			});
+		}
+		
+		// Execute the sub-pipeline on a copy of current results
+		let facetResults = results.map(r => copy(r));
+		
+		for (let k = 0; k < facetPipeline.length; k++) {
+			const facetStage = facetPipeline[k];
+			const facetStageKeys = Object.keys(facetStage);
+			if (facetStageKeys.length !== 1) {
+				throw new QueryError('Each pipeline stage must have exactly one key', {
+					collection: this.name,
+					code: ErrorCodes.FAILED_TO_PARSE
+				});
+			}
+			
+			const facetStageType = facetStageKeys[0];
+			const facetStageSpec = facetStage[facetStageType];
+			
+			// Process facet stage (recursive call to aggregation logic)
+			// We need to inline the stage processing here
+			if (facetStageType === "$match") {
+				const matched = [];
+				for (let m = 0; m < facetResults.length; m++) {
+					if (matches(facetResults[m], facetStageSpec)) {
+						matched.push(facetResults[m]);
+					}
+				}
+				facetResults = matched;
+			} else if (facetStageType === "$project") {
+				const projected = [];
+				for (let m = 0; m < facetResults.length; m++) {
+					projected.push(applyProjectionWithExpressions(facetStageSpec, facetResults[m]));
+				}
+				facetResults = projected;
+			} else if (facetStageType === "$limit") {
+				facetResults = facetResults.slice(0, facetStageSpec);
+			} else if (facetStageType === "$skip") {
+				facetResults = facetResults.slice(facetStageSpec);
+			} else if (facetStageType === "$sort") {
+				const sortKeys = Object.keys(facetStageSpec);
+				facetResults.sort(function (a, b) {
+					for (let n = 0; n < sortKeys.length; n++) {
+						const key = sortKeys[n];
+						if (a[key] === undefined && b[key] !== undefined) return -1 * facetStageSpec[key];
+						if (a[key] !== undefined && b[key] === undefined) return 1 * facetStageSpec[key];
+						if (a[key] < b[key]) return -1 * facetStageSpec[key];
+						if (a[key] > b[key]) return 1 * facetStageSpec[key];
+					}
+					return 0;
+				});
+			} else if (facetStageType === "$count") {
+				facetResults = [{ [facetStageSpec]: facetResults.length }];
+			} else if (facetStageType === "$group") {
+				// Handle $group in facet sub-pipelines
+				const groups = {};
+				const groupId = facetStageSpec._id;
+
+				for (let m = 0; m < facetResults.length; m++) {
+					const doc = facetResults[m];
+					let key;
+
+					if (groupId === null || groupId === undefined) {
+						key = null;
+					} else {
+						key = evaluateExpression(groupId, doc);
+					}
+
+					const keyStr = JSON.stringify(key);
+
+					if (!groups[keyStr]) {
+						groups[keyStr] = {
+							_id: key,
+							docs: [],
+							accumulators: {}
+						};
+					}
+
+					groups[keyStr].docs.push(doc);
+				}
+
+				// Apply accumulators (simplified version)
+				const grouped = [];
+				for (const groupKey in groups) {
+					const group = groups[groupKey];
+					const result = { _id: group._id };
+
+					for (const field in facetStageSpec) {
+						if (field === '_id') continue;
+
+						const accumulator = facetStageSpec[field];
+						const accKeys = Object.keys(accumulator);
+						if (accKeys.length !== 1) continue;
+
+						const accType = accKeys[0];
+						const accExpr = accumulator[accType];
+
+						if (accType === '$sum') {
+							let sum = 0;
+							for (let n = 0; n < group.docs.length; n++) {
+								const val = evaluateExpression(accExpr, group.docs[n]);
+								if (typeof val === 'number') {
+									sum += val;
+								} else if (val !== null && val !== undefined) {
+									sum += Number(val) || 0;
+								}
+							}
+							result[field] = sum;
+						} else if (accType === '$avg') {
+							let sum = 0;
+							let count = 0;
+							for (let n = 0; n < group.docs.length; n++) {
+								const val = evaluateExpression(accExpr, group.docs[n]);
+								if (val !== undefined && val !== null) {
+									sum += Number(val) || 0;
+									count++;
+								}
+							}
+							result[field] = count > 0 ? sum / count : 0;
+						} else if (accType === '$max') {
+							let max = undefined;
+							for (let n = 0; n < group.docs.length; n++) {
+								const val = evaluateExpression(accExpr, group.docs[n]);
+								if (val !== undefined && (max === undefined || val > max)) {
+									max = val;
+								}
+							}
+							result[field] = max;
+						}
+					}
+
+					grouped.push(result);
+				}
+				facetResults = grouped;
+			} else if (facetStageType === "$sortByCount") {
+				// Handle $sortByCount in facet sub-pipelines
+				const groups = {};
+				
+				for (let m = 0; m < facetResults.length; m++) {
+					const doc = facetResults[m];
+					const value = evaluateExpression(facetStageSpec, doc);
+					const key = JSON.stringify(value);
+					
+					if (!groups[key]) {
+						groups[key] = {
+							_id: value,
+							count: 0
+						};
+					}
+					groups[key].count++;
+				}
+				
+				facetResults = Object.values(groups).sort((a, b) => b.count - a.count);
+			} else if (facetStageType === "$sample") {
+				// Handle $sample in facet sub-pipelines
+				const size = facetStageSpec.size || 1;
+				const shuffled = [...facetResults];
+				for (let m = shuffled.length - 1; m > 0; m--) {
+					const k = Math.floor(Math.random() * (m + 1));
+					[shuffled[m], shuffled[k]] = [shuffled[k], shuffled[m]];
+				}
+				facetResults = shuffled.slice(0, Math.min(size, shuffled.length));
+			} else if (facetStageType === "$bucket") {
+				// Handle $bucket in facet sub-pipelines
+				const boundaries = facetStageSpec.boundaries;
+				const defaultBucket = facetStageSpec.default;
+				const output = facetStageSpec.output || { count: { $sum: 1 } };
+				
+				const buckets = {};
+				for (let m = 0; m < boundaries.length - 1; m++) {
+					const key = JSON.stringify(boundaries[m]);
+					buckets[key] = {
+						_id: boundaries[m],
+						docs: []
+					};
+				}
+				if (defaultBucket !== undefined) {
+					buckets['default'] = {
+						_id: defaultBucket,
+						docs: []
+					};
+				}
+				
+				// Categorize documents
+				for (let m = 0; m < facetResults.length; m++) {
+					const doc = facetResults[m];
+					const value = evaluateExpression(facetStageSpec.groupBy, doc);
+					
+					let placed = false;
+					for (let n = 0; n < boundaries.length - 1; n++) {
+						if (value >= boundaries[n] && value < boundaries[n + 1]) {
+							const key = JSON.stringify(boundaries[n]);
+							buckets[key].docs.push(doc);
+							placed = true;
+							break;
+						}
+					}
+					
+					if (!placed && defaultBucket !== undefined) {
+						buckets['default'].docs.push(doc);
+					}
+				}
+				
+				// Apply accumulators
+				const bucketed = [];
+				for (const bucketKey in buckets) {
+					const bucket = buckets[bucketKey];
+					if (bucket.docs.length === 0) continue;
+					
+					const result = { _id: bucket._id };
+					
+					for (const field in output) {
+						const accumulator = output[field];
+						const accKeys = Object.keys(accumulator);
+						if (accKeys.length !== 1) continue;
+						
+						const accType = accKeys[0];
+						const accExpr = accumulator[accType];
+						
+						if (accType === '$sum') {
+							let sum = 0;
+							for (let n = 0; n < bucket.docs.length; n++) {
+								const val = evaluateExpression(accExpr, bucket.docs[n]);
+								if (typeof val === 'number') {
+									sum += val;
+								} else if (val !== null && val !== undefined) {
+									sum += Number(val) || 0;
+								}
+							}
+							result[field] = sum;
+						}
+					}
+					
+					bucketed.push(result);
+				}
+				
+				facetResults = bucketed.sort((a, b) => {
+					if (a._id < b._id) return -1;
+					if (a._id > b._id) return 1;
+					return 0;
+				});
+			}
+			// Add more stage types as needed for facet sub-pipelines
+		}
+		
+		facetResult[facetName] = facetResults;
+	}
+	
+	results = [facetResult];
+} else if (stageType === "$redact") {
+	// Conditionally filter or redact document content
+	const redacted = [];
+	
+	for (let j = 0; j < results.length; j++) {
+		const doc = results[j];
+		const decision = evaluateExpression(stageSpec, doc);
+		
+		if (decision === '$$DESCEND') {
+			// Include document and recurse into subdocuments (simplified: just include)
+			redacted.push(doc);
+		} else if (decision === '$$PRUNE') {
+			// Exclude this document
+			continue;
+		} else if (decision === '$$KEEP') {
+			// Include this document
+			redacted.push(doc);
+		} else {
+			// If result is a conditional expression, evaluate it
+			if (decision) {
+				redacted.push(doc);
+			}
+		}
+	}
+	results = redacted;
+} else if (stageType === "$geoNear") {
+	// Geospatial aggregation with distance calculation
+	if (!stageSpec.near || !stageSpec.distanceField) {
+		throw new QueryError('$geoNear requires near and distanceField', {
+			collection: this.name,
+			code: ErrorCodes.FAILED_TO_PARSE
+		});
+	}
+	
+	const near = stageSpec.near;
+	const distanceField = stageSpec.distanceField;
+	const maxDistance = stageSpec.maxDistance;
+	const minDistance = stageSpec.minDistance || 0;
+	const spherical = stageSpec.spherical !== false;
+	const key = stageSpec.key || 'location';
+	
+	// Calculate distance for each document
+	const withDistances = [];
+	for (let j = 0; j < results.length; j++) {
+		const doc = copy(results[j]);
+		const location = getProp(doc, key);
+		
+		if (!location || !Array.isArray(location) || location.length < 2) {
+			continue;
+		}
+		
+		// Calculate distance (using Haversine formula for spherical or Euclidean for planar)
+		let distance;
+		if (spherical) {
+			// Haversine formula for great circle distance
+			const R = 6371000; // Earth radius in meters
+			const lat1 = near[1] * Math.PI / 180;
+			const lat2 = location[1] * Math.PI / 180;
+			const deltaLat = (location[1] - near[1]) * Math.PI / 180;
+			const deltaLon = (location[0] - near[0]) * Math.PI / 180;
+			
+			const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+			          Math.cos(lat1) * Math.cos(lat2) *
+			          Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+			const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+			distance = R * c;
+		} else {
+			// Euclidean distance
+			const dx = location[0] - near[0];
+			const dy = location[1] - near[1];
+			distance = Math.sqrt(dx * dx + dy * dy);
+		}
+		
+		// Filter by distance
+		if (distance >= minDistance && (!maxDistance || distance <= maxDistance)) {
+			doc[distanceField] = distance;
+			withDistances.push(doc);
+		}
+	}
+	
+	// Sort by distance (nearest first)
+	withDistances.sort((a, b) => a[distanceField] - b[distanceField]);
+	
+	// Apply limit if specified
+	if (stageSpec.limit) {
+		results = withDistances.slice(0, stageSpec.limit);
+	} else {
+		results = withDistances;
+	}
 } else {
 	throw new QueryError('Unsupported aggregation stage: ' + stageType, { 
 		collection: this.name, 
