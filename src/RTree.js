@@ -1,3 +1,6 @@
+
+import { IndexStore } from './IndexStore.js';
+
 /**
  * R-tree implementation for geospatial indexing
  * 
@@ -98,10 +101,86 @@ function enlargement(bbox1, bbox2) {
  * R-tree Node class
  */
 class RTreeNode {
-	constructor(isLeaf = false) {
-		this.isLeaf = isLeaf;
-		this.children = []; // For internal nodes: child nodes; For leaf nodes: data entries
-		this.bbox = null;
+	constructor(isLeaf = false, indexStore) {
+    if (!(indexStore instanceof IndexStore)) {
+      throw new Error('IndexStore is required to create RTreeNode');
+    }
+
+    this.indexStore = indexStore;
+
+    if (typeof isLeaf === 'object') {
+      this._data = isLeaf;
+      this.id = this._data.id;
+      this.isLeaf = this._data.isLeaf;
+      this.children = [];
+      this.bbox = Object.assign({}, this._data.bbox);
+
+      // leaf nodes will have data entries as children
+      // internal nodes will have child node IDs
+      if (!this.isLeaf) {
+        for (const childId of this._data.children) {
+          const childData = indexStore.get(childId);
+          if (!childData) {
+            throw new Error(`RTreeNode: Child node with id ${childId} not found in IndexStore`);
+          }
+          const childNode = new RTreeNode(childData, indexStore);
+          this.children.push(childNode);
+        }
+      } else {
+        this.children = [...this._data.children];
+      }
+
+    } else {
+      this._data = {
+        id: indexStore.getMeta('nextId'),
+        isLeaf: isLeaf,
+        children: [],
+        bbox: null
+      };
+      indexStore.setMeta('nextId', this._data.id + 1);
+      indexStore.set(this._data.id, this._data);
+      this.id = this._data.id;
+      this.isLeaf = isLeaf;
+      this.children = []; // For internal nodes: child nodes; For leaf nodes: data entries
+      this.bbox = null;
+    }
+
+    return new Proxy(this, {
+      set(target, prop, value) {
+        if (prop === 'children') {
+          // console.warn('Directly modifying children', value);
+          target.children = value;
+          // Update the stored children IDs
+          if (!target.isLeaf) {
+            target._data.children = target.children.map(child => child.id);
+          } else {
+            target._data.children = [...target.children];
+          }
+          indexStore.set(target.id, target._data);
+          return true;
+        }
+        target[prop] = value;
+        return true;
+      },
+      get(target, prop) {
+        if (prop === 'children') {
+          return new Proxy(target.children, {
+            set(childTarget, childProp, childValue) {
+              childTarget[childProp] = childValue;
+              // Update the stored children IDs
+              if (!target.isLeaf) {
+                target._data.children = target.children.map(child => child.id);
+              } else {
+                target._data.children = [...target.children];
+              }
+              indexStore.set(target.id, target._data);
+              return true;
+            }
+          });
+        }
+        return target[prop];
+      }
+    });
 	}
 
 	/**
@@ -125,6 +204,8 @@ class RTreeNode {
 		}
 
 		this.bbox = { minLat, maxLat, minLng, maxLng };
+    this._data.bbox = Object.assign({}, this.bbox);
+    this.indexStore.set(this.id, this._data);
 	}
 }
 
@@ -132,11 +213,30 @@ class RTreeNode {
  * R-tree implementation
  */
 export class RTree {
-	constructor(maxEntries = 9) {
+	constructor(maxEntries = 9, indexStore = new IndexStore()) {
 		this.maxEntries = maxEntries;
 		this.minEntries = Math.max(2, Math.ceil(maxEntries / 2));
-		this.root = new RTreeNode(true);
-		this._size = 0; // Track size for O(1) queries
+    this.indexStore = indexStore;
+
+    if (indexStore.hasMeta('maxEntries')) {
+      if (indexStore.getMeta('maxEntries') !== maxEntries) {
+        throw new Error(`R-tree maxEntries does not match stored index metadata ${indexStore.getMeta('maxEntries')} != ${maxEntries}`);
+      }
+      if (indexStore.getMeta('minEntries') !== this.minEntries) {
+        throw new Error(`R-tree minEntries does not match stored index metadata ${indexStore.getMeta('minEntries')} != ${this.minEntries}`);
+      }
+
+      this._size = this.indexStore.getMeta('size');
+      this.root = new RTreeNode(this.indexStore.get(this.indexStore.getMeta('rootId')), this.indexStore);
+    } else {
+      this.indexStore.setMeta('maxEntries', this.maxEntries);
+      this.indexStore.setMeta('minEntries', this.minEntries);
+      this.indexStore.setMeta('nextId', 1);
+      this.root = new RTreeNode(true, this.indexStore);
+      this.indexStore.setMeta('rootId', this.root.id);
+      this.indexStore.setMeta('size', 0);
+      this._size = 0;
+    }
 	}
 
 	/**
@@ -157,6 +257,7 @@ export class RTree {
 		const entry = { bbox, lat, lng, data };
 		this._insert(entry, this.root, 1);
 		this._size++;
+    this.indexStore.setMeta('size', this._size);
 	}
 
 	/**
@@ -215,6 +316,8 @@ export class RTree {
 	 * Split an overflowing node
 	 */
 	_split(node) {
+
+    // console.log(`Splitting node ${node.id} with ${node.children.length} children`);
 		// Simple linear split algorithm
 		const children = node.children;
 		const isLeaf = node.isLeaf;
@@ -239,11 +342,14 @@ export class RTree {
 		}
 
 		// Create two new nodes
-		const node1 = new RTreeNode(isLeaf);
-		const node2 = new RTreeNode(isLeaf);
+		const node1 = new RTreeNode(isLeaf, this.indexStore);
+		const node2 = new RTreeNode(isLeaf, this.indexStore);
 
 		node1.children.push(children[seed1Idx]);
 		node2.children.push(children[seed2Idx]);
+
+    // console.log('node1 children after seeds:', node1);
+    // console.log('node2 children after seeds:', node2);
 
 		// Distribute remaining entries
 		for (let i = 0; i < children.length; i++) {
@@ -286,10 +392,11 @@ export class RTree {
 
 		// If this was the root, create a new root
 		if (node === this.root) {
-			const newRoot = new RTreeNode(false);
+			const newRoot = new RTreeNode(false, this.indexStore);
 			newRoot.children = [node1, node2];
 			newRoot.updateBBox();
 			this.root = newRoot;
+      this.indexStore.setMeta('rootId', this.root.id);
 			return null;
 		}
 
@@ -371,11 +478,13 @@ export class RTree {
 		
 		if (removed) {
 			this._size--;
+      this.indexStore.setMeta('size', this._size);
 		}
 		
 		// If root has only one child after removal, make that child the new root
 		if (this.root.children.length === 1 && !this.root.isLeaf) {
 			this.root = this.root.children[0];
+      this.indexStore.setMeta('rootId', this.root.id);
 		}
 
 		return removed;
@@ -472,82 +581,12 @@ export class RTree {
 	 * Clear all entries from the tree
 	 */
 	clear() {
-		this.root = new RTreeNode(true);
+		this.root = new RTreeNode(true, this.indexStore);
+    this.indexStore.setMeta('rootId', this.root.id);
 		this._size = 0;
+    this.indexStore.setMeta('size', 0);
 	}
 
-	/**
-	 * Serialize the R-tree state for storage
-	 * @returns {Object} Serializable state
-	 */
-	serialize() {
-		return {
-			maxEntries: this.maxEntries,
-			minEntries: this.minEntries,
-			size: this._size,
-			root: this._serializeNode(this.root)
-		};
-	}
-
-	/**
-	 * Serialize a node recursively
-	 */
-	_serializeNode(node) {
-		const serialized = {
-			isLeaf: node.isLeaf,
-			bbox: node.bbox,
-			children: []
-		};
-
-		if (node.isLeaf) {
-			// Leaf nodes contain entries
-			serialized.children = node.children.map(entry => ({
-				bbox: entry.bbox,
-				lat: entry.lat,
-				lng: entry.lng,
-				data: entry.data
-			}));
-		} else {
-			// Internal nodes contain child nodes
-			serialized.children = node.children.map(child => this._serializeNode(child));
-		}
-
-		return serialized;
-	}
-
-	/**
-	 * Restore the R-tree state from serialized data
-	 * @param {Object} state - Serialized state
-	 */
-	deserialize(state) {
-		this.maxEntries = state.maxEntries || 9;
-		this.minEntries = state.minEntries || Math.ceil(this.maxEntries / 2);
-		this._size = state.size || 0;
-		this.root = this._deserializeNode(state.root);
-	}
-
-	/**
-	 * Deserialize a node recursively
-	 */
-	_deserializeNode(serialized) {
-		const node = new RTreeNode(serialized.isLeaf);
-		node.bbox = serialized.bbox;
-
-		if (serialized.isLeaf) {
-			// Restore leaf entries
-			node.children = serialized.children.map(entry => ({
-				bbox: entry.bbox,
-				lat: entry.lat,
-				lng: entry.lng,
-				data: entry.data
-			}));
-		} else {
-			// Restore child nodes
-			node.children = serialized.children.map(child => this._deserializeNode(child));
-		}
-
-		return node;
-	}
 }
 
 export default RTree;
