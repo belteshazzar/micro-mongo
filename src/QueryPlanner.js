@@ -172,9 +172,9 @@ export class QueryPlanner {
 					const plan = new QueryPlan();
 					plan.type = 'index_scan';
 					plan.indexes = [indexName];
-					const docIds = index.search(textQuery);
-					plan.indexScans = [{ indexName, docIds }];
-					plan.estimatedCost = docIds.length;
+					// Store query info for execution phase, don't execute yet
+					plan.indexScans = [{ indexName, index, textQuery }];
+					plan.estimatedCost = 100; // Rough estimate without executing
 					plan.indexOnly = true; // Text search must use index
 					return plan;
 				}
@@ -205,16 +205,15 @@ export class QueryPlanner {
 		// Find geospatial index
 		for (const [indexName,index] of this.indexes) {
 			if (index instanceof GeospatialCollectionIndex) {
-				const docIds = index.query(query);
-				if (docIds !== null) {
-					const plan = new QueryPlan();
-					plan.type = 'index_scan';
-					plan.indexes = [indexName];
-					plan.indexScans = [{ indexName, docIds }];
-					plan.estimatedCost = docIds.length;
-					plan.indexOnly = true; // Geospatial queries must use index
-					return plan;
-				}
+				// Check if this index can handle the query (don't execute yet)
+				const plan = new QueryPlan();
+				plan.type = 'index_scan';
+				plan.indexes = [indexName];
+				// Store query info for execution phase, don't execute yet
+				plan.indexScans = [{ indexName, index, query }];
+				plan.estimatedCost = 100; // Rough estimate without executing
+				plan.indexOnly = true; // Geospatial queries must use index
+				return plan;
 			}
 		}
 		return null;
@@ -251,8 +250,8 @@ export class QueryPlanner {
 			plan.indexScans = indexableConditions;
 			plan.indexes = indexableConditions.map(scan => scan.indexName);
 			
-			// Estimate cost as the smallest set
-			plan.estimatedCost = Math.min(...indexableConditions.map(scan => scan.docIds.length));
+			// Estimate cost (rough estimate without executing)
+			plan.estimatedCost = 50; // Intersection typically reduces result set
 			return plan;
 		}
 
@@ -261,7 +260,7 @@ export class QueryPlanner {
 			plan.type = 'index_scan';
 			plan.indexScans = [indexableConditions[0]];
 			plan.indexes = [indexableConditions[0].indexName];
-			plan.estimatedCost = indexableConditions[0].docIds.length;
+			plan.estimatedCost = 50; // Rough estimate without executing
 			return plan;
 		}
 
@@ -296,8 +295,8 @@ export class QueryPlanner {
 			plan.indexScans = indexableConditions;
 			plan.indexes = indexableConditions.map(scan => scan.indexName);
 			
-			// Estimate cost as the sum of all sets
-			plan.estimatedCost = indexableConditions.reduce((sum, scan) => sum + scan.docIds.length, 0);
+			// Estimate cost (rough estimate without executing)
+			plan.estimatedCost = 100 * indexableConditions.length; // Union typically increases result set
 			return plan;
 		}
 
@@ -324,18 +323,67 @@ export class QueryPlanner {
 				continue;
 			}
 
-			// Try to use this index
-			const docIds = index.query(query);
-			if (docIds !== null && docIds.length >= 0) {
+			// Check if this index CAN handle the query (don't execute yet)
+			if (this._canIndexHandleQuery(index, query)) {
 				plan.type = 'index_scan';
 				plan.indexes = [indexName];
-				plan.indexScans = [{ indexName, docIds }];
-				plan.estimatedCost = docIds.length;
+				// Store query info for execution phase, don't execute yet
+				plan.indexScans = [{ indexName, index, query }];
+				plan.estimatedCost = 50; // Rough estimate without executing
 				return plan;
 			}
 		}
 
 		return plan; // full_scan
+	}
+
+	/**
+	 * Execute a single index scan that was deferred from planning
+	 * @private
+	 */
+	_executeIndexScan(scan) {
+		const { index, query, textQuery } = scan;
+		
+		// Handle text search
+		if (textQuery !== undefined) {
+			return index.search(textQuery);
+		}
+		
+		// Handle regular index query
+		if (query !== undefined) {
+			const docIds = index.query(query);
+			return docIds !== null ? docIds : [];
+		}
+		
+		// Fallback: if docIds were already computed (backward compatibility)
+		if (scan.docIds !== undefined) {
+			return scan.docIds;
+		}
+		
+		return [];
+	}
+
+	/**
+	 * Check if an index can handle a query (without executing it)
+	 * @private
+	 */
+	_canIndexHandleQuery(index, query) {
+		const queryKeys = Object.keys(query);
+		const indexFields = Object.keys(index.keys);
+
+		// Only support single-field index queries for now
+		if (indexFields.length !== 1) {
+			return false;
+		}
+
+		const field = indexFields[0];
+		
+		// Check if query has this field
+		if (queryKeys.indexOf(field) === -1) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -349,15 +397,23 @@ export class QueryPlanner {
 		}
 
 		if (plan.type === 'index_scan') {
-			return plan.indexScans[0].docIds;
+			// Execute the query now
+			const scan = plan.indexScans[0];
+			return this._executeIndexScan(scan);
 		}
 
 		if (plan.type === 'index_intersection') {
 			// Intersection: docs must be in ALL index results
 			if (plan.indexScans.length === 0) return null;
 			
+			// Execute all scans
+			const results = plan.indexScans.map(scan => ({
+				docIds: this._executeIndexScan(scan),
+				indexName: scan.indexName
+			}));
+			
 			// Start with the smallest set for efficiency
-			const sorted = plan.indexScans.slice().sort((a, b) => a.docIds.length - b.docIds.length);
+			const sorted = results.slice().sort((a, b) => a.docIds.length - b.docIds.length);
 			let result = new Set(sorted[0].docIds);
 			
 			// Intersect with each subsequent set
@@ -376,7 +432,8 @@ export class QueryPlanner {
 			// Union: docs in ANY index result
 			const result = new Set();
 			for (const scan of plan.indexScans) {
-				scan.docIds.forEach(id => result.add(id));
+				const docIds = this._executeIndexScan(scan);
+				docIds.forEach(id => result.add(id));
 			}
 			return Array.from(result);
 		}
