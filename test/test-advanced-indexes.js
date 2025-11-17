@@ -6,7 +6,7 @@ describe('Advanced Index Support', function() {
 	const collectionName = 'test_advanced_indexes';
 
 	beforeEach(async function() {
-		client = new MongoClient();
+		client = await new MongoClient().connect();
 		db = await client.db('test_db_advanced');
 		await db.createCollection(collectionName);
 	});
