@@ -144,45 +144,21 @@ export function applyUpdates(updates, doc, setOnInsert) {
 					var element = src[k];
 					var shouldRemove = false;
 					
-					// Check if condition is a query object with operators or just a value/object to match
+					// Determine how to match the condition against the element
 					if (typeof condition === 'object' && condition !== null && !Array.isArray(condition)) {
-						// Check if ANY key contains query operators
-						var hasOperators = false;
-						var conditionKeys = Object.keys(condition);
-						for (var m = 0; m < conditionKeys.length; m++) {
-							var condKey = conditionKeys[m];
-							// If the key starts with $, it's an operator
-							if (condKey.charAt(0) == "$") {
-								hasOperators = true;
-								break;
-							}
-							// If the value is an object with operator keys, it's a nested query
-							if (typeof condition[condKey] === 'object' && condition[condKey] !== null) {
-								var nestedKeys = Object.keys(condition[condKey]);
-								if (nestedKeys.length > 0 && nestedKeys[0].charAt(0) == "$") {
-									hasOperators = true;
-									break;
-								}
-							}
-						}
-						
-						if (hasOperators) {
-							// Use query matching - treat the element as a document
-							// and the condition as a query
-							if (typeof element === 'object' && element !== null && !Array.isArray(element)) {
-								// For objects, use matches function
-								shouldRemove = matches(element, condition);
-							} else {
-								// For primitives with operators like {$gte: 5}
-								var tempDoc = { __temp: element };
-								shouldRemove = opMatches(tempDoc, "__temp", condition);
-							}
+						// Condition is an object (could be a query or a value to match)
+						if (typeof element === 'object' && element !== null && !Array.isArray(element)) {
+							// Element is also an object - use query matching
+							// This handles both {price: null}, {name: "test"}, and {price: {$gte: 10}}
+							shouldRemove = matches(element, condition);
 						} else {
-							// For plain objects without operators, do deep equality check
-							shouldRemove = objectEquals(element, condition);
+							// Element is a primitive but condition is an object with operators like {$gte: 5}
+							var tempDoc = { __temp: element };
+							shouldRemove = opMatches(tempDoc, "__temp", condition);
 						}
 					} else {
-						// For simple values (string, number, boolean, etc.), do direct comparison
+						// Condition is a simple value (string, number, boolean, null, etc.)
+						// Do direct comparison
 						shouldRemove = element == condition;
 					}
 					
