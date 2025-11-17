@@ -270,7 +270,7 @@ This document tracks the features needed to make micro-mongo more compatible wit
 ### Tasks:
 - [ ] Fix $currentDate to support { $type: "timestamp" } and { $type: "date" }
 - [ ] Add $pull with query conditions (not just value matching)
-- [ ] Add $[] (update all array elements)
+- [x] Add $[] (update all array elements) ✅
 - [ ] Add $[<identifier>] (filtered positional operator)
 - [ ] Add $.$ (update first matching array element)
 - [ ] Properly implement $each, $position, $slice, $sort for $push
