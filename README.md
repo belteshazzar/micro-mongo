@@ -273,6 +273,48 @@ The following table summarises the API implementation status.
 | db.collection.updateOne            | yes         |
 | db.collection.updateMany           | yes         |
 | db.collection.validate             | no          |
+| db.collection.watch                | yes         |
+
+## Change Streams
+
+**NEW:** Micro-Mongo now supports change streams for reactive programming! Watch for real-time data changes at the collection, database, or client level.
+
+```javascript
+import { MongoClient } from 'micro-mongo';
+
+const client = await MongoClient.connect();
+const db = client.db('myapp');
+const collection = db.collection('users');
+
+// Watch for changes to a collection
+const changeStream = collection.watch();
+
+changeStream.on('change', (change) => {
+    console.log('Change detected:', change.operationType);
+    console.log('Document:', change.fullDocument);
+});
+
+// Make changes - they'll trigger the change stream
+await collection.insertOne({ name: 'Alice', age: 30 });
+await collection.updateOne({ name: 'Alice' }, { $set: { age: 31 } });
+await collection.deleteOne({ name: 'Alice' });
+
+// Filter changes using aggregation pipelines
+const filtered = collection.watch([
+    { $match: { 'fullDocument.age': { $gte: 30 } } }
+]);
+
+// Watch at database level (all collections)
+const dbStream = db.watch();
+
+// Watch at client level (all databases)
+const clientStream = client.watch();
+
+// Close when done
+changeStream.close();
+```
+
+See [CHANGE-STREAMS.md](CHANGE-STREAMS.md) for complete documentation, examples, and browser reactivity patterns.
 
 ## Cursor Methods
 

@@ -1,6 +1,7 @@
 import { Collection } from './Collection.js';
 import { StorageEngine } from './StorageEngine.js';
 import { ObjectId } from './ObjectId.js';
+import { ChangeStream } from './ChangeStream.js';
 
 /**
  * DB class
@@ -95,6 +96,24 @@ export class DB {
 		);
 	}
 
+	/**
+	 * Get or create a collection by name (MongoDB-compatible method)
+	 * @param {string} name - Collection name
+	 * @returns {Collection} The collection instance
+	 */
+	collection(name) {
+		if (!name) throw new Error('Collection name is required');
+		
+		// Return existing collection if it exists
+		if (this[name] && this[name].isCollection) {
+			return this[name];
+		}
+		
+		// Create and return new collection
+		this.createCollection(name);
+		return this[name];
+	}
+
 	currentOp() { throw "Not Implemented"; }
 
 	dropDatabase() {
@@ -167,4 +186,14 @@ export class DB {
 	version() { throw "Not Implemented"; }
 	upgradeCheck() { throw "Not Implemented"; }
 	upgradeCheckAllDBs() { throw "Not Implemented"; }
+
+	/**
+	 * Watch for changes across all collections in this database
+	 * @param {Array} pipeline - Aggregation pipeline to filter changes
+	 * @param {Object} options - Watch options
+	 * @returns {ChangeStream} A change stream instance
+	 */
+	watch(pipeline = [], options = {}) {
+		return new ChangeStream(this, pipeline, options);
+	}
 }

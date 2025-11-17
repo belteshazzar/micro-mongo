@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { Cursor } from './Cursor.js';
 import { SortedCursor } from './SortedCursor.js';
 import { isArray, getProp, applyProjection, copy } from './utils.js';
@@ -8,12 +9,14 @@ import { TextCollectionIndex } from './TextCollectionIndex.js';
 import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
 import { QueryPlanner } from './QueryPlanner.js';
 import { evaluateExpression } from './aggregationExpressions.js';
+import { ChangeStream } from './ChangeStream.js';
 
 /**
  * Collection class
  */
-export class Collection {
+export class Collection extends EventEmitter {
 	constructor(db, name, storage, idGenerator) {
+		super();
 		this.db = db;
 		this.name = name;
 		this.storage = storage;
@@ -525,6 +528,7 @@ export class Collection {
 		if (doc) {
 			this.updateIndexesOnDelete(doc);
 			this.storage.remove(doc._id.toString());
+			this.emit('delete', { _id: doc._id });
 			return { deletedCount: 1 };
 		} else {
 			return { deletedCount: 0 };
@@ -544,6 +548,7 @@ export class Collection {
 		for (let i = 0; i < ids.length; i++) {
 			this.updateIndexesOnDelete(docs[i]);
 			this.storage.remove(ids[i].toString());
+			this.emit('delete', { _id: ids[i] });
 		}
 		return { deletedCount: deletedCount };
 	}
@@ -713,6 +718,7 @@ export class Collection {
 		if (doc._id == undefined) doc._id = this.idGenerator();
 		this.storage.set(doc._id.toString(), doc);
 		this.updateIndexesOnInsert(doc);
+		this.emit('insert', doc);
 		return { insertedId: doc._id };
 	}
 
@@ -740,6 +746,8 @@ export class Collection {
 				const newDoc = replacement;
 				newDoc._id = this.idGenerator();
 				this.storage.set(newDoc._id.toString(), newDoc);
+				this.updateIndexesOnInsert(newDoc);
+				this.emit('insert', newDoc);
 				result.upsertedId = newDoc._id;
 			}
 		} else {
@@ -749,6 +757,7 @@ export class Collection {
 			replacement._id = doc._id;
 			this.storage.set(doc._id.toString(), replacement);
 			this.updateIndexesOnInsert(replacement);
+			this.emit('replace', replacement);
 		}
 		return result;
 	}
@@ -807,15 +816,19 @@ export class Collection {
 		const c = this.find(query);
 		if (c.hasNext()) {
 			const doc = c.next();
+			const originalDoc = JSON.parse(JSON.stringify(doc));
 			this.updateIndexesOnDelete(doc);
 			applyUpdates(updates, doc);
 			this.storage.set(doc._id.toString(), doc);
 			this.updateIndexesOnInsert(doc);
+			const updateDescription = this._getUpdateDescription(originalDoc, doc);
+			this.emit('update', doc, updateDescription);
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
 				this.storage.set(newDoc._id.toString(), newDoc);
 				this.updateIndexesOnInsert(newDoc);
+				this.emit('insert', newDoc);
 			}
 		}
 	}
@@ -825,21 +838,66 @@ export class Collection {
 		if (c.hasNext()) {
 			while (c.hasNext()) {
 				const doc = c.next();
+				const originalDoc = JSON.parse(JSON.stringify(doc));
 				this.updateIndexesOnDelete(doc);
 				applyUpdates(updates, doc);
 				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
+				const updateDescription = this._getUpdateDescription(originalDoc, doc);
+				this.emit('update', doc, updateDescription);
 			}
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
 				this.storage.set(newDoc._id.toString(), newDoc);
 				this.updateIndexesOnInsert(newDoc);
+				this.emit('insert', newDoc);
 			}
 		}
 	}
 
 	validate() { throw "Not Implemented"; }
+
+	/**
+	 * Generate updateDescription for change events
+	 * Compares original and updated documents to track changes
+	 */
+	_getUpdateDescription(originalDoc, updatedDoc) {
+		const updatedFields = {};
+		const removedFields = [];
+
+		// Find updated and new fields
+		for (const key in updatedDoc) {
+			if (key === '_id') continue;
+			if (JSON.stringify(originalDoc[key]) !== JSON.stringify(updatedDoc[key])) {
+				updatedFields[key] = updatedDoc[key];
+			}
+		}
+
+		// Find removed fields
+		for (const key in originalDoc) {
+			if (key === '_id') continue;
+			if (!(key in updatedDoc)) {
+				removedFields.push(key);
+			}
+		}
+
+		return {
+			updatedFields,
+			removedFields,
+			truncatedArrays: [] // Not implemented in micro-mongo
+		};
+	}
+
+	/**
+	 * Watch for changes to this collection
+	 * @param {Array} pipeline - Aggregation pipeline to filter changes
+	 * @param {Object} options - Watch options (fullDocument, etc.)
+	 * @returns {ChangeStream} A change stream instance
+	 */
+	watch(pipeline = [], options = {}) {
+		return new ChangeStream(this, pipeline, options);
+	}
 
 }
 

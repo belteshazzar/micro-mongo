@@ -114,7 +114,6 @@ export class GeospatialCollectionIndex extends Index {
 	 * @returns {Array|null} Array of document IDs or null if query is not a geospatial query
 	 */
 	query(query) {
-    console.log("GeospatialCollectionIndex query", query);
 		// Check if this is a geospatial query on our indexed field
 		if (!query[this.geoField]) {
 			return null;

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { DB } from './DB.js';
+import { ChangeStream } from './ChangeStream.js';
 
 export class MongoClient extends EventEmitter {
   constructor(uri = 'mongodb://localhost:27017', options = {}) {
@@ -69,6 +70,16 @@ export class MongoClient extends EventEmitter {
   get readConcern() { return this.options.readConcern; }
   get writeConcern() { return this.options.writeConcern; }
   get readPreference() { return this.options.readPreference; }
+
+  /**
+   * Watch for changes across all databases and collections
+   * @param {Array} pipeline - Aggregation pipeline to filter changes
+   * @param {Object} options - Watch options
+   * @returns {ChangeStream} A change stream instance
+   */
+  watch(pipeline = [], options = {}) {
+    return new ChangeStream(this, pipeline, options);
+  }
 
   _parseDefaultDbName(uri) {
     // Parse mongodb://host:port/dbname format
