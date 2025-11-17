@@ -31,19 +31,55 @@ export class Cursor {
 			});
 		}
 	}		this.pos = 0;
-		this.max = 0;
+		this._limit = 0;
+		this._skip = 0;
+		this._closed = false;
 	}
 
-	batchSize() { throw new NotImplementedError('batchSize'); }
-	close() { throw new NotImplementedError('close'); }
-	comment() { throw new NotImplementedError('comment'); }
+	batchSize(size) { 
+		// No-op for in-memory database, but return this for chaining
+		this._batchSize = size;
+		return this;
+	}
+	close() {
+		this._closed = true;
+		this.pos = this.documents.length; // Move to end
+		return undefined;
+	}
+	comment(commentString) {
+		this._comment = commentString;
+		return this;
+	}
 	
 	count() {
 		// Return total count without considering skip/limit applied to this cursor
 		return this.documents.length;
 	}
 	
-	explain() { throw new NotImplementedError('explain'); }
+	explain(verbosity = 'queryPlanner') {
+		// Return basic query execution info
+		return {
+			queryPlanner: {
+				plannerVersion: 1,
+				namespace: `${this.collection.db?.name || 'db'}.${this.collection.name}`,
+				indexFilterSet: false,
+				parsedQuery: this.query,
+				winningPlan: {
+					stage: 'COLLSCAN',
+					filter: this.query,
+					direction: 'forward'
+				}
+			},
+			executionStats: verbosity === 'executionStats' || verbosity === 'allPlansExecution' ? {
+				executionSuccess: true,
+				nReturned: this.documents.length,
+				executionTimeMillis: 0,
+				totalKeysExamined: 0,
+				totalDocsExamined: this.documents.length
+			} : undefined,
+			ok: 1
+		};
+	}
 	
 	async forEach(fn) {
 		while (this.hasNext()) {
@@ -52,15 +88,33 @@ export class Cursor {
 	}
 	
 	hasNext() {
-		const effectiveMax = this.max > 0 ? Math.min(this.max, this.documents.length) : this.documents.length;
+		if (this._closed) return false;
+		// Calculate effective max position: skip + limit or total docs
+		let effectiveMax;
+		if (this._limit > 0) {
+			effectiveMax = Math.min(this._skip + this._limit, this.documents.length);
+		} else {
+			effectiveMax = this.documents.length;
+		}
 		return this.pos < effectiveMax;
 	}
 	
-	hint() { throw new NotImplementedError('hint'); }
-	itcount() { throw new NotImplementedError('itcount'); }
+	hint(index) {
+		// Store hint for query planner (informational in micro-mongo)
+		this._hint = index;
+		return this;
+	}
+	itcount() {
+		let count = 0;
+		while (this.hasNext()) {
+			this.next();
+			count++;
+		}
+		return count;
+	}
 	
 	limit(_max) {
-		this.max = _max;
+		this._limit = _max;
 		return this;
 	}
 	
@@ -72,10 +126,26 @@ export class Cursor {
 		return results;
 	}
 	
-	maxScan() { throw new NotImplementedError('maxScan'); }
-	maxTimeMS() { throw new NotImplementedError('maxTimeMS'); }
-	max() { throw new NotImplementedError('max'); }
-	min() { throw new NotImplementedError('min'); }
+	maxScan(maxScan) {
+		// Set maximum number of documents to scan (deprecated in MongoDB 4.0)
+		this._maxScan = maxScan;
+		return this;
+	}
+	maxTimeMS(ms) {
+		// Set maximum execution time (informational in micro-mongo)
+		this._maxTimeMS = ms;
+		return this;
+	}
+	max(indexBounds) {
+		// Set maximum index bound (informational in micro-mongo)
+		this._maxIndexBounds = indexBounds;
+		return this;
+	}
+	min(indexBounds) {
+		// Set minimum index bound (informational in micro-mongo)
+		this._minIndexBounds = indexBounds;
+		return this;
+	}
 	
 	next() {
 		if (!this.hasNext()) {
@@ -90,24 +160,81 @@ export class Cursor {
 		return result;
 	}
 	
-	noCursorTimeout() { throw new NotImplementedError('noCursorTimeout'); }
-	objsLeftInBatch() { throw new NotImplementedError('objsLeftInBatch'); }
-	pretty() { throw new NotImplementedError('pretty'); }
-	readConcern() { throw new NotImplementedError('readConcern'); }
-	readPref() { throw new NotImplementedError('readPref'); }
-	returnKey() { throw new NotImplementedError('returnKey'); }
-	showRecordId() { throw new NotImplementedError('showRecordId'); }
-	size() { throw new NotImplementedError('size'); }
+	noCursorTimeout() {
+		// Prevent cursor timeout (no-op for in-memory)
+		this._noCursorTimeout = true;
+		return this;
+	}
+	objsLeftInBatch() {
+		// Return number of objects left in current batch
+		// For in-memory, this is same as remaining documents
+		return this.size();
+	}
+	pretty() {
+		// Enable pretty printing (no-op but return this for chaining)
+		this._pretty = true;
+		return this;
+	}
+	readConcern(level) {
+		// Set read concern (no-op for in-memory database)
+		this._readConcern = level;
+		return this;
+	}
+	readPref(mode, tagSet) {
+		// Set read preference (no-op for in-memory database)
+		this._readPref = { mode, tagSet };
+		return this;
+	}
+	returnKey(enabled = true) {
+		// Return only the index key (informational in micro-mongo)
+		this._returnKey = enabled;
+		return this;
+	}
+	showRecordId(enabled = true) {
+		// Show record ID in results
+		this._showRecordId = enabled;
+		return this;
+	}
+	size() {
+		// Return count considering skip and limit
+		const remaining = this.documents.length - this.pos;
+		if (this._limit > 0) {
+			// Calculate how many docs left based on skip+limit boundary
+			const maxPos = this._skip + this._limit;
+			return Math.min(maxPos - this.pos, remaining);
+		}
+		return remaining;
+	}
 	
 	skip(num) {
-		this.pos = Math.min(this.pos + num, this.documents.length);
+		this._skip = num;
+		// Move initial position to skip point
+		if (this.pos === 0) {
+			this.pos = Math.min(num, this.documents.length);
+		}
 		return this;
+	}
+	
+	isClosed() {
+		return this._closed === true;
 	}
 	
 	snapshot() { throw new NotImplementedError('snapshot'); }
 	
 	sort(s) {
 		return new this.SortedCursor(this.collection, this.query, this, s);
+	}
+	
+	allowDiskUse(enabled = true) {
+		// Allow disk use for sorts (no-op for in-memory)
+		this._allowDiskUse = enabled;
+		return this;
+	}
+	
+	collation(collationDocument) {
+		// Set collation (no-op for micro-mongo)
+		this._collation = collationDocument;
+		return this;
 	}
 	
 	tailable() { throw new NotImplementedError('tailable'); }
