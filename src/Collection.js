@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { Cursor } from './Cursor.js';
 import { SortedCursor } from './SortedCursor.js';
 import { isArray, getProp, applyProjection, copy } from './utils.js';
-import { matches } from './queryMatcher.js';
+import { matches, matchWithArrayIndices } from './queryMatcher.js';
 import { applyUpdates, createDocFromUpdate } from './updates.js';
 import { RegularCollectionIndex } from './RegularCollectionIndex.js';
 import { TextCollectionIndex } from './TextCollectionIndex.js';
@@ -1534,7 +1534,12 @@ return results;
 		if (!c.hasNext()) return null;
 		const doc = c.next();
 		const clone = Object.assign({}, doc);
-		applyUpdates(update, clone);
+		
+		// Get array filter information for positional operator support
+		const matchInfo = matchWithArrayIndices(doc, filter);
+		const arrayFilters = matchInfo.arrayFilters;
+		
+		applyUpdates(update, clone, false, arrayFilters);
 		this.storage.set(doc._id.toString(), clone);
 		if (options && options.returnNewDocument) {
 			if (options && options.projection) return applyProjection(options.projection, clone);
@@ -1649,15 +1654,25 @@ return results;
 			if (options && options.multi) {
 				while (c.hasNext()) {
 					const doc = c.next();
+					
+					// Get array filter information for positional operator support
+					const matchInfo = matchWithArrayIndices(doc, query);
+					const arrayFilters = matchInfo.arrayFilters;
+					
 					this.updateIndexesOnDelete(doc);
-					applyUpdates(updates, doc);
+					applyUpdates(updates, doc, false, arrayFilters);
 					this.storage.set(doc._id.toString(), doc);
 					this.updateIndexesOnInsert(doc);
 				}
 			} else {
 				const doc = c.next();
+				
+				// Get array filter information for positional operator support
+				const matchInfo = matchWithArrayIndices(doc, query);
+				const arrayFilters = matchInfo.arrayFilters;
+				
 				this.updateIndexesOnDelete(doc);
-				applyUpdates(updates, doc);
+				applyUpdates(updates, doc, false, arrayFilters);
 				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
 			}
@@ -1675,8 +1690,13 @@ return results;
 		if (c.hasNext()) {
 			const doc = c.next();
 			const originalDoc = JSON.parse(JSON.stringify(doc));
+			
+			// Get array filter information for positional operator support
+			const matchInfo = matchWithArrayIndices(doc, query);
+			const arrayFilters = matchInfo.arrayFilters;
+			
 			this.updateIndexesOnDelete(doc);
-			applyUpdates(updates, doc);
+			applyUpdates(updates, doc, false, arrayFilters);
 			this.storage.set(doc._id.toString(), doc);
 			this.updateIndexesOnInsert(doc);
 			const updateDescription = this._getUpdateDescription(originalDoc, doc);
@@ -1697,8 +1717,13 @@ return results;
 			while (c.hasNext()) {
 				const doc = c.next();
 				const originalDoc = JSON.parse(JSON.stringify(doc));
+				
+				// Get array filter information for positional operator support
+				const matchInfo = matchWithArrayIndices(doc, query);
+				const arrayFilters = matchInfo.arrayFilters;
+				
 				this.updateIndexesOnDelete(doc);
-				applyUpdates(updates, doc);
+				applyUpdates(updates, doc, false, arrayFilters);
 				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
 				const updateDescription = this._getUpdateDescription(originalDoc, doc);

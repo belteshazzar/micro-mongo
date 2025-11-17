@@ -5,9 +5,61 @@
 import { setProp, getProp } from './utils.js';
 
 /**
- * Apply update operators to a document
+ * Replace $ positional operator in a field path with the matched array index
+ * 
+ * @param {string} fieldPath - The field path potentially containing $
+ * @param {object} arrayFilters - Map of field paths to matched array indices
+ * @returns {string} The field path with $ replaced by the matched index
  */
-export function applyUpdates(updates, doc, setOnInsert) {
+function replacePositionalOperator(fieldPath, arrayFilters) {
+	if (!arrayFilters || !fieldPath.includes('$')) {
+		return fieldPath;
+	}
+	
+	// Split the path to find the $ placeholder
+	const parts = fieldPath.split('.');
+	const dollarIndex = parts.indexOf('$');
+	
+	if (dollarIndex === -1) {
+		return fieldPath;
+	}
+	
+	// Build the field path up to the $
+	const pathBeforeDollar = parts.slice(0, dollarIndex).join('.');
+	
+	// Find the matched index for this field path
+	// We need to check if we have a match for the field before $
+	let matchedIndex = null;
+	
+	// Try to find a matching filter by checking various possible field paths
+	// The query could be on the array itself or a nested field
+	for (const filterPath in arrayFilters) {
+		// Check if the filter path matches the beginning of our field path
+		if (filterPath === pathBeforeDollar || filterPath.startsWith(pathBeforeDollar + '.')) {
+			matchedIndex = arrayFilters[filterPath];
+			break;
+		}
+	}
+	
+	// If we found a matched index, replace $ with it
+	if (matchedIndex !== null && matchedIndex !== undefined) {
+		parts[dollarIndex] = matchedIndex.toString();
+		return parts.join('.');
+	}
+	
+	// If no matched index found, return original path (update will likely be a no-op)
+	return fieldPath;
+}
+
+/**
+ * Apply update operators to a document
+ * 
+ * @param {object} updates - The update operators to apply
+ * @param {object} doc - The document to update
+ * @param {boolean} setOnInsert - Whether to apply $setOnInsert
+ * @param {object} arrayFilters - Optional map of field paths to matched array indices for $ operator
+ */
+export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 	var keys = Object.keys(updates);
 	for (var i = 0; i < keys.length; i++) {
 		var key = keys[i];
@@ -15,8 +67,8 @@ export function applyUpdates(updates, doc, setOnInsert) {
 		if (key == "$inc") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var amount = value[field];
+				var field = replacePositionalOperator(fields[j], arrayFilters);
+				var amount = value[fields[j]];
 				var currentValue = getProp(doc, field);
 				if (currentValue == undefined) currentValue = 0;
 				setProp(doc, field, currentValue + amount);
@@ -24,28 +76,29 @@ export function applyUpdates(updates, doc, setOnInsert) {
 		} else if (key == "$mul") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var amount = value[field];
+				var field = replacePositionalOperator(fields[j], arrayFilters);
+				var amount = value[fields[j]];
 				doc[field] = doc[field] * amount;
 			}
 		} else if (key == "$rename") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var newName = value[field];
+				var field = replacePositionalOperator(fields[j], arrayFilters);
+				var newName = replacePositionalOperator(value[fields[j]], arrayFilters);
 				doc[newName] = doc[field];
 				delete doc[field];
 			}
 		} else if (key == "$setOnInsert" && setOnInsert) {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				doc[fields[j]] = value[fields[j]];
+				var field = replacePositionalOperator(fields[j], arrayFilters);
+				doc[field] = value[fields[j]];
 			}
 		} else if (key == "$set") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				setProp(doc, field, value[field]);
+				var field = replacePositionalOperator(fields[j], arrayFilters);
+				setProp(doc, field, value[fields[j]]);
 			}
 		} else if (key == "$unset") {
 			var fields = Object.keys(value);
