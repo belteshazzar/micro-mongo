@@ -1070,6 +1070,54 @@ describe("DB", function() {
 				if (!doc.now) throw "now should have been set to date";
 			});
 
+			it('should testUpdate_Op_CurrentDate with boolean true', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 1 });
+				await db[collectionName].updateOne({test: 'currentDate'}, { $currentDate: { timestamp: true } });
+				var doc = await db[collectionName].findOne({test: 'currentDate'});
+				expect(doc.timestamp).to.be.instanceOf(Date);
+			});
+
+			it('should testUpdate_Op_CurrentDate with $type date', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 2 });
+				await db[collectionName].updateOne({test: 'currentDate', value: 2}, { $currentDate: { dateField: { $type: 'date' } } });
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 2});
+				expect(doc.dateField).to.be.instanceOf(Date);
+			});
+
+			it('should testUpdate_Op_CurrentDate with $type timestamp', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 3 });
+				await db[collectionName].updateOne({test: 'currentDate', value: 3}, { $currentDate: { timestampField: { $type: 'timestamp' } } });
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 3});
+				expect(doc.timestampField).to.be.instanceOf(mongo.Timestamp);
+				expect(doc.timestampField.high).to.be.greaterThan(0);
+			});
+
+			it('should testUpdate_Op_CurrentDate with multiple fields', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 4 });
+				await db[collectionName].updateOne(
+					{test: 'currentDate', value: 4}, 
+					{ $currentDate: { 
+						dateField: { $type: 'date' },
+						timestampField: { $type: 'timestamp' },
+						boolField: true
+					}}
+				);
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 4});
+				expect(doc.dateField).to.be.instanceOf(Date);
+				expect(doc.timestampField).to.be.instanceOf(mongo.Timestamp);
+				expect(doc.boolField).to.be.instanceOf(Date);
+			});
+
+			it('should testUpdate_Op_CurrentDate with dot notation', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 5, nested: {} });
+				await db[collectionName].updateOne(
+					{test: 'currentDate', value: 5}, 
+					{ $currentDate: { 'nested.timestamp': { $type: 'timestamp' } }}
+				);
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 5});
+				expect(doc.nested.timestamp).to.be.instanceOf(mongo.Timestamp);
+			});
+
 			it('should testUpdate_Op_AddToSet', async function() {
 				await db[collectionName].insert({ me: 7, nums: [3] });
 				var orig = await db[collectionName].findOne({me:7});
