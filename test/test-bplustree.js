@@ -32,7 +32,7 @@ describe('BPlusTree', function() {
         it('should add a single key-value pair', function() {
             tree.add(10, 'ten');
             expect(tree.size()).to.equal(1);
-            expect(tree.search(10)).to.equal('ten');
+            expect(tree.search(10)).to.deep.equal(['ten']);
         });
 
         it('should add multiple key-value pairs', function() {
@@ -42,10 +42,10 @@ describe('BPlusTree', function() {
             tree.add(15, 'fifteen');
 
             expect(tree.size()).to.equal(4);
-            expect(tree.search(10)).to.equal('ten');
-            expect(tree.search(20)).to.equal('twenty');
-            expect(tree.search(5)).to.equal('five');
-            expect(tree.search(15)).to.equal('fifteen');
+            expect(tree.search(10)).to.deep.equal(['ten']);
+            expect(tree.search(20)).to.deep.equal(['twenty']);
+            expect(tree.search(5)).to.deep.equal(['five']);
+            expect(tree.search(15)).to.deep.equal(['fifteen']);
         });
 
         it('should return undefined for non-existent keys', function() {
@@ -61,7 +61,7 @@ describe('BPlusTree', function() {
 
             expect(tree.size()).to.equal(10);
             for (let i = 1; i <= 10; i++) {
-                expect(tree.search(i)).to.equal(`value${i}`);
+                expect(tree.search(i)).to.deep.equal([`value${i}`]);
             }
         });
 
@@ -72,7 +72,7 @@ describe('BPlusTree', function() {
 
             expect(tree.size()).to.equal(10);
             for (let i = 1; i <= 10; i++) {
-                expect(tree.search(i)).to.equal(`value${i}`);
+                expect(tree.search(i)).to.deep.equal([`value${i}`]);
             }
         });
 
@@ -82,19 +82,19 @@ describe('BPlusTree', function() {
 
             expect(tree.size()).to.equal(10);
             keys.forEach(key => {
-                expect(tree.search(key)).to.equal(`value${key}`);
+                expect(tree.search(key)).to.deep.equal([`value${key}`]);
             });
         });
 
-        it('should handle adding duplicate keys (update value)', function() {
+        it('should handle adding duplicate keys (multiple values)', function() {
             tree.add(10, 'ten');
             tree.add(10, 'TEN');
             
-            // When a duplicate key is added, it should update the value
+            // When a duplicate key is added, it should add to values array
             const result = tree.search(10);
-            expect(result).to.equal('TEN');
-            // Size should still be 1 since we updated, not added
-            expect(tree.size()).to.equal(1);
+            expect(result).to.deep.equal(['ten', 'TEN']);
+            // Size should be 2 since we added both values
+            expect(tree.size()).to.equal(2);
         });
 
 
@@ -103,9 +103,9 @@ describe('BPlusTree', function() {
             tree.add('banana', 2);
             tree.add('cherry', 3);
 
-            expect(tree.search('apple')).to.equal(1);
-            expect(tree.search('banana')).to.equal(2);
-            expect(tree.search('cherry')).to.equal(3);
+            expect(tree.search('apple')).to.deep.equal([1]);
+            expect(tree.search('banana')).to.deep.equal([2]);
+            expect(tree.search('cherry')).to.deep.equal([3]);
         });
 
         it('should handle large number of insertions', function() {
@@ -116,7 +116,7 @@ describe('BPlusTree', function() {
 
             expect(tree.size()).to.equal(count);
             for (let i = 0; i < count; i++) {
-                expect(tree.search(i)).to.equal(`value${i}`);
+                expect(tree.search(i)).to.deep.equal([`value${i}`]);
             }
         });
     });
@@ -143,8 +143,8 @@ describe('BPlusTree', function() {
             expect(tree.delete(10)).to.be.true;
             expect(tree.size()).to.equal(2);
             expect(tree.search(10)).to.be.undefined;
-            expect(tree.search(20)).to.equal('twenty');
-            expect(tree.search(5)).to.equal('five');
+            expect(tree.search(20)).to.deep.equal(['twenty']);
+            expect(tree.search(5)).to.deep.equal(['five']);
         });
 
         it('should return false when deleting non-existent key', function() {
@@ -180,7 +180,7 @@ describe('BPlusTree', function() {
 
             // Verify remaining elements
             for (let i = 1; i < count; i += 2) {
-                expect(tree.search(i)).to.equal(`value${i}`);
+                expect(tree.search(i)).to.deep.equal([`value${i}`]);
             }
         });
     });
@@ -304,10 +304,10 @@ describe('BPlusTree', function() {
             tree.add(0, 'zero');
             tree.add(5, 'positive five');
 
-            expect(tree.search(-5)).to.equal('negative five');
-            expect(tree.search(-10)).to.equal('negative ten');
-            expect(tree.search(0)).to.equal('zero');
-            expect(tree.search(5)).to.equal('positive five');
+            expect(tree.search(-5)).to.deep.equal(['negative five']);
+            expect(tree.search(-10)).to.deep.equal(['negative ten']);
+            expect(tree.search(0)).to.deep.equal(['zero']);
+            expect(tree.search(5)).to.deep.equal(['positive five']);
         });
 
         it('should handle floating point numbers', function() {
@@ -316,9 +316,9 @@ describe('BPlusTree', function() {
             tree.add(2.7, 'two point seven');
             tree.add(3.2, 'three point two');
 
-            expect(tree.search(1.5)).to.equal('one point five');
-            expect(tree.search(2.7)).to.equal('two point seven');
-            expect(tree.search(3.2)).to.equal('three point two');
+            expect(tree.search(1.5)).to.deep.equal(['one point five']);
+            expect(tree.search(2.7)).to.deep.equal(['two point seven']);
+            expect(tree.search(3.2)).to.deep.equal(['three point two']);
         });
 
         it('should handle complex object values', function() {
@@ -329,8 +329,8 @@ describe('BPlusTree', function() {
             tree.add(1, obj1);
             tree.add(2, obj2);
 
-            expect(tree.search(1)).to.deep.equal(obj1);
-            expect(tree.search(2)).to.deep.equal(obj2);
+            expect(tree.search(1)).to.deep.equal([obj1]);
+            expect(tree.search(2)).to.deep.equal([obj2]);
         });
 
         it('should maintain tree properties with higher order', function() {
@@ -341,7 +341,7 @@ describe('BPlusTree', function() {
 
             expect(tree.size()).to.equal(50);
             for (let i = 1; i <= 50; i++) {
-                expect(tree.search(i)).to.equal(`value${i}`);
+                expect(tree.search(i)).to.deep.equal([`value${i}`]);
             }
         });
     });
@@ -364,7 +364,7 @@ describe('BPlusTree', function() {
             // Verify remaining
             expect(tree.size()).to.equal(operations / 2);
             for (let i = operations / 2; i < operations; i++) {
-                expect(tree.search(i)).to.equal(`value${i}`);
+                expect(tree.search(i)).to.deep.equal([`value${i}`]);
             }
         });
 
@@ -382,6 +382,171 @@ describe('BPlusTree', function() {
 
             const result = tree.toArray();
             expect(result.map(r => r.key)).to.deep.equal([1, 2, 7, 9]);
+        });
+    });
+
+    describe('Multiple Values Per Key', function() {
+        let tree;
+
+        beforeEach(function() {
+            tree = new BPlusTree(3);
+        });
+
+        it('should store multiple values with the same key', function() {
+            tree.add(10, 'value1');
+            tree.add(10, 'value2');
+            tree.add(10, 'value3');
+
+            const values = tree.search(10);
+            expect(values).to.be.an('array');
+            expect(values).to.have.lengthOf(3);
+            expect(values).to.include('value1');
+            expect(values).to.include('value2');
+            expect(values).to.include('value3');
+        });
+
+        it('should maintain insertion order for multiple values', function() {
+            tree.add(10, 'first');
+            tree.add(10, 'second');
+            tree.add(10, 'third');
+
+            const values = tree.search(10);
+            expect(values).to.deep.equal(['first', 'second', 'third']);
+        });
+
+        it('should handle mixed single and multiple values', function() {
+            tree.add(5, 'single');
+            tree.add(10, 'multiple1');
+            tree.add(10, 'multiple2');
+            tree.add(15, 'another single');
+
+            expect(tree.search(5)).to.deep.equal(['single']);
+            expect(tree.search(10)).to.deep.equal(['multiple1', 'multiple2']);
+            expect(tree.search(15)).to.deep.equal(['another single']);
+        });
+
+        it('should remove a specific value from multiple values with same key', function() {
+            tree.add(10, 'value1');
+            tree.add(10, 'value2');
+            tree.add(10, 'value3');
+
+            const removed = tree.deleteValue(10, 'value2');
+            expect(removed).to.be.true;
+
+            const values = tree.search(10);
+            expect(values).to.have.lengthOf(2);
+            expect(values).to.deep.equal(['value1', 'value3']);
+        });
+
+        it('should remove key when last value is deleted', function() {
+            tree.add(10, 'value1');
+            tree.add(10, 'value2');
+
+            tree.deleteValue(10, 'value1');
+            tree.deleteValue(10, 'value2');
+
+            expect(tree.search(10)).to.be.undefined;
+            expect(tree.size()).to.equal(0);
+        });
+
+        it('should return false when trying to delete non-existent value', function() {
+            tree.add(10, 'value1');
+            tree.add(10, 'value2');
+
+            const removed = tree.deleteValue(10, 'value3');
+            expect(removed).to.be.false;
+
+            const values = tree.search(10);
+            expect(values).to.have.lengthOf(2);
+        });
+
+        it('should delete all values for a key with delete()', function() {
+            tree.add(10, 'value1');
+            tree.add(10, 'value2');
+            tree.add(10, 'value3');
+            tree.add(20, 'other');
+
+            tree.delete(10);
+
+            expect(tree.search(10)).to.be.undefined;
+            expect(tree.search(20)).to.deep.equal(['other']);
+            expect(tree.size()).to.equal(1);
+        });
+
+        it('should handle duplicate values for same key', function() {
+            tree.add(10, 'duplicate');
+            tree.add(10, 'duplicate');
+            tree.add(10, 'unique');
+
+            const values = tree.search(10);
+            expect(values).to.have.lengthOf(3);
+            expect(values).to.deep.equal(['duplicate', 'duplicate', 'unique']);
+
+            // Remove only first occurrence
+            tree.deleteValue(10, 'duplicate');
+            const remaining = tree.search(10);
+            expect(remaining).to.have.lengthOf(2);
+            expect(remaining).to.deep.equal(['duplicate', 'unique']);
+        });
+
+        it('should correctly report size with multiple values per key', function() {
+            tree.add(10, 'a');
+            tree.add(10, 'b');
+            tree.add(20, 'c');
+            tree.add(20, 'd');
+            tree.add(20, 'e');
+
+            // Size should count total key-value pairs
+            expect(tree.size()).to.equal(5);
+        });
+
+        it('should handle toArray with multiple values per key', function() {
+            tree.add(5, 'a');
+            tree.add(10, 'b');
+            tree.add(10, 'c');
+            tree.add(15, 'd');
+
+            const result = tree.toArray();
+            expect(result).to.have.lengthOf(4);
+            expect(result).to.deep.equal([
+                {key: 5, value: 'a'},
+                {key: 10, value: 'b'},
+                {key: 10, value: 'c'},
+                {key: 15, value: 'd'}
+            ]);
+        });
+
+        it('should handle rangeSearch with multiple values per key', function() {
+            tree.add(5, 'a1');
+            tree.add(5, 'a2');
+            tree.add(10, 'b');
+            tree.add(15, 'c1');
+            tree.add(15, 'c2');
+            tree.add(15, 'c3');
+
+            const result = tree.rangeSearch(5, 15);
+            expect(result).to.have.lengthOf(6);
+            expect(result.map(r => r.value)).to.deep.equal(['a1', 'a2', 'b', 'c1', 'c2', 'c3']);
+        });
+
+        it('should work correctly with complex values', function() {
+            const obj1 = {id: 1, name: 'Alice'};
+            const obj2 = {id: 2, name: 'Bob'};
+            const obj3 = {id: 3, name: 'Charlie'};
+
+            tree.add(10, obj1);
+            tree.add(10, obj2);
+            tree.add(10, obj3);
+
+            const values = tree.search(10);
+            expect(values).to.have.lengthOf(3);
+            expect(values).to.deep.equal([obj1, obj2, obj3]);
+
+            // Delete by object reference
+            tree.deleteValue(10, obj2);
+            const remaining = tree.search(10);
+            expect(remaining).to.have.lengthOf(2);
+            expect(remaining).to.deep.equal([obj1, obj3]);
         });
     });
 });

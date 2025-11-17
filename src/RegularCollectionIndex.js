@@ -46,19 +46,9 @@ export class RegularCollectionIndex extends Index {
 	 * @param {Object} doc - The document to index
 	 */
 	add(doc) {
-
-    console.log(`Adding document with _id '${doc._id}' to index '${this.name}'...`);
-
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
-			// Get existing array or create new one
-			let idArray = this.data.search(indexKey);
-			if (!idArray) {
-				idArray = [];
-			}
-			idArray.push(doc._id);
-			this.data.add(indexKey, idArray);
-      console.log(`Document with _id '${doc._id}' added to index '${this.name}'.`); 
+			this.data.add(indexKey, doc._id);
 		}
 	}
 
@@ -70,18 +60,7 @@ export class RegularCollectionIndex extends Index {
 	remove(doc) {
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
-			const idArray = this.data.search(indexKey);
-			if (idArray) {
-				const idx = idArray.indexOf(doc._id);
-				if (idx !== -1) {
-					idArray.splice(idx, 1);
-				}
-				if (idArray.length === 0) {
-					this.data.delete(indexKey);
-				} else {
-					this.data.add(indexKey, idArray);
-				}
-			}
+      this.data.delete(indexKey, doc._id);
 		}
 	}
 
@@ -112,8 +91,9 @@ export class RegularCollectionIndex extends Index {
 		// Case 1: Simple equality
 		if (typeof queryValue !== 'object' || queryValue === null) {
 			const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
-			const result = this.data.search(indexKey);
-			return result || [];
+			const searchResult = this.data.search(indexKey);
+			// BPlusTree returns array of values, get the first one which is our ID array
+			return searchResult ? searchResult[0] : [];
 		}
 
 		// Case 2: Query with operators
@@ -167,7 +147,8 @@ export class RegularCollectionIndex extends Index {
 						if (ops.includes('$lte') && !(keyValue <= operators['$lte'])) matches = false;
 						
 						if (matches && value) {
-							value.forEach(id => results.add(id));
+							// value is now a single document ID (from the flattened array)
+							results.add(value);
 						}
 					} catch (e) {
 						// Skip malformed entries
@@ -195,7 +176,8 @@ export class RegularCollectionIndex extends Index {
 						}
 						
 						if (matches && value) {
-							value.forEach(id => results.add(id));
+							// value is now a single document ID (from the flattened array)
+							results.add(value);
 						}
 					} catch (e) {
 						// Skip malformed entries
@@ -235,7 +217,8 @@ export class RegularCollectionIndex extends Index {
 			const allEntries = this.data.toArray();
 			for (const {key, value} of allEntries) {
 				if (key !== excludeKey && value) {
-					value.forEach(id => results.add(id));
+					// value is now a single document ID (from the flattened array)
+					results.add(value);
 				}
 			}
 			return Array.from(results);

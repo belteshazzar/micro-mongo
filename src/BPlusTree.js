@@ -35,8 +35,8 @@ class BPlusTreeNode {
       // Load existing node from indexStore
       this._data = isLeaf;
       this.id = this._data.id;
-      this.keys = [...this._data.keys];
-      this.values = this._data.isLeaf ? [...this._data.values] : [];
+      this.keys = this._data.keys;
+      this.values = this._data.values;
       this.children = [];
       for (const childId of this._data.children) {
         if (nodeCache.has(childId)) {
@@ -78,8 +78,8 @@ class BPlusTreeNode {
       indexStore.setMeta('nextId', this._data.id + 1);
       indexStore.getDataMap('nodes').set(this._data.id, this._data);
       this.id = this._data.id;
-      this.keys = [...this._data.keys];
-      this.values = [...this._data.values];
+      this.keys = this._data.keys;
+      this.values = this._data.values;
       this.children = [];
       this.isLeaf = this._data.isLeaf;
       this.next = null;
@@ -220,7 +220,7 @@ export class BPlusTree {
     /**
      * Searches for a value by key in the B+ tree
      * @param {*} key - The key to search for
-     * @returns {*} The value associated with the key, or undefined if not found
+     * @returns {Array} Array of values associated with the key, or undefined if not found
      */
     search(key) {
         return this._searchNode(this.root, key);
@@ -231,17 +231,19 @@ export class BPlusTree {
      * @private
      * @param {BPlusTreeNode} node - The node to search in
      * @param {*} key - The key to search for
-     * @returns {*} The value if found, undefined otherwise
+     * @returns {Array} Array of values if found, undefined otherwise
      */
     _searchNode(node, key) {
         if (node.isLeaf) {
-            // In a leaf node, check if we found the exact key
+            // In a leaf node, collect all values for the key
+            const values = [];
             for (let i = 0; i < node.keys.length; i++) {
                 if (key === node.keys[i]) {
-                    return node.values[i];
+                    // Values are stored as arrays, concatenate them
+                    values.push(...node.values[i]);
                 }
             }
-            return undefined;
+            return values.length > 0 ? values : undefined;
         } else {
             // In an internal node, find the appropriate child
             // Keys in internal nodes are separators - go right if key >= separator
@@ -285,10 +287,11 @@ export class BPlusTree {
         let i = node.keys.length - 1;
 
         if (node.isLeaf) {
-            // Check if key already exists and update its value
+            // Check if key already exists and append value
             for (let j = 0; j < node.keys.length; j++) {
                 if (node.keys[j] === key) {
-                    node.values[j] = value;
+                    // Key exists, append value to array
+                    node.values[j].push(value);
                     return;
                 }
             }
@@ -304,10 +307,7 @@ export class BPlusTree {
             }
 
             node.keys[i + 1] = key;
-            node.values[i + 1] = value;
-
-            console.log(`Inserted key '${key}', value '${value}' into leaf node.`);
-            console.dir(node);
+            node.values[i + 1] = [value]; // Store as array
 
         } else {
             // Find the child to insert into
@@ -366,7 +366,27 @@ export class BPlusTree {
     }
 
     /**
-     * Deletes a key from the B+ tree
+     * Deletes a specific value from a key in the B+ tree
+     * @param {*} key - The key to delete from
+     * @param {*} value - The specific value to remove
+     * @returns {boolean} True if the value was found and deleted, false otherwise
+     */
+    deleteValue(key, value) {
+        const deleted = this._deleteValue(this.root, key, value);
+
+        // If root is now empty after deletion, make its only child the new root
+        if (this.root.keys.length === 0) {
+            if (!this.root.isLeaf && this.root.children.length > 0) {
+                this.root = this.root.children[0];
+                this.indexStore.setMeta('rootId', this.root.id);
+            }
+        }
+
+        return deleted;
+    }
+
+    /**
+     * Deletes all values for a key from the B+ tree
      * @param {*} key - The key to delete
      * @returns {boolean} True if the key was found and deleted, false otherwise
      */
@@ -382,6 +402,56 @@ export class BPlusTree {
         }
 
         return deleted;
+    }
+
+    /**
+     * Internal method to delete a specific value from a key
+     * @private
+     * @param {BPlusTreeNode} node - The node to delete from
+     * @param {*} key - The key to delete from
+     * @param {*} value - The value to delete
+     * @returns {boolean} True if deleted, false otherwise
+     */
+    _deleteValue(node, key, value) {
+        if (node.isLeaf) {
+            // Found the key in a leaf node
+            for (let i = 0; i < node.keys.length; i++) {
+                if (key === node.keys[i]) {
+                    const values = node.values[i];
+                    const valueIndex = values.indexOf(value);
+                    if (valueIndex === -1) {
+                        return false; // Value not found
+                    }
+                    
+                    // Remove the specific value
+                    values.splice(valueIndex, 1);
+                    
+                    // If no values left, remove the key entirely
+                    if (values.length === 0) {
+                        node.keys.splice(i, 1);
+                        node.values.splice(i, 1);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            // Find the appropriate child to delete from
+            let i = 0;
+            while (i < node.keys.length && key >= node.keys[i]) {
+                i++;
+            }
+
+            // Recursively delete from the appropriate child
+            const deleted = this._deleteValue(node.children[i], key, value);
+
+            if (deleted) {
+                // After deletion, check if child needs rebalancing
+                this._rebalanceAfterDelete(node, i);
+            }
+
+            return deleted;
+        }
     }
 
     /**
@@ -553,10 +623,14 @@ export class BPlusTree {
 
         while (current) {
             for (let i = 0; i < current.keys.length; i++) {
-                result.push({
-                    key: current.keys[i],
-                    value: current.values[i]
-                });
+                // Each key can have multiple values
+                const values = current.values[i];
+                for (let j = 0; j < values.length; j++) {
+                    result.push({
+                        key: current.keys[i],
+                        value: values[j]
+                    });
+                }
             }
             current = current.next;
         }
@@ -586,7 +660,10 @@ export class BPlusTree {
         let current = this._getFirstLeaf(this.root);
 
         while (current) {
-            count += current.keys.length;
+            // Count all values (each key can have multiple values)
+            for (let i = 0; i < current.values.length; i++) {
+                count += current.values[i].length;
+            }
             current = current.next;
         }
 
@@ -629,10 +706,14 @@ export class BPlusTree {
         while (current) {
             for (let i = 0; i < current.keys.length; i++) {
                 if (current.keys[i] >= minKey && current.keys[i] <= maxKey) {
-                    result.push({
-                        key: current.keys[i],
-                        value: current.values[i]
-                    });
+                    // Each key can have multiple values
+                    const values = current.values[i];
+                    for (let j = 0; j < values.length; j++) {
+                        result.push({
+                            key: current.keys[i],
+                            value: values[j]
+                        });
+                    }
                 } else if (current.keys[i] > maxKey) {
                     return result;
                 }
