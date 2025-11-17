@@ -48,7 +48,7 @@ export class RegularCollectionIndex extends Index {
 	add(doc) {
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
-			this.data.add(indexKey, doc._id);
+			this.data.add(indexKey, doc._id.toString());
 		}
 	}
 
@@ -60,7 +60,7 @@ export class RegularCollectionIndex extends Index {
 	remove(doc) {
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
-      this.data.delete(indexKey, doc._id);
+      this.data.delete(indexKey, doc._id.toString());
 		}
 	}
 
