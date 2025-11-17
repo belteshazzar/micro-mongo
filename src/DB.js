@@ -2,6 +2,7 @@ import { Collection } from './Collection.js';
 import { StorageEngine } from './StorageEngine.js';
 import { ObjectId } from './ObjectId.js';
 import { ChangeStream } from './ChangeStream.js';
+import { NotImplementedError } from './errors.js';
 
 /**
  * DB class
@@ -81,10 +82,10 @@ export class DB {
 	}
 
 	// DB Methods
-	cloneCollection() { throw "Not Implemented"; }
-	cloneDatabase() { throw "Not Implemented"; }
-	commandHelp() { throw "Not Implemented"; }
-	copyDatabase() { throw "Not Implemented"; }
+	cloneCollection() { throw new NotImplementedError('cloneCollection', { database: this.dbName }); }
+	cloneDatabase() { throw new NotImplementedError('cloneDatabase', { database: this.dbName }); }
+	commandHelp() { throw new NotImplementedError('commandHelp', { database: this.dbName }); }
+	copyDatabase() { throw new NotImplementedError('copyDatabase', { database: this.dbName }); }
 
 	createCollection(name) {
 		if (!name) return;
@@ -114,7 +115,7 @@ export class DB {
 		return this[name];
 	}
 
-	currentOp() { throw "Not Implemented"; }
+	currentOp() { throw new NotImplementedError('currentOp', { database: this.dbName }); }
 
 	dropDatabase() {
 		// Get all collection names
@@ -129,11 +130,11 @@ export class DB {
 		}
 	}
 
-	eval() { throw "Not Implemented"; }
-	fsyncLock() { throw "Not Implemented"; }
-	fsyncUnlock() { throw "Not Implemented"; }
-	getCollection() { throw "Not Implemented"; }
-	getCollectionInfos() { throw "Not Implemented"; }
+	eval() { throw new NotImplementedError('eval', { database: this.dbName }); }
+	fsyncLock() { throw new NotImplementedError('fsyncLock', { database: this.dbName }); }
+	fsyncUnlock() { throw new NotImplementedError('fsyncUnlock', { database: this.dbName }); }
+	getCollection() { throw new NotImplementedError('getCollection', { database: this.dbName }); }
+	getCollectionInfos() { throw new NotImplementedError('getCollectionInfos', { database: this.dbName }); }
 
 	getCollectionNames() {
 		const names = [];
@@ -145,16 +146,16 @@ export class DB {
 		return names;
 	}
 
-	getLastError() { throw "Not Implemented"; }
-	getLastErrorObj() { throw "Not Implemented"; }
-	getLogComponents() { throw "Not Implemented"; }
-	getMongo() { throw "Not Implemented"; }
-	getName() { throw "Not Implemented"; }
-	getPrevError() { throw "Not Implemented"; }
-	getProfilingLevel() { throw "Not Implemented"; }
-	getProfilingStatus() { throw "Not Implemented"; }
-	getReplicationInfo() { throw "Not Implemented"; }
-	getSiblingDB() { throw "Not Implemented"; }
+	getLastError() { throw new NotImplementedError('getLastError', { database: this.dbName }); }
+	getLastErrorObj() { throw new NotImplementedError('getLastErrorObj', { database: this.dbName }); }
+	getLogComponents() { throw new NotImplementedError('getLogComponents', { database: this.dbName }); }
+	getMongo() { throw new NotImplementedError('getMongo', { database: this.dbName }); }
+	getName() { throw new NotImplementedError('getName', { database: this.dbName }); }
+	getPrevError() { throw new NotImplementedError('getPrevError', { database: this.dbName }); }
+	getProfilingLevel() { throw new NotImplementedError('getProfilingLevel', { database: this.dbName }); }
+	getProfilingStatus() { throw new NotImplementedError('getProfilingStatus', { database: this.dbName }); }
+	getReplicationInfo() { throw new NotImplementedError('getReplicationInfo', { database: this.dbName }); }
+	getSiblingDB() { throw new NotImplementedError('getSiblingDB', { database: this.dbName }); }
 
 	help() {
 		this._log("        help mr                      mapreduce");
@@ -163,29 +164,29 @@ export class DB {
 		this._log("        it                           result of the last line evaluated; use to further iterate");
 	}
 
-	hostInfo() { throw "Not Implemented"; }
-	isMaster() { throw "Not Implemented"; }
-	killOp() { throw "Not Implemented"; }
-	listCommands() { throw "Not Implemented"; }
-	loadServerScripts() { throw "Not Implemented"; }
-	logout() { throw "Not Implemented"; }
-	printCollectionStats() { throw "Not Implemented"; }
-	printReplicationInfo() { throw "Not Implemented"; }
-	printShardingStatus() { throw "Not Implemented"; }
-	printSlaveReplicationInfo() { throw "Not Implemented"; }
-	repairDatabase() { throw "Not Implemented"; }
-	resetError() { throw "Not Implemented"; }
-	runCommand() { throw "Not Implemented"; }
-	serverBuildInfo() { throw "Not Implemented"; }
-	serverCmdLineOpts() { throw "Not Implemented"; }
-	serverStatus() { throw "Not Implemented"; }
-	setLogLevel() { throw "Not Implemented"; }
-	setProfilingLevel() { throw "Not Implemented"; }
-	shutdownServer() { throw "Not Implemented"; }
-	stats() { throw "Not Implemented"; }
-	version() { throw "Not Implemented"; }
-	upgradeCheck() { throw "Not Implemented"; }
-	upgradeCheckAllDBs() { throw "Not Implemented"; }
+	hostInfo() { throw new NotImplementedError('hostInfo', { database: this.dbName }); }
+	isMaster() { throw new NotImplementedError('isMaster', { database: this.dbName }); }
+	killOp() { throw new NotImplementedError('killOp', { database: this.dbName }); }
+	listCommands() { throw new NotImplementedError('listCommands', { database: this.dbName }); }
+	loadServerScripts() { throw new NotImplementedError('loadServerScripts', { database: this.dbName }); }
+	logout() { throw new NotImplementedError('logout', { database: this.dbName }); }
+	printCollectionStats() { throw new NotImplementedError('printCollectionStats', { database: this.dbName }); }
+	printReplicationInfo() { throw new NotImplementedError('printReplicationInfo', { database: this.dbName }); }
+	printShardingStatus() { throw new NotImplementedError('printShardingStatus', { database: this.dbName }); }
+	printSlaveReplicationInfo() { throw new NotImplementedError('printSlaveReplicationInfo', { database: this.dbName }); }
+	repairDatabase() { throw new NotImplementedError('repairDatabase', { database: this.dbName }); }
+	resetError() { throw new NotImplementedError('resetError', { database: this.dbName }); }
+	runCommand() { throw new NotImplementedError('runCommand', { database: this.dbName }); }
+	serverBuildInfo() { throw new NotImplementedError('serverBuildInfo', { database: this.dbName }); }
+	serverCmdLineOpts() { throw new NotImplementedError('serverCmdLineOpts', { database: this.dbName }); }
+	serverStatus() { throw new NotImplementedError('serverStatus', { database: this.dbName }); }
+	setLogLevel() { throw new NotImplementedError('setLogLevel', { database: this.dbName }); }
+	setProfilingLevel() { throw new NotImplementedError('setProfilingLevel', { database: this.dbName }); }
+	shutdownServer() { throw new NotImplementedError('shutdownServer', { database: this.dbName }); }
+	stats() { throw new NotImplementedError('stats', { database: this.dbName }); }
+	version() { throw new NotImplementedError('version', { database: this.dbName }); }
+	upgradeCheck() { throw new NotImplementedError('upgradeCheck', { database: this.dbName }); }
+	upgradeCheckAllDBs() { throw new NotImplementedError('upgradeCheckAllDBs', { database: this.dbName }); }
 
 	/**
 	 * Watch for changes across all collections in this database

@@ -1,4 +1,5 @@
 import { applyProjection } from './utils.js';
+import { NotImplementedError, QueryError, ErrorCodes } from './errors.js';
 
 /**
  * Cursor class for iterating over query results
@@ -19,29 +20,30 @@ export class Cursor {
 			let hasExclusion = false;
 			for (let i = 0; i < keys.length; i++) {
 				if (keys[i] === '_id') continue; // _id is special
-				if (projection[keys[i]]) hasInclusion = true;
-				else hasExclusion = true;
-			}
-			
-			if (hasInclusion && hasExclusion) {
-				throw { $err: "Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.", code: 17287 };
-			}
+			if (projection[keys[i]]) hasInclusion = true;
+			else hasExclusion = true;
 		}
 		
-		this.pos = 0;
+		if (hasInclusion && hasExclusion) {
+			throw new QueryError("Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.", { 
+				code: ErrorCodes.FAILED_TO_PARSE,
+				collection: collection.name 
+			});
+		}
+	}		this.pos = 0;
 		this.max = 0;
 	}
 
-	batchSize() { throw "Not Implemented"; }
-	close() { throw "Not Implemented"; }
-	comment() { throw "Not Implemented"; }
+	batchSize() { throw new NotImplementedError('batchSize'); }
+	close() { throw new NotImplementedError('close'); }
+	comment() { throw new NotImplementedError('comment'); }
 	
 	count() {
 		// Return total count without considering skip/limit applied to this cursor
 		return this.documents.length;
 	}
 	
-	explain() { throw "Not Implemented"; }
+	explain() { throw new NotImplementedError('explain'); }
 	
 	async forEach(fn) {
 		while (this.hasNext()) {
@@ -54,8 +56,8 @@ export class Cursor {
 		return this.pos < effectiveMax;
 	}
 	
-	hint() { throw "Not Implemented"; }
-	itcount() { throw "Not Implemented"; }
+	hint() { throw new NotImplementedError('hint'); }
+	itcount() { throw new NotImplementedError('itcount'); }
 	
 	limit(_max) {
 		this.max = _max;
@@ -70,14 +72,16 @@ export class Cursor {
 		return results;
 	}
 	
-	maxScan() { throw "Not Implemented"; }
-	maxTimeMS() { throw "Not Implemented"; }
-	max() { throw "Not Implemented"; }
-	min() { throw "Not Implemented"; }
+	maxScan() { throw new NotImplementedError('maxScan'); }
+	maxTimeMS() { throw new NotImplementedError('maxTimeMS'); }
+	max() { throw new NotImplementedError('max'); }
+	min() { throw new NotImplementedError('min'); }
 	
 	next() {
 		if (!this.hasNext()) {
-			throw "Error: error hasNext: false";
+			throw new QueryError("Error: error hasNext: false", { 
+				collection: this.collection.name 
+			});
 		}
 		const result = this.documents[this.pos++];
 		if (this.projection) {
@@ -86,27 +90,27 @@ export class Cursor {
 		return result;
 	}
 	
-	noCursorTimeout() { throw "Not Implemented"; }
-	objsLeftInBatch() { throw "Not Implemented"; }
-	pretty() { throw "Not Implemented"; }
-	readConcern() { throw "Not Implemented"; }
-	readPref() { throw "Not Implemented"; }
-	returnKey() { throw "Not Implemented"; }
-	showRecordId() { throw "Not Implemented"; }
-	size() { throw "Not Implemented"; }
+	noCursorTimeout() { throw new NotImplementedError('noCursorTimeout'); }
+	objsLeftInBatch() { throw new NotImplementedError('objsLeftInBatch'); }
+	pretty() { throw new NotImplementedError('pretty'); }
+	readConcern() { throw new NotImplementedError('readConcern'); }
+	readPref() { throw new NotImplementedError('readPref'); }
+	returnKey() { throw new NotImplementedError('returnKey'); }
+	showRecordId() { throw new NotImplementedError('showRecordId'); }
+	size() { throw new NotImplementedError('size'); }
 	
 	skip(num) {
 		this.pos = Math.min(this.pos + num, this.documents.length);
 		return this;
 	}
 	
-	snapshot() { throw "Not Implemented"; }
+	snapshot() { throw new NotImplementedError('snapshot'); }
 	
 	sort(s) {
 		return new this.SortedCursor(this.collection, this.query, this, s);
 	}
 	
-	tailable() { throw "Not Implemented"; }
+	tailable() { throw new NotImplementedError('tailable'); }
 	
 	async toArray() {
 		const results = [];

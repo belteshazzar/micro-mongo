@@ -10,6 +10,14 @@ import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
 import { QueryPlanner } from './QueryPlanner.js';
 import { evaluateExpression } from './aggregationExpressions.js';
 import { ChangeStream } from './ChangeStream.js';
+import { 
+	NotImplementedError, 
+	QueryError, 
+	BadValueError, 
+	IndexError, 
+	IndexNotFoundError,
+	ErrorCodes 
+} from './errors.js';
 
 /**
  * Collection class
@@ -164,7 +172,10 @@ export class Collection extends EventEmitter {
 	// Collection methods
 	aggregate(pipeline) {
 		if (!pipeline || !isArray(pipeline)) {
-			throw { $err: "Pipeline must be an array", code: 17287 };
+			throw new QueryError('Pipeline must be an array', { 
+				collection: this.name, 
+				code: ErrorCodes.FAILED_TO_PARSE 
+			});
 		}
 
 		// Start with all documents
@@ -179,7 +190,10 @@ export class Collection extends EventEmitter {
 			const stage = pipeline[i];
 			const stageKeys = Object.keys(stage);
 			if (stageKeys.length !== 1) {
-				throw { $err: "Each pipeline stage must have exactly one key", code: 17287 };
+				throw new QueryError('Each pipeline stage must have exactly one key', { 
+					collection: this.name, 
+					code: ErrorCodes.FAILED_TO_PARSE 
+				});
 			}
 			const stageType = stageKeys[0];
 			const stageSpec = stage[stageType];
@@ -455,23 +469,24 @@ export class Collection extends EventEmitter {
 									target[parts[l]] = {};
 								}
 								target = target[parts[l]];
-							}
-							target[parts[parts.length - 1]] = arr[k];
-							unwound.push(unwoundDoc);
-						}
-					}
-					// MongoDB's default behavior: skip documents where field is missing, null, empty array, or not an array
-				}
-				results = unwound;
-			} else {
-				throw { $err: "Unsupported aggregation stage: " + stageType, code: 17287 };
 			}
+			target[parts[parts.length - 1]] = arr[k];
+			unwound.push(unwoundDoc);
 		}
-
-		return results;
 	}
+	// MongoDB's default behavior: skip documents where field is missing, null, empty array, or not an array
+}
+results = unwound;
+} else {
+	throw new QueryError('Unsupported aggregation stage: ' + stageType, { 
+		collection: this.name, 
+		code: ErrorCodes.FAILED_TO_PARSE 
+	});
+}
+}
 
-	bulkWrite() { throw "Not Implemented"; }
+return results;
+}	bulkWrite() { throw new NotImplementedError('bulkWrite', { collection: this.name }); }
 
 	async count() {
 		return this.storage.size();
@@ -497,7 +512,9 @@ export class Collection extends EventEmitter {
 		// options: { name: "indexName", unique: true, ... }
 
 		if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
-			throw { $err: "createIndex requires a key specification object", code: 2 };
+			throw new BadValueError('keys', keys, 'createIndex requires a key specification object', { 
+				collection: this.name 
+			});
 		}
 
 		const indexName = (options && options.name) ? options.name : this.generateIndexName(keys);
@@ -509,7 +526,14 @@ export class Collection extends EventEmitter {
 			const existingKeys = JSON.stringify(existingIndex.keys);
 			const newKeys = JSON.stringify(keys);
 			if (existingKeys !== newKeys) {
-				throw { $err: "Index with name '" + indexName + "' already exists with a different key specification", code: 85 };
+				throw new IndexError(
+					"Index with name '" + indexName + "' already exists with a different key specification", 
+					{ 
+						code: ErrorCodes.INDEX_OPTIONS_CONFLICT,
+						index: indexName, 
+						collection: this.name 
+					}
+				);
 			}
 			// Same index, return without error
 			return indexName;
@@ -521,7 +545,7 @@ export class Collection extends EventEmitter {
 		return indexName;
 	}
 
-	dataSize() { throw "Not Implemented"; }
+	dataSize() { throw new NotImplementedError('dataSize', { collection: this.name }); }
 
 	async deleteOne(query) {
 		const doc = await this.findOne(query);
@@ -575,7 +599,7 @@ export class Collection extends EventEmitter {
 
 	dropIndex(indexName) {
 		if (!this.indexes.has(indexName)) {
-			throw { $err: "Index not found with name: " + indexName, code: 27 };
+			throw new IndexNotFoundError(indexName, { collection: this.name });
 		}
 		this.indexes.get(indexName).clear();
 		this.indexes.delete(indexName);
@@ -590,8 +614,8 @@ export class Collection extends EventEmitter {
 		this.indexes.clear();
 		return { nIndexesWas: count, msg: "non-_id indexes dropped", ok: 1 };
 	}
-	ensureIndex() { throw "Not Implemented"; }
-	explain() { throw "Not Implemented"; }
+	ensureIndex() { throw new NotImplementedError('ensureIndex', { collection: this.name }); }
+	explain() { throw new NotImplementedError('explain', { collection: this.name }); }
 
 	find(query, projection) {
 		const normalizedQuery = query == undefined ? {} : query;
@@ -633,7 +657,7 @@ export class Collection extends EventEmitter {
 		);
 	}
 
-	findAndModify() { throw "Not Implemented"; }
+	findAndModify() { throw new NotImplementedError('findAndModify', { collection: this.name }); }
 
 	async findOne(query, projection) {
 		const cursor = this.find(query, projection);
@@ -696,15 +720,15 @@ export class Collection extends EventEmitter {
 		return result;
 	}
 
-	getShardDistribution() { throw "Not Implemented"; }
-	getShardVersion() { throw "Not Implemented"; }
+	getShardDistribution() { throw new NotImplementedError('getShardDistribution', { collection: this.name }); }
+	getShardVersion() { throw new NotImplementedError('getShardVersion', { collection: this.name }); }
 
 	// non-mongo
 	getStore() {
 		return this.storage.getStore();
 	}
 
-	group() { throw "Not Implemented"; }
+	group() { throw new NotImplementedError('group', { collection: this.name }); }
 
 	async insert(doc) {
 		if (Array == doc.constructor) {
@@ -731,9 +755,9 @@ export class Collection extends EventEmitter {
 		return { insertedIds: insertedIds };
 	}
 
-	isCapped() { throw "Not Implemented"; }
-	mapReduce() { throw "Not Implemented"; }
-	reIndex() { throw "Not Implemented"; }
+	isCapped() { throw new NotImplementedError('isCapped', { collection: this.name }); }
+	mapReduce() { throw new NotImplementedError('mapReduce', { collection: this.name }); }
+	reIndex() { throw new NotImplementedError('reIndex', { collection: this.name }); }
 
 	async replaceOne(query, replacement, options) { // only replace
 		// first
@@ -778,12 +802,12 @@ export class Collection extends EventEmitter {
 		}
 	}
 
-	renameCollection() { throw "Not Implemented"; }
-	save() { throw "Not Implemented"; }
-	stats() { throw "Not Implemented"; }
-	storageSize() { throw "Not Implemented"; }
-	totalSize() { throw "Not Implemented"; }
-	totalIndexSize() { throw "Not Implemented"; }
+	renameCollection() { throw new NotImplementedError('renameCollection', { collection: this.name }); }
+	save() { throw new NotImplementedError('save', { collection: this.name }); }
+	stats() { throw new NotImplementedError('stats', { collection: this.name }); }
+	storageSize() { throw new NotImplementedError('storageSize', { collection: this.name }); }
+	totalSize() { throw new NotImplementedError('totalSize', { collection: this.name }); }
+	totalIndexSize() { throw new NotImplementedError('totalIndexSize', { collection: this.name }); }
 
 	update(query, updates, options) {
 		const c = this.find(query);
@@ -856,7 +880,7 @@ export class Collection extends EventEmitter {
 		}
 	}
 
-	validate() { throw "Not Implemented"; }
+	validate() { throw new NotImplementedError('validate', { collection: this.name }); }
 
 	/**
 	 * Generate updateDescription for change events
