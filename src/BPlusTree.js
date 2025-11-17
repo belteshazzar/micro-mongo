@@ -243,7 +243,7 @@ export class BPlusTree {
                     values.push(...node.values[i]);
                 }
             }
-            return values.length > 0 ? values : undefined;
+            return values;//values.length > 0 ? values : undefined;
         } else {
             // In an internal node, find the appropriate child
             // Keys in internal nodes are separators - go right if key >= separator

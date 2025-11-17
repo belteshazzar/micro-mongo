@@ -50,8 +50,8 @@ describe('BPlusTree', function() {
 
         it('should return undefined for non-existent keys', function() {
             tree.add(10, 'ten');
-            expect(tree.search(20)).to.be.undefined;
-            expect(tree.search(5)).to.be.undefined;
+            expect(tree.search(20)).to.deep.equal([]);
+            expect(tree.search(5)).to.deep.equal([]);
         });
 
         it('should handle adding keys in ascending order', function() {
@@ -132,7 +132,7 @@ describe('BPlusTree', function() {
             tree.add(10, 'ten');
             expect(tree.delete(10)).to.be.true;
             expect(tree.size()).to.equal(0);
-            expect(tree.search(10)).to.be.undefined;
+            expect(tree.search(10)).to.deep.equal([]);
         });
 
         it('should delete a key from tree with multiple elements', function() {
@@ -142,7 +142,7 @@ describe('BPlusTree', function() {
 
             expect(tree.delete(10)).to.be.true;
             expect(tree.size()).to.equal(2);
-            expect(tree.search(10)).to.be.undefined;
+            expect(tree.search(10)).to.deep.equal([]);
             expect(tree.search(20)).to.deep.equal(['twenty']);
             expect(tree.search(5)).to.deep.equal(['five']);
         });
@@ -159,7 +159,7 @@ describe('BPlusTree', function() {
 
             keys.forEach(key => {
                 expect(tree.delete(key)).to.be.true;
-                expect(tree.search(key)).to.be.undefined;
+                expect(tree.search(key)).to.deep.equal([]);
             });
 
             expect(tree.isEmpty()).to.be.true;
@@ -445,7 +445,7 @@ describe('BPlusTree', function() {
             tree.deleteValue(10, 'value1');
             tree.deleteValue(10, 'value2');
 
-            expect(tree.search(10)).to.be.undefined;
+            expect(tree.search(10)).to.deep.equal([]);
             expect(tree.size()).to.equal(0);
         });
 
@@ -468,7 +468,7 @@ describe('BPlusTree', function() {
 
             tree.delete(10);
 
-            expect(tree.search(10)).to.be.undefined;
+            expect(tree.search(10)).to.deep.equal([]);
             expect(tree.search(20)).to.deep.equal(['other']);
             expect(tree.size()).to.equal(1);
         });

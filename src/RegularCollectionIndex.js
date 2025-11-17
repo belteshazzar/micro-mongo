@@ -26,7 +26,7 @@ export class RegularCollectionIndex extends Index {
 			const value = getProp(doc, field);
 			if (value === undefined) return null;
 			// Preserve type information in the key
-			return JSON.stringify({ t: typeof value, v: value });
+			return value; //JSON.stringify({ t: typeof value, v: value });
 		}
 
 		// For compound index, concatenate values with type preservation
@@ -34,7 +34,7 @@ export class RegularCollectionIndex extends Index {
 		for (let i = 0; i < keyFields.length; i++) {
 			const value = getProp(doc, keyFields[i]);
 			if (value === undefined) return null;
-			keyParts.push(JSON.stringify(value));
+			keyParts.push(value /*JSON.stringify(value) */);
 		}
 		// Use a separator that won't appear in JSON
 		return keyParts.join('\x00');
@@ -90,10 +90,8 @@ export class RegularCollectionIndex extends Index {
 
 		// Case 1: Simple equality
 		if (typeof queryValue !== 'object' || queryValue === null) {
-			const indexKey = JSON.stringify({ t: typeof queryValue, v: queryValue });
-			const searchResult = this.data.search(indexKey);
-			// BPlusTree returns array of values, get the first one which is our ID array
-			return searchResult ? searchResult[0] : [];
+			const indexKey = queryValue; //JSON.stringify({ t: typeof queryValue, v: queryValue });
+			return this.data.search(indexKey);
 		}
 
 		// Case 2: Query with operators
@@ -128,16 +126,16 @@ export class RegularCollectionIndex extends Index {
 				const maxValue = ops.includes('$lte') ? operators['$lte'] : 
 				                ops.includes('$lt') ? operators['$lt'] : Infinity;
 				
-				const minKey = JSON.stringify({ t: typeof minValue, v: minValue });
-				const maxKey = JSON.stringify({ t: typeof maxValue, v: maxValue });
+				const minKey = minValue; //JSON.stringify({ t: typeof minValue, v: minValue });
+				const maxKey = maxValue; //JSON.stringify({ t: typeof maxValue, v: maxValue });
 				
 				// Use B+ tree range search
 				const rangeResults = this.data.rangeSearch(minKey, maxKey);
 				
 				for (const {key, value} of rangeResults) {
 					try {
-						const parsed = JSON.parse(key);
-						const keyValue = parsed.v;
+						//const parsed = JSON.parse(key);
+						const keyValue = key; //parsed.v;
 						
 						// Apply exact operator semantics
 						let matches = true;
@@ -160,8 +158,8 @@ export class RegularCollectionIndex extends Index {
 				const allEntries = this.data.toArray();
 				for (const {key, value} of allEntries) {
 					try {
-						const parsed = JSON.parse(key);
-						const keyValue = parsed.v;
+						//const parsed = JSON.parse(key);
+						const keyValue = key; //parsed.v;
 						
 						// Check if value matches all operators
 						let matches = true;
@@ -192,7 +190,7 @@ export class RegularCollectionIndex extends Index {
 			const values = operators['$in'];
 			if (Array.isArray(values)) {
 				for (const value of values) {
-					const indexKey = JSON.stringify({ t: typeof value, v: value });
+					const indexKey = value; //JSON.stringify({ t: typeof value, v: value });
 					const idArray = this.data.search(indexKey);
 					if (idArray) {
 						idArray.forEach(id => results.add(id));
@@ -205,7 +203,7 @@ export class RegularCollectionIndex extends Index {
 		// Handle $eq operator
 		if (ops.includes('$eq')) {
 			const value = operators['$eq'];
-			const indexKey = JSON.stringify({ t: typeof value, v: value });
+			const indexKey = value; //JSON.stringify({ t: typeof value, v: value });
 			const result = this.data.search(indexKey);
 			return result || [];
 		}
@@ -213,7 +211,7 @@ export class RegularCollectionIndex extends Index {
 		// Handle $ne operator (requires full scan, not optimal)
 		if (ops.includes('$ne')) {
 			const excludeValue = operators['$ne'];
-			const excludeKey = JSON.stringify({ t: typeof excludeValue, v: excludeValue });
+			const excludeKey = excludeValue; //JSON.stringify({ t: typeof excludeValue, v: excludeValue });
 			const allEntries = this.data.toArray();
 			for (const {key, value} of allEntries) {
 				if (key !== excludeKey && value) {
