@@ -27,31 +27,42 @@ export class IndexStore {
 		return this._meta.get(key);
 	}
 
-	clear() {
-		this._data.clear();
-	}
-
-  keys() {
-    return this._data.keys();
+  hasDataMap(name) {
+    return this._data.has(name);
   }
 
-  has(index) {
-    return this._data.has(index);
+  getDataMap(name) {
+    if (!this._data.has(name)) {
+      this._data.set(name, new Map());
+    }
+    return this._data.get(name);
   }
 
-	get(index) {
-		return this._data.get(index);
-	}
+	// clear() {
+	// 	this._data.clear();
+	// }
 
-	remove(key) {
-		this._data.delete(key);
-	}
+  // keys() {
+  //   return this._data.keys();
+  // }
 
-	set(key, value) {
-		this._data.set(key, value);
-	}
+  // has(index) {
+  //   return this._data.has(index);
+  // }
 
-	size() {
-		return this._data.size;
-	}
+	// get(index) {
+	// 	return this._data.get(index);
+	// }
+
+	// remove(key) {
+	// 	this._data.delete(key);
+	// }
+
+	// set(key, value) {
+	// 	this._data.set(key, value);
+	// }
+
+	// size() {
+	// 	return this._data.size;
+	// }
 }

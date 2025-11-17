@@ -43,7 +43,7 @@ class BPlusTreeNode {
           this.children.push(nodeCache.get(childId));
           continue;
         }
-        const childData = indexStore.get(childId);
+        const childData = indexStore.getDataMap('nodes').get(childId);
         if (!childData) {
           throw new Error(`BPlusTreeNode: Child node with id ${childId} not found in IndexStore`);
         }
@@ -56,7 +56,7 @@ class BPlusTreeNode {
         if (nodeCache.has(this._data.next)) {
           this.next = nodeCache.get(this._data.next);
         } else {
-          const nextData = indexStore.get(this._data.next);
+          const nextData = indexStore.getDataMap('nodes').get(this._data.next);
           if (!nextData) {
             throw new Error(`BPlusTreeNode: Next leaf node with id ${this._data.next} not found in IndexStore`);
           }
@@ -76,7 +76,7 @@ class BPlusTreeNode {
         next : null,    // Pointer to next leaf node (only used in leaf nodes)
       };
       indexStore.setMeta('nextId', this._data.id + 1);
-      indexStore.set(this._data.id, this._data);
+      indexStore.getDataMap('nodes').set(this._data.id, this._data);
       this.id = this._data.id;
       this.keys = [...this._data.keys];
       this.values = [...this._data.values];
@@ -99,7 +99,7 @@ class BPlusTreeNode {
                     if (args.length == 3) {
                       if (args[2] instanceof BPlusTreeNode) {
                         self._data.children.splice(args[0], args[1], args[2].id);
-                        indexStore.set(self._data.id, self._data);
+                        indexStore.getDataMap('nodes').set(self._data.id, self._data);
                       } else {
                         throw new Error('BPlusTreeNode: children array can only store BPlusTreeNode instances',args[2]);
                       }
@@ -113,7 +113,7 @@ class BPlusTreeNode {
                     }
                     if (args[0] instanceof BPlusTreeNode) {
                       self._data.children.push(args[0].id);
-                      indexStore.set(self._data.id, self._data);
+                      indexStore.getDataMap('nodes').set(self._data.id, self._data);
                       return self.children.push(args[0]);
                     } else {
                       throw new Error('BPlusTreeNode: children array can only store BPlusTreeNode instances',args[2]);
@@ -130,7 +130,7 @@ class BPlusTreeNode {
               } else {
                 Reflect.set(self._data.children, property, value, receiver);
               }
-              indexStore.set(self._data.id, self._data);
+              indexStore.getDataMap('nodes').set(self._data.id, self._data);
               return Reflect.set(target, property, value, receiver); // Forward the operation to the original array
             }
           });
@@ -142,26 +142,26 @@ class BPlusTreeNode {
             if (value instanceof BPlusTreeNode) {
               target.next = value;
               target._data.next = value.id;
-              indexStore.set(target._data.id, target._data);
+              indexStore.getDataMap('nodes').set(target._data.id, target._data);
             } else if (value === null) {
               target.next = null;
               target._data.next = null;
-              indexStore.set(target._data.id, target._data);
+              indexStore.getDataMap('nodes').set(target._data.id, target._data);
             } else {
               throw new Error('BPlusTreeNode: next pointer must be a BPlusTreeNode or null');
             }
           } else if (prop === 'isLeaf') {
             target.isLeaf = value;
             target._data.isLeaf = value;
-            indexStore.set(target._data.id, target._data);
+            indexStore.getDataMap('nodes').set(target._data.id, target._data);
           } else if (prop === 'children') {
             target.children = value;
             target._data.children = value.map(child => child.id);
-            indexStore.set(target._data.id, target._data);
+            indexStore.getDataMap('nodes').set(target._data.id, target._data);
           } else {
             target[prop] = value;
             target._data[prop] = value;
-            indexStore.set(target._data.id, target._data);
+            indexStore.getDataMap('nodes').set(target._data.id, target._data);
           }
         return true;
       }
@@ -210,7 +210,7 @@ export class BPlusTree {
    */
   _buildTreeFromStorage() {
     const nodeCache = new Map();
-    const rootData = this.indexStore.get(this.indexStore.getMeta('rootId'));
+    const rootData = this.indexStore.getDataMap('nodes').get(this.indexStore.getMeta('rootId'));
     if (!rootData) {
       throw new Error('BPlusTree: Root node not found in IndexStore');
     }
@@ -305,6 +305,10 @@ export class BPlusTree {
 
             node.keys[i + 1] = key;
             node.values[i + 1] = value;
+
+            console.log(`Inserted key '${key}', value '${value}' into leaf node.`);
+            console.dir(node);
+
         } else {
             // Find the child to insert into
             // In internal nodes, go right if key >= separator
@@ -601,7 +605,7 @@ export class BPlusTree {
      * Clears all entries from the tree
      */
     clear() {
-      this.indexStore.clear();
+      this.indexStore.getDataMap('nodes').clear();
       this.root = new BPlusTreeNode(true, this.indexStore);
       this.indexStore.setMeta('rootId', this.root.id);
     }

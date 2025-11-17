@@ -119,7 +119,7 @@ class RTreeNode {
       // internal nodes will have child node IDs
       if (!this.isLeaf) {
         for (const childId of this._data.children) {
-          const childData = indexStore.get(childId);
+          const childData = indexStore.getDataMap('nodes').get(childId);
           if (!childData) {
             throw new Error(`RTreeNode: Child node with id ${childId} not found in IndexStore`);
           }
@@ -138,7 +138,7 @@ class RTreeNode {
         bbox: null
       };
       indexStore.setMeta('nextId', this._data.id + 1);
-      indexStore.set(this._data.id, this._data);
+      indexStore.getDataMap('nodes').set(this._data.id, this._data);
       this.id = this._data.id;
       this.isLeaf = isLeaf;
       this.children = []; // For internal nodes: child nodes; For leaf nodes: data entries
@@ -156,7 +156,7 @@ class RTreeNode {
           } else {
             target._data.children = [...target.children];
           }
-          indexStore.set(target.id, target._data);
+          indexStore.getDataMap('nodes').set(target.id, target._data);
           return true;
         }
         target[prop] = value;
@@ -173,7 +173,7 @@ class RTreeNode {
               } else {
                 target._data.children = [...target.children];
               }
-              indexStore.set(target.id, target._data);
+              indexStore.getDataMap('nodes').set(target.id, target._data);
               return true;
             }
           });
@@ -205,7 +205,7 @@ class RTreeNode {
 
 		this.bbox = { minLat, maxLat, minLng, maxLng };
     this._data.bbox = Object.assign({}, this.bbox);
-    this.indexStore.set(this.id, this._data);
+    this.indexStore.getDataMap('nodes').set(this.id, this._data);
 	}
 }
 
@@ -227,7 +227,7 @@ export class RTree {
       }
 
       this._size = this.indexStore.getMeta('size');
-      this.root = new RTreeNode(this.indexStore.get(this.indexStore.getMeta('rootId')), this.indexStore);
+      this.root = new RTreeNode(this.indexStore.getDataMap('nodes').get(this.indexStore.getMeta('rootId')), this.indexStore);
     } else {
       this.indexStore.setMeta('maxEntries', this.maxEntries);
       this.indexStore.setMeta('minEntries', this.minEntries);

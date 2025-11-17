@@ -1,4 +1,5 @@
 import { stemmer } from 'stemmer';
+import { IndexStore } from './IndexStore.js';
 
 // Common English stop words that don't add semantic value to searches
 const STOPWORDS = new Set([
@@ -23,19 +24,17 @@ const STOPWORDS = new Set([
  * algorithm to normalize words to their root forms.
  */
 export class TextIndex {
-  constructor(options = {}) {
+  constructor(storage = new IndexStore()) {
+    // Storage for persistence
+    this.storage = storage;
     // Map from stemmed term to Map of document IDs to term frequency
     // Structure: term -> { docId: frequency }
-    this.index = new Map();
+    this.index = this.storage.getDataMap('index');
     // Map from document ID to Map of stemmed terms to their frequency
     // Structure: docId -> { term: frequency }
-    this.documentTerms = new Map();
+    this.documentTerms = this.storage.getDataMap('documentTerms');
     // Map from document ID to total term count (for normalization)
-    this.documentLengths = new Map();
-    // Stop words configuration
-    this.useStopWords = options.useStopWords !== false; // default: true
-    // Create a copy of STOPWORDS to avoid mutating the global set
-    this.stopWords = options.stopWords || new Set(STOPWORDS);
+    this.documentLengths = this.storage.getDataMap('documentLengths');
   }
 
   /**
@@ -52,12 +51,8 @@ export class TextIndex {
       .split(/\W+/)
       .filter(word => word.length > 0);
     
-    // Filter stop words if enabled
-    if (this.useStopWords) {
-      return words.filter(word => !this.stopWords.has(word));
-    }
-    
-    return words;
+    // Filter stop words
+    return words.filter(word => !STOPWORDS.has(word));
   }
 
   /**
@@ -251,109 +246,4 @@ export class TextIndex {
     this.documentLengths.clear();
   }
 
-  /**
-   * Add custom stop words
-   * @param {...string} words - Words to add to stop word list
-   * @returns {TextIndex} this for chaining
-   */
-  addStopWords(...words) {
-    words.forEach(word => this.stopWords.add(word.toLowerCase()));
-    return this;
-  }
-
-  /**
-   * Remove words from stop word list
-   * @param {...string} words - Words to remove from stop word list
-   * @returns {TextIndex} this for chaining
-   */
-  removeStopWords(...words) {
-    words.forEach(word => this.stopWords.delete(word.toLowerCase()));
-    return this;
-  }
-
-  /**
-   * Enable or disable stop word filtering
-   * @param {boolean} enabled - Whether to filter stop words
-   * @returns {TextIndex} this for chaining
-   */
-  setStopWordFiltering(enabled) {
-    this.useStopWords = enabled;
-    return this;
-  }
-
-  /**
-   * Serialize the text index state for storage
-   * @returns {Object} Serializable state
-   */
-  serialize() {
-    // Convert Maps to plain objects for JSON serialization
-    const indexObj = {};
-    this.index.forEach((docs, term) => {
-      const docsObj = {};
-      docs.forEach((freq, docId) => {
-        docsObj[docId] = freq;
-      });
-      indexObj[term] = docsObj;
-    });
-
-    const documentTermsObj = {};
-    this.documentTerms.forEach((terms, docId) => {
-      const termsObj = {};
-      terms.forEach((freq, term) => {
-        termsObj[term] = freq;
-      });
-      documentTermsObj[docId] = termsObj;
-    });
-
-    const documentLengthsObj = {};
-    this.documentLengths.forEach((length, docId) => {
-      documentLengthsObj[docId] = length;
-    });
-
-    return {
-      index: indexObj,
-      documentTerms: documentTermsObj,
-      documentLengths: documentLengthsObj,
-      useStopWords: this.useStopWords,
-      stopWords: Array.from(this.stopWords)
-    };
-  }
-
-  /**
-   * Restore the text index state from serialized data
-   * @param {Object} state - Serialized state
-   */
-  deserialize(state) {
-    // Restore index
-    this.index = new Map();
-    for (const term in state.index) {
-      const docs = new Map();
-      for (const docId in state.index[term]) {
-        docs.set(docId, state.index[term][docId]);
-      }
-      this.index.set(term, docs);
-    }
-
-    // Restore documentTerms
-    this.documentTerms = new Map();
-    for (const docId in state.documentTerms) {
-      const terms = new Map();
-      for (const term in state.documentTerms[docId]) {
-        terms.set(term, state.documentTerms[docId][term]);
-      }
-      this.documentTerms.set(docId, terms);
-    }
-
-    // Restore documentLengths
-    this.documentLengths = new Map();
-    for (const docId in state.documentLengths) {
-      this.documentLengths.set(docId, state.documentLengths[docId]);
-    }
-
-    // Restore settings
-    this.useStopWords = state.useStopWords !== false;
-    if (state.stopWords) {
-      this.stopWords = new Set(state.stopWords);
-    }
-  }
 }

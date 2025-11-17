@@ -10,7 +10,7 @@ export class GeospatialCollectionIndex extends Index {
 	constructor(name, keys, storage, options = {}) {
 		super(name, keys, storage, options);
 		// Create the underlying RTree
-		this.rtree = new RTree();
+		this.rtree = new RTree(9, storage);
 		// Track which field is the geospatial field
 		this.geoField = null;
 		for (const field in keys) {

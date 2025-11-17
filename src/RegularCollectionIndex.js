@@ -46,6 +46,9 @@ export class RegularCollectionIndex extends Index {
 	 * @param {Object} doc - The document to index
 	 */
 	add(doc) {
+
+    console.log(`Adding document with _id '${doc._id}' to index '${this.name}'...`);
+
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
 			// Get existing array or create new one
@@ -55,6 +58,7 @@ export class RegularCollectionIndex extends Index {
 			}
 			idArray.push(doc._id);
 			this.data.add(indexKey, idArray);
+      console.log(`Document with _id '${doc._id}' added to index '${this.name}'.`); 
 		}
 	}
 
@@ -245,33 +249,5 @@ export class RegularCollectionIndex extends Index {
 	 */
 	clear() {
 		this.data.clear();
-		// Clear storage
-		if (this.storage) {
-			this.storage.clear();
-		}
-	}
-
-	/**
-	 * Serialize index state for storage
-   * 
-	 * @returns {Object} Serializable index state
-	 */
-	serialize() {
-		// Data is already in IndexStore, no need to serialize separately
-		return {
-			type: 'regular',
-			keys: this.keys,
-			options: this.options
-		};
-	}
-
-	/**
-	 * Restore index state from serialized data
-   * 
-	 * @param {Object} state - Serialized index state
-	 */
-	deserialize(state) {
-		// Data is loaded from IndexStore in constructor
-		// This method is kept for compatibility but doesn't need to do anything
 	}
 }

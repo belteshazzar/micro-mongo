@@ -94,6 +94,7 @@ export class Collection {
 			index = new RegularCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
 		}
 
+    console.log(`Building index '${indexName}' on collection '${this.name}'...`);
 		// Build index by scanning all documents
 		const allDocs = this.storage.getAllDocuments();
 		for (const doc of allDocs) {
@@ -111,6 +112,7 @@ export class Collection {
 	 */
 	updateIndexesOnInsert(doc) {
 		for (const [indexName, index] of this.indexes) {
+      console.log(`Updating index '${indexName}' on collection '${this.name}' with new document...`);
 			index.add(doc);
 		}
 	}
