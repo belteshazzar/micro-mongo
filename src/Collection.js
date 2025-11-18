@@ -1537,9 +1537,10 @@ return results;
 		
 		// Get array filter information for positional operator support
 		const matchInfo = matchWithArrayIndices(doc, filter);
-		const arrayFilters = matchInfo.arrayFilters;
+		const positionalMatchInfo = matchInfo.arrayFilters;
+		const userArrayFilters = options && options.arrayFilters;
 		
-		applyUpdates(update, clone, false, arrayFilters);
+		applyUpdates(update, clone, false, positionalMatchInfo, userArrayFilters);
 		this.storage.set(doc._id.toString(), clone);
 		if (options && options.returnNewDocument) {
 			if (options && options.projection) return applyProjection(options.projection, clone);
@@ -1657,10 +1658,11 @@ return results;
 					
 					// Get array filter information for positional operator support
 					const matchInfo = matchWithArrayIndices(doc, query);
-					const arrayFilters = matchInfo.arrayFilters;
+					const positionalMatchInfo = matchInfo.arrayFilters;
+					const userArrayFilters = options && options.arrayFilters;
 					
 					this.updateIndexesOnDelete(doc);
-					applyUpdates(updates, doc, false, arrayFilters);
+					applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
 					this.storage.set(doc._id.toString(), doc);
 					this.updateIndexesOnInsert(doc);
 				}
@@ -1669,10 +1671,11 @@ return results;
 				
 				// Get array filter information for positional operator support
 				const matchInfo = matchWithArrayIndices(doc, query);
-				const arrayFilters = matchInfo.arrayFilters;
+				const positionalMatchInfo = matchInfo.arrayFilters;
+				const userArrayFilters = options && options.arrayFilters;
 				
 				this.updateIndexesOnDelete(doc);
-				applyUpdates(updates, doc, false, arrayFilters);
+				applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
 				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
 			}
@@ -1693,10 +1696,11 @@ return results;
 			
 			// Get array filter information for positional operator support
 			const matchInfo = matchWithArrayIndices(doc, query);
-			const arrayFilters = matchInfo.arrayFilters;
+			const positionalMatchInfo = matchInfo.arrayFilters;
+			const userArrayFilters = options && options.arrayFilters;
 			
 			this.updateIndexesOnDelete(doc);
-			applyUpdates(updates, doc, false, arrayFilters);
+			applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
 			this.storage.set(doc._id.toString(), doc);
 			this.updateIndexesOnInsert(doc);
 			const updateDescription = this._getUpdateDescription(originalDoc, doc);
@@ -1720,10 +1724,11 @@ return results;
 				
 				// Get array filter information for positional operator support
 				const matchInfo = matchWithArrayIndices(doc, query);
-				const arrayFilters = matchInfo.arrayFilters;
+				const positionalMatchInfo = matchInfo.arrayFilters;
+				const userArrayFilters = options && options.arrayFilters;
 				
 				this.updateIndexesOnDelete(doc);
-				applyUpdates(updates, doc, false, arrayFilters);
+				applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
 				this.storage.set(doc._id.toString(), doc);
 				this.updateIndexesOnInsert(doc);
 				const updateDescription = this._getUpdateDescription(originalDoc, doc);
