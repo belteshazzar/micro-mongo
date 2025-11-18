@@ -1307,6 +1307,80 @@ describe("DB", function() {
 				if (doc.nums[1]!=4) throw "[1] element should be 4";
 			});
 
+			it('should testUpdate_Op_AllPositional', async function() {
+				// Test $[] operator - update all array elements
+				await db[collectionName].insert({ 
+					me: 8, 
+					items: [
+						{ name: "apple", quantity: 5 },
+						{ name: "banana", quantity: 10 },
+						{ name: "cherry", quantity: 15 }
+					]
+				});
+				
+				// Update quantity of all items
+				db[collectionName].update({ me: 8 }, { $set: { "items.$[].quantity": 0 } });
+				var doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items.length != 3) throw "should have 3 items";
+				if (doc.items[0].quantity != 0) throw "items[0].quantity should be 0";
+				if (doc.items[1].quantity != 0) throw "items[1].quantity should be 0";
+				if (doc.items[2].quantity != 0) throw "items[2].quantity should be 0";
+				
+				// Test with $inc operator
+				db[collectionName].update({ me: 8 }, { $inc: { "items.$[].quantity": 5 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 5) throw "items[0].quantity should be 5";
+				if (doc.items[1].quantity != 5) throw "items[1].quantity should be 5";
+				if (doc.items[2].quantity != 5) throw "items[2].quantity should be 5";
+				
+				// Test with $mul operator
+				db[collectionName].update({ me: 8 }, { $mul: { "items.$[].quantity": 2 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 10) throw "items[0].quantity should be 10";
+				if (doc.items[1].quantity != 10) throw "items[1].quantity should be 10";
+				if (doc.items[2].quantity != 10) throw "items[2].quantity should be 10";
+				
+				// Test with $min operator
+				db[collectionName].update({ me: 8 }, { $min: { "items.$[].quantity": 7 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 7) throw "items[0].quantity should be 7";
+				if (doc.items[1].quantity != 7) throw "items[1].quantity should be 7";
+				if (doc.items[2].quantity != 7) throw "items[2].quantity should be 7";
+				
+				// Test with $max operator
+				db[collectionName].update({ me: 8 }, { $max: { "items.$[].quantity": 12 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 12) throw "items[0].quantity should be 12";
+				if (doc.items[1].quantity != 12) throw "items[1].quantity should be 12";
+				if (doc.items[2].quantity != 12) throw "items[2].quantity should be 12";
+				
+				// Test simple array update
+				await db[collectionName].insert({ me: 9, scores: [10, 20, 30] });
+				db[collectionName].update({ me: 9 }, { $set: { "scores.$[]": 100 } });
+				doc = await db[collectionName].findOne({ me: 9 });
+				if (doc.scores.length != 3) throw "should have 3 scores";
+				if (doc.scores[0] != 100) throw "scores[0] should be 100";
+				if (doc.scores[1] != 100) throw "scores[1] should be 100";
+				if (doc.scores[2] != 100) throw "scores[2] should be 100";
+				
+				// Test nested array update
+				await db[collectionName].insert({ 
+					me: 10, 
+					students: [
+						{ grades: [70, 80, 90] },
+						{ grades: [60, 75, 85] }
+					]
+				});
+				db[collectionName].update({ me: 10 }, { $inc: { "students.$[].grades.$[]": 5 } });
+				doc = await db[collectionName].findOne({ me: 10 });
+				if (doc.students[0].grades[0] != 75) throw "students[0].grades[0] should be 75";
+				if (doc.students[0].grades[1] != 85) throw "students[0].grades[1] should be 85";
+				if (doc.students[0].grades[2] != 95) throw "students[0].grades[2] should be 95";
+				if (doc.students[1].grades[0] != 65) throw "students[1].grades[0] should be 65";
+				if (doc.students[1].grades[1] != 80) throw "students[1].grades[1] should be 80";
+				if (doc.students[1].grades[2] != 90) throw "students[1].grades[2] should be 90";
+			});
+
 			it('should testUpdate_Op_Each', async function() {
 				await db[collectionName].insert({ me: 7, nums: [1, 2] });
 				await db[collectionName].update({me:7}, { $push: { nums: { $each: [3, 4, 5] } } });
