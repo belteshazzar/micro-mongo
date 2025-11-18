@@ -43,6 +43,7 @@ function objectEquals(a, b) {
 	
 	return true;
 }
+import { Timestamp } from './Timestamp.js';
 
 /**
  * Apply update operators to a document
@@ -106,10 +107,24 @@ export function applyUpdates(updates, doc, setOnInsert) {
 				var amount = value[field];
 				doc[field] = Math.max(doc[field], amount);
 			}
-		} else if (key == "$currentDate") {  // TODO not the same as mongo
+		} else if (key == "$currentDate") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				doc[fields[j]] = new Date();
+				var field = fields[j];
+				var typeSpec = value[field];
+				
+				// Handle boolean true or { $type: "date" }
+				if (typeSpec === true || (typeof typeSpec === 'object' && typeSpec.$type === 'date')) {
+					setProp(doc, field, new Date());
+				}
+				// Handle { $type: "timestamp" }
+				else if (typeof typeSpec === 'object' && typeSpec.$type === 'timestamp') {
+					setProp(doc, field, new Timestamp());
+				}
+				// Default to Date for backwards compatibility
+				else {
+					setProp(doc, field, new Date());
+				}
 			}
 		} else if (key == "$addToSet") {
 			var fields = Object.keys(value);
