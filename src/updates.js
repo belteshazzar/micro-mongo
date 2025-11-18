@@ -3,7 +3,47 @@
  */
 
 import { setProp, getProp } from './utils.js';
+import { opMatches, matches } from './queryMatcher.js';
 import { Timestamp } from './Timestamp.js';
+
+/**
+ * Deep equality check for objects
+ */
+function objectEquals(a, b) {
+	if (a === b) return true;
+	if (a == null || b == null) return false;
+	if (typeof a !== 'object' || typeof b !== 'object') return false;
+	
+	// Handle arrays
+	if (Array.isArray(a) && Array.isArray(b)) {
+		if (a.length !== b.length) return false;
+		for (var i = 0; i < a.length; i++) {
+			if (!objectEquals(a[i], b[i])) return false;
+		}
+		return true;
+	}
+	
+	// Handle dates
+	if (a instanceof Date && b instanceof Date) {
+		return a.getTime() === b.getTime();
+	}
+	
+	// One is array, the other is not
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	
+	var keysA = Object.keys(a);
+	var keysB = Object.keys(b);
+	
+	if (keysA.length !== keysB.length) return false;
+	
+	for (var i = 0; i < keysA.length; i++) {
+		var key = keysA[i];
+		if (!keysB.includes(key)) return false;
+		if (!objectEquals(a[key], b[key])) return false;
+	}
+	
+	return true;
+}
 
 /**
  * Apply update operators to a document
@@ -103,6 +143,43 @@ export function applyUpdates(updates, doc, setOnInsert) {
 				} else if (value == -1) {
 					doc[field].shift();
 				}
+			}
+		} else if (key == "$pull") {
+			var fields = Object.keys(value);
+			for (var j = 0; j < fields.length; j++) {
+				var field = fields[j];
+				var condition = value[field];
+				var src = getProp(doc, field);
+				
+				// Skip if field doesn't exist or is not an array
+				if (src == undefined || !Array.isArray(src)) continue;
+				
+				var notRemoved = [];
+				for (var k = 0; k < src.length; k++) {
+					var element = src[k];
+					var shouldRemove = false;
+					
+					// Determine how to match the condition against the element
+					if (typeof condition === 'object' && condition !== null && !Array.isArray(condition)) {
+						// Condition is an object (could be a query or a value to match)
+						if (typeof element === 'object' && element !== null && !Array.isArray(element)) {
+							// Element is also an object - use query matching
+							// This handles both {price: null}, {name: "test"}, and {price: {$gte: 10}}
+							shouldRemove = matches(element, condition);
+						} else {
+							// Element is a primitive but condition is an object with operators like {$gte: 5}
+							var tempDoc = { __temp: element };
+							shouldRemove = opMatches(tempDoc, "__temp", condition);
+						}
+					} else {
+						// Condition is a simple value (string, number, boolean, null, etc.)
+						// Do direct comparison
+						shouldRemove = element == condition;
+					}
+					
+					if (!shouldRemove) notRemoved.push(element);
+				}
+				setProp(doc, field, notRemoved);
 			}
 		} else if (key == "$pullAll") {
 			var fields = Object.keys(value);
