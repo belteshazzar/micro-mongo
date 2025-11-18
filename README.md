@@ -316,6 +316,55 @@ changeStream.close();
 
 See [CHANGE-STREAMS.md](CHANGE-STREAMS.md) for complete documentation, examples, and browser reactivity patterns.
 
+## Filtered Positional Operator with arrayFilters
+
+**NEW:** Micro-Mongo now supports the filtered positional operator `$[<identifier>]` with `arrayFilters`, allowing you to update specific array elements that match filter conditions!
+
+```javascript
+import { MongoClient } from 'micro-mongo';
+
+const client = await MongoClient.connect();
+const db = client.db('myapp');
+
+// Update items with quantity <= 5
+await db.products.insertOne({
+    _id: 1,
+    items: [
+        { name: 'apple', quantity: 5 },
+        { name: 'banana', quantity: 0 },
+        { name: 'orange', quantity: 10 }
+    ]
+});
+
+await db.products.updateOne(
+    { _id: 1 },
+    { $set: { 'items.$[elem].quantity': 100 } },
+    { arrayFilters: [{ 'elem.quantity': { $lte: 5 } }] }
+);
+// Result: apple and banana quantity set to 100, orange remains 10
+
+// Update simple arrays
+await db.scores.updateOne(
+    { _id: 1 },
+    { $set: { 'scores.$[score]': 90 } },
+    { arrayFilters: [{ 'score': { $lt: 90 } }] }
+);
+
+// Nested arrays with multiple filters
+await db.students.updateOne(
+    { _id: 1 },
+    { $inc: { 'students.$[student].grades.$[grade].score': 5 } },
+    { 
+        arrayFilters: [
+            { 'student.name': 'Alice' },
+            { 'grade.score': { $lt: 90 } }
+        ] 
+    }
+);
+```
+
+See [docs/ARRAY-FILTERS.md](docs/ARRAY-FILTERS.md) for complete documentation and examples.
+
 ## Cursor Methods
 
 | Name                    | Implemented     |
