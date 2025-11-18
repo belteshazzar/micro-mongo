@@ -212,7 +212,78 @@ export function applyUpdates(updates, doc, setOnInsert) {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
-				doc[field].push(value[field]);
+				var pushValue = value[field];
+				
+				// Check if this is a modifier-based push
+				var isModifierPush = pushValue !== null && typeof pushValue === 'object' && 
+					(pushValue.$each !== undefined || pushValue.$position !== undefined || 
+					 pushValue.$slice !== undefined || pushValue.$sort !== undefined);
+				
+				if (isModifierPush) {
+					// Initialize array if it doesn't exist
+					if (!doc[field]) {
+						doc[field] = [];
+					}
+					
+					// Get the values to push (either from $each or wrap single value)
+					var valuesToPush = pushValue.$each !== undefined ? pushValue.$each : [pushValue];
+					
+					// Get position (default to end of array)
+					var position = pushValue.$position !== undefined ? pushValue.$position : doc[field].length;
+					
+					// Handle negative position (from end)
+					if (position < 0) {
+						position = Math.max(0, doc[field].length + position);
+					}
+					
+					// Insert values at specified position
+					doc[field].splice(position, 0, ...valuesToPush);
+					
+					// Apply $sort if specified
+					if (pushValue.$sort !== undefined) {
+						var sortSpec = pushValue.$sort;
+						if (typeof sortSpec === 'number') {
+							// Simple numeric sort
+							doc[field].sort(function(a, b) {
+								if (a < b) return sortSpec > 0 ? -1 : 1;
+								if (a > b) return sortSpec > 0 ? 1 : -1;
+								return 0;
+							});
+						} else if (typeof sortSpec === 'object') {
+							// Sort by subdocument fields
+							doc[field].sort(function(a, b) {
+								var sortKeys = Object.keys(sortSpec);
+								for (var k = 0; k < sortKeys.length; k++) {
+									var sortKey = sortKeys[k];
+									var sortDir = sortSpec[sortKey];
+									var aVal = getProp(a, sortKey);
+									var bVal = getProp(b, sortKey);
+									if (aVal < bVal) return sortDir > 0 ? -1 : 1;
+									if (aVal > bVal) return sortDir > 0 ? 1 : -1;
+								}
+								return 0;
+							});
+						}
+					}
+					
+					// Apply $slice if specified
+					if (pushValue.$slice !== undefined) {
+						var sliceValue = pushValue.$slice;
+						if (sliceValue < 0) {
+							// Keep last N elements
+							doc[field] = doc[field].slice(sliceValue);
+						} else if (sliceValue === 0) {
+							// Empty the array
+							doc[field] = [];
+						} else {
+							// Keep first N elements
+							doc[field] = doc[field].slice(0, sliceValue);
+						}
+					}
+				} else {
+					// Simple push (original behavior)
+					doc[field].push(pushValue);
+				}
 			}
 		} else if (key == "$bit") {
 			var field = Object.keys(value)[0];
