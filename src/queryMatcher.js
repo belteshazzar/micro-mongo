@@ -620,3 +620,198 @@ export function nor(doc, els) {
 export function matches(doc, query) {
 	return and(doc, toArray(query));
 }
+
+/**
+ * Enhanced matching function that also tracks which array index matched for positional operator ($)
+ * Returns an object with:
+ *   - matched: boolean indicating if the query matched
+ *   - arrayFilters: object mapping field paths to the first matched array index
+ * 
+ * Example: if query is { "grades": { $gte: 85 } } and doc is { grades: [80, 90, 85] }
+ * Returns: { matched: true, arrayFilters: { "grades": 1 } } (index 1 is 90, first to match)
+ */
+export function matchWithArrayIndices(doc, query) {
+	const arrayFilters = {};
+	const matched = andWithTracking(doc, toArray(query), arrayFilters);
+	return { matched, arrayFilters };
+}
+
+/**
+ * Helper to track array indices during AND matching
+ */
+function andWithTracking(doc, els, arrayFilters) {
+	for (var i = 0; i < els.length; i++) {
+		if (!tlMatchesWithTracking(doc, els[i], arrayFilters)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Top level match with tracking
+ */
+function tlMatchesWithTracking(doc, query, arrayFilters) {
+	var key = Object.keys(query)[0];
+	var value = query[key];
+	if (key.charAt(0) == "$") {
+		if (key == "$and") return andWithTracking(doc, value, arrayFilters);
+		else if (key == "$or") return orWithTracking(doc, value, arrayFilters);
+		else if (key == "$not") {
+			// For $not, we don't track positions as it's a negation
+			return !tlMatches(doc, value);
+		}
+		else if (key == "$nor") return norWithTracking(doc, value, arrayFilters);
+		else if (key == "$where") return where(doc, value);
+		else if (key == "$comment") return true;
+		else if (key == "$jsonSchema") return validateJsonSchema(doc, value);
+		else if (key == "$expr") {
+			try {
+				return evaluateExpression(value, doc);
+			} catch (e) {
+				return false;
+			}
+		}
+		else throw { $err: "Can't canonicalize query: BadValue unknown top level operator: " + key, code: 17287 };
+	} else {
+		return opMatchesWithTracking(doc, key, value, arrayFilters);
+	}
+}
+
+/**
+ * OR operator with tracking - track positions from the first matching clause
+ */
+function orWithTracking(doc, els, arrayFilters) {
+	for (var i = 0; i < els.length; i++) {
+		if (tlMatchesWithTracking(doc, els[i], arrayFilters)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * NOR operator with tracking
+ */
+function norWithTracking(doc, els, arrayFilters) {
+	for (var i = 0; i < els.length; i++) {
+		if (tlMatchesWithTracking(doc, els[i], arrayFilters)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Operator match with array index tracking
+ */
+function opMatchesWithTracking(doc, key, value, arrayFilters) {
+	// Get the base field (before any dots)
+	const baseField = key.split('.')[0];
+	const fieldValue = getFieldValues(doc, key);
+	
+	// Helper to track which index matched
+	const trackMatchingIndex = (fieldValue, checkFn) => {
+		if (fieldValue === undefined) return false;
+		if (fieldValue === null) return checkFn(fieldValue);
+		
+		// If fieldValue is an array from array traversal
+		if (isArray(fieldValue)) {
+			// Check if the base field itself is an array in the document
+			const baseValue = getProp(doc, baseField);
+			if (isArray(baseValue)) {
+				// Find first matching index
+				for (var i = 0; i < fieldValue.length; i++) {
+					if (checkFn(fieldValue[i])) {
+						// Track this as the matched index for this field
+						arrayFilters[key] = i;
+						return true;
+					}
+				}
+				return false;
+			}
+		}
+		
+		// Otherwise use regular matching
+		return fieldValueMatches(fieldValue, checkFn);
+	};
+	
+	// Now perform the actual matching with tracking
+	if (typeof (value) == "string") return trackMatchingIndex(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (typeof (value) == "number") return trackMatchingIndex(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (typeof (value) == "boolean") return trackMatchingIndex(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (value instanceof ObjectId) return trackMatchingIndex(fieldValue, function(v) { return valuesEqual(v, value); });
+	else if (typeof (value) == "object") {
+		if (value instanceof RegExp) return fieldValue != undefined && trackMatchingIndex(fieldValue, function(v) { return v && v.match(value); });
+		else if (isArray(value)) return fieldValue != undefined && trackMatchingIndex(fieldValue, function(v) { return v && arrayMatches(v, value); });
+		else {
+			var keys = Object.keys(value);
+			if (keys[0].charAt(0) == "$") {
+				// Handle operators
+				for (var i = 0; i < keys.length; i++) {
+					var operator = keys[i];
+					var operand = value[operator];
+					if (operator == "$eq") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return valuesEqual(v, operand); })) return false;
+					} else if (operator == "$gt") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return compareValues(v, operand, '>'); })) return false;
+					} else if (operator == "$gte") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return compareValues(v, operand, '>='); })) return false;
+					} else if (operator == "$lt") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return compareValues(v, operand, '<'); })) return false;
+					} else if (operator == "$lte") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return compareValues(v, operand, '<='); })) return false;
+					} else if (operator == "$ne") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return !valuesEqual(v, operand); })) return false;
+					} else if (operator == "$in") {
+						if (!trackMatchingIndex(fieldValue, function(v) { return isIn(v, operand); })) return false;
+					} else if (operator == "$nin") {
+						if (trackMatchingIndex(fieldValue, function(v) { return isIn(v, operand); })) return false;
+					} else if (operator == "$elemMatch") {
+						// Special handling for $elemMatch
+						var arrayFieldValue = getProp(doc, key);
+						if (arrayFieldValue == undefined || !isArray(arrayFieldValue)) return false;
+						for (var j = 0; j < arrayFieldValue.length; j++) {
+							var element = arrayFieldValue[j];
+							// Check if element matches the query
+							if (typeof element === 'object' && !isArray(element)) {
+								// For objects, use matches
+								if (matches(element, operand)) {
+									arrayFilters[key] = j;
+									return true;
+								}
+							} else {
+								// For primitive values, check operators directly
+								var matchesPrimitive = true;
+								var opKeys = Object.keys(operand);
+								for (var k = 0; k < opKeys.length; k++) {
+									var op = opKeys[k];
+									var opValue = operand[op];
+									if (op == "$gte" && !(element >= opValue)) matchesPrimitive = false;
+									else if (op == "$gt" && !(element > opValue)) matchesPrimitive = false;
+									else if (op == "$lte" && !(element <= opValue)) matchesPrimitive = false;
+									else if (op == "$lt" && !(element < opValue)) matchesPrimitive = false;
+									else if (op == "$eq" && element != opValue) matchesPrimitive = false;
+									else if (op == "$ne" && element == opValue) matchesPrimitive = false;
+								}
+								if (matchesPrimitive) {
+									arrayFilters[key] = j;
+									return true;
+								}
+							}
+						}
+						return false;
+					} else {
+						// For other operators, use standard matching
+						if (!opMatches(doc, key, value)) return false;
+					}
+				}
+				return true;
+			} else {
+				// Object equality
+				return fieldValue != undefined && trackMatchingIndex(fieldValue, function(v) { return objectMatches(v, value); });
+			}
+		}
+	}
+	return false;
+}

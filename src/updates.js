@@ -293,9 +293,61 @@ function applyToAllPositional(doc, field, updateFn) {
 }
 
 /**
- * Apply update operators to a document
+ * Replace $ positional operator in a field path with the matched array index
+ * 
+ * @param {string} fieldPath - The field path potentially containing $
+ * @param {object} arrayFilters - Map of field paths to matched array indices
+ * @returns {string} The field path with $ replaced by the matched index
  */
-export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
+function replacePositionalOperator(fieldPath, arrayFilters) {
+	if (!arrayFilters || !fieldPath.includes('$')) {
+		return fieldPath;
+	}
+	
+	// Split the path to find the $ placeholder
+	const parts = fieldPath.split('.');
+	const dollarIndex = parts.indexOf('$');
+	
+	if (dollarIndex === -1) {
+		return fieldPath;
+	}
+	
+	// Build the field path up to the $
+	const pathBeforeDollar = parts.slice(0, dollarIndex).join('.');
+	
+	// Find the matched index for this field path
+	// We need to check if we have a match for the field before $
+	let matchedIndex = null;
+	
+	// Try to find a matching filter by checking various possible field paths
+	// The query could be on the array itself or a nested field
+	for (const filterPath in arrayFilters) {
+		// Check if the filter path matches the beginning of our field path
+		if (filterPath === pathBeforeDollar || filterPath.startsWith(pathBeforeDollar + '.')) {
+			matchedIndex = arrayFilters[filterPath];
+			break;
+		}
+	}
+	
+	// If we found a matched index, replace $ with it
+	if (matchedIndex !== null && matchedIndex !== undefined) {
+		parts[dollarIndex] = matchedIndex.toString();
+		return parts.join('.');
+	}
+	
+	// If no matched index found, return original path (update will likely be a no-op)
+	return fieldPath;
+}
+
+/**
+ * Apply update operators to a document
+ * 
+ * @param {object} updates - The update operators to apply
+ * @param {object} doc - The document to update
+ * @param {boolean} setOnInsert - Whether to apply $setOnInsert
+ * @param {object} arrayFilters - Optional map of field paths to matched array indices for $ operator
+ */
+export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, userArrayFilters) {
 	var keys = Object.keys(updates);
 	for (var i = 0; i < keys.length; i++) {
 		var key = keys[i];
@@ -303,13 +355,13 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		if (key == "$inc") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var amount = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var amount = value[fields[j]];
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
-					applyToFilteredArrayElements(doc, parsedPath, amount, '$inc', arrayFilters);
+					applyToFilteredArrayElements(doc, parsedPath, amount, '$inc', userArrayFilters);
 				} else if (hasAllPositional(field)) {
 					// Handle $[] all-positional operator
 					applyToAllPositional(doc, field, function(val) {
@@ -324,13 +376,13 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		} else if (key == "$mul") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var amount = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var amount = value[fields[j]];
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
-					applyToFilteredArrayElements(doc, parsedPath, amount, '$mul', arrayFilters);
+					applyToFilteredArrayElements(doc, parsedPath, amount, '$mul', userArrayFilters);
 				} else if (hasAllPositional(field)) {
 					// Handle $[] all-positional operator
 					applyToAllPositional(doc, field, function(val) {
@@ -345,44 +397,46 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		} else if (key == "$rename") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var newName = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var newName = replacePositionalOperator(value[fields[j]], positionalMatchInfo);
 				doc[newName] = doc[field];
 				delete doc[field];
 			}
 		} else if (key == "$setOnInsert" && setOnInsert) {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				doc[fields[j]] = value[fields[j]];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				doc[field] = value[fields[j]];
 			}
 		} else if (key == "$set") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
-					applyToFilteredArrayElements(doc, parsedPath, value[field], '$set', arrayFilters);
+					applyToFilteredArrayElements(doc, parsedPath, value[fields[j]], '$set', userArrayFilters);
 				} else {
-					setProp(doc, field, value[field]);
+					setProp(doc, field, value[fields[j]]);
 				}
 			}
 		} else if (key == "$unset") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				delete doc[fields[j]];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				delete doc[field];
 			}
 		} else if (key == "$min") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var amount = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var amount = value[fields[j]];
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
-					applyToFilteredArrayElements(doc, parsedPath, amount, '$min', arrayFilters);
+					applyToFilteredArrayElements(doc, parsedPath, amount, '$min', userArrayFilters);
 				} else if (hasAllPositional(field)) {
 					// Handle $[] all-positional operator
 					applyToAllPositional(doc, field, function(val) {
@@ -396,13 +450,13 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		} else if (key == "$max") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var amount = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var amount = value[fields[j]];
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
-					applyToFilteredArrayElements(doc, parsedPath, amount, '$max', arrayFilters);
+					applyToFilteredArrayElements(doc, parsedPath, amount, '$max', userArrayFilters);
 				} else if (hasAllPositional(field)) {
 					// Handle $[] all-positional operator
 					applyToAllPositional(doc, field, function(val) {
@@ -416,8 +470,8 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		} else if (key == "$currentDate") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var typeSpec = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var typeSpec = value[fields[j]];
 				
 				// Handle boolean true or { $type: "date" }
 				if (typeSpec === true || (typeof typeSpec === 'object' && typeSpec.$type === 'date')) {
@@ -435,26 +489,32 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		} else if (key == "$addToSet") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var value = value[field];
-				doc[field].push(value);
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var addValue = value[fields[j]];
+				var currentArray = getProp(doc, field);
+				if (currentArray && Array.isArray(currentArray)) {
+					currentArray.push(addValue);
+				}
 			}
 		} else if (key == "$pop") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var value = value[field];
-				if (value == 1) {
-					doc[field].pop();
-				} else if (value == -1) {
-					doc[field].shift();
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var popValue = value[fields[j]];
+				var currentArray = getProp(doc, field);
+				if (currentArray && Array.isArray(currentArray)) {
+					if (popValue == 1) {
+						currentArray.pop();
+					} else if (popValue == -1) {
+						currentArray.shift();
+					}
 				}
 			}
 		} else if (key == "$pull") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var condition = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var condition = value[fields[j]];
 				var src = getProp(doc, field);
 				
 				// Skip if field doesn't exist or is not an array
@@ -490,7 +550,8 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 		} else if (key == "$pullAll") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var src = doc[fields[j]];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var src = getProp(doc, field);
 				var toRemove = value[fields[j]];
 				var notRemoved = [];
 				for (var k = 0; k < src.length; k++) {
@@ -503,22 +564,25 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 					}
 					if (!removed) notRemoved.push(src[k]);
 				}
-				doc[fields[j]] = notRemoved;
+				setProp(doc, field, notRemoved);
 			}
 		} else if (key == "$pushAll") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var values = value[field];
-				for (var k = 0; k < values.length; k++) {
-					doc[field].push(values[k]);
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var values = value[fields[j]];
+				var currentArray = getProp(doc, field);
+				if (currentArray && Array.isArray(currentArray)) {
+					for (var k = 0; k < values.length; k++) {
+						currentArray.push(values[k]);
+					}
 				}
 			}
 		} else if (key == "$push") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				var field = fields[j];
-				var pushValue = value[field];
+				var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+				var pushValue = value[fields[j]];
 				
 				// Check if this is a modifier-based push
 				var isModifierPush = pushValue !== null && typeof pushValue === 'object' && 
@@ -527,37 +591,39 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 				
 				if (isModifierPush) {
 					// Initialize array if it doesn't exist
-					if (!doc[field]) {
-						doc[field] = [];
+					var currentArray = getProp(doc, field);
+					if (!currentArray) {
+						currentArray = [];
+						setProp(doc, field, currentArray);
 					}
 					
 					// Get the values to push (either from $each or wrap single value)
 					var valuesToPush = pushValue.$each !== undefined ? pushValue.$each : [pushValue];
 					
 					// Get position (default to end of array)
-					var position = pushValue.$position !== undefined ? pushValue.$position : doc[field].length;
+					var position = pushValue.$position !== undefined ? pushValue.$position : currentArray.length;
 					
 					// Handle negative position (from end)
 					if (position < 0) {
-						position = Math.max(0, doc[field].length + position);
+						position = Math.max(0, currentArray.length + position);
 					}
 					
 					// Insert values at specified position
-					doc[field].splice(position, 0, ...valuesToPush);
+					currentArray.splice(position, 0, ...valuesToPush);
 					
 					// Apply $sort if specified
 					if (pushValue.$sort !== undefined) {
 						var sortSpec = pushValue.$sort;
 						if (typeof sortSpec === 'number') {
 							// Simple numeric sort
-							doc[field].sort(function(a, b) {
+							currentArray.sort(function(a, b) {
 								if (a < b) return sortSpec > 0 ? -1 : 1;
 								if (a > b) return sortSpec > 0 ? 1 : -1;
 								return 0;
 							});
 						} else if (typeof sortSpec === 'object') {
 							// Sort by subdocument fields
-							doc[field].sort(function(a, b) {
+							currentArray.sort(function(a, b) {
 								var sortKeys = Object.keys(sortSpec);
 								for (var k = 0; k < sortKeys.length; k++) {
 									var sortKey = sortKeys[k];
@@ -577,31 +643,38 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 						var sliceValue = pushValue.$slice;
 						if (sliceValue < 0) {
 							// Keep last N elements
-							doc[field] = doc[field].slice(sliceValue);
+							var sliced = currentArray.slice(sliceValue);
+							setProp(doc, field, sliced);
 						} else if (sliceValue === 0) {
 							// Empty the array
-							doc[field] = [];
+							setProp(doc, field, []);
 						} else {
 							// Keep first N elements
-							doc[field] = doc[field].slice(0, sliceValue);
+							var sliced = currentArray.slice(0, sliceValue);
+							setProp(doc, field, sliced);
 						}
 					}
 				} else {
 					// Simple push (original behavior)
-					doc[field].push(pushValue);
+					var currentArray = getProp(doc, field);
+					if (currentArray && Array.isArray(currentArray)) {
+						currentArray.push(pushValue);
+					}
 				}
 			}
 		} else if (key == "$bit") {
-			var field = Object.keys(value)[0];
-			var operation = value[field];
+			var fields = Object.keys(value);
+			var field = replacePositionalOperator(fields[0], positionalMatchInfo);
+			var operation = value[fields[0]];
 			var operator = Object.keys(operation)[0];
 			var operand = operation[operator];
+			var currentValue = getProp(doc, field);
 			if (operator == "and") {
-				doc[field] = doc[field] & operand;
+				setProp(doc, field, currentValue & operand);
 			} else if (operator == "or") {
-				doc[field] = doc[field] | operand;
+				setProp(doc, field, currentValue | operand);
 			} else if (operator == "xor") {
-				doc[field] = doc[field] ^ operand;
+				setProp(doc, field, currentValue ^ operand);
 			} else {
 				throw "unknown $bit operator: " + operator;
 			}
