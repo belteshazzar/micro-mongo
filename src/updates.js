@@ -4,6 +4,7 @@
 
 import { setProp, getProp } from './utils.js';
 import { opMatches, matches } from './queryMatcher.js';
+import { Timestamp } from './Timestamp.js';
 
 /**
  * Deep equality check for objects
@@ -43,7 +44,6 @@ function objectEquals(a, b) {
 	
 	return true;
 }
-import { Timestamp } from './Timestamp.js';
 
 /**
  * Apply update operators to a document
