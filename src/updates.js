@@ -3,7 +3,8 @@
  */
 
 import { setProp, getProp, isArray } from './utils.js';
-import { matches } from './queryMatcher.js';
+import { opMatches, matches } from './queryMatcher.js';
+import { Timestamp } from './Timestamp.js';
 
 /**
  * Extract identifier from a filtered positional operator pattern like $[identifier]
@@ -198,6 +199,100 @@ function hasFilteredPositionalOperator(fieldPath) {
 }
 
 /**
+ * Deep equality check for objects
+ */
+function objectEquals(a, b) {
+	if (a === b) return true;
+	if (a == null || b == null) return false;
+	if (typeof a !== 'object' || typeof b !== 'object') return false;
+	
+	// Handle arrays
+	if (Array.isArray(a) && Array.isArray(b)) {
+		if (a.length !== b.length) return false;
+		for (var i = 0; i < a.length; i++) {
+			if (!objectEquals(a[i], b[i])) return false;
+		}
+		return true;
+	}
+	
+	// Handle dates
+	if (a instanceof Date && b instanceof Date) {
+		return a.getTime() === b.getTime();
+	}
+	
+	// One is array, the other is not
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	
+	var keysA = Object.keys(a);
+	var keysB = Object.keys(b);
+	
+	if (keysA.length !== keysB.length) return false;
+	
+	for (var i = 0; i < keysA.length; i++) {
+		var key = keysA[i];
+		if (!keysB.includes(key)) return false;
+		if (!objectEquals(a[key], b[key])) return false;
+	}
+	
+	return true;
+}
+
+/**
+ * Check if a field path contains the $[] positional operator
+ */
+function hasAllPositional(field) {
+	return field.indexOf('$[]') !== -1;
+}
+
+/**
+ * Apply an update function to all elements matching $[] operator
+ * This is used for operators like $inc, $mul that need to read-modify-write
+ */
+function applyToAllPositional(doc, field, updateFn) {
+	var path = field.split(".");
+	var current = doc;
+	
+	// Navigate to the first $[] operator
+	for (var i = 0; i < path.length; i++) {
+		var pathSegment = path[i];
+		
+		if (pathSegment === '$[]') {
+			// Current should be an array
+			if (!Array.isArray(current)) {
+				return; // Skip if not an array
+			}
+			
+			// Build the remaining path after this $[]
+			var remainingPath = path.slice(i + 1).join('.');
+			
+			// Process each array element
+			for (var j = 0; j < current.length; j++) {
+				if (remainingPath) {
+					// There's more path after $[], recursively apply
+					if (remainingPath.indexOf('$[]') !== -1) {
+						// Nested $[] operator
+						applyToAllPositional(current[j], remainingPath, updateFn);
+					} else {
+						// No more $[], apply the update function
+						var currentValue = getProp(current[j], remainingPath);
+						var newValue = updateFn(currentValue);
+						setProp(current[j], remainingPath, newValue);
+					}
+				} else {
+					// $[] is the last segment, apply to each element directly
+					current[j] = updateFn(current[j]);
+				}
+			}
+			return;
+		}
+		
+		// Navigate to next level
+		if (current == null || current == undefined) return;
+		current = current[pathSegment];
+	}
+}
+
+/**
  * Apply update operators to a document
  */
 export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
@@ -215,6 +310,11 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$inc', arrayFilters);
+				} else if (hasAllPositional(field)) {
+					// Handle $[] all-positional operator
+					applyToAllPositional(doc, field, function(val) {
+						return (val === undefined ? 0 : val) + amount;
+					});
 				} else {
 					var currentValue = getProp(doc, field);
 					if (currentValue == undefined) currentValue = 0;
@@ -231,8 +331,15 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$mul', arrayFilters);
+				} else if (hasAllPositional(field)) {
+					// Handle $[] all-positional operator
+					applyToAllPositional(doc, field, function(val) {
+						return val * amount;
+					});
 				} else {
-					doc[field] = doc[field] * amount;
+					var currentValue = getProp(doc, field);
+					if (currentValue == undefined) currentValue = 0;
+					setProp(doc, field, currentValue * amount);
 				}
 			}
 		} else if (key == "$rename") {
@@ -276,8 +383,14 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$min', arrayFilters);
+				} else if (hasAllPositional(field)) {
+					// Handle $[] all-positional operator
+					applyToAllPositional(doc, field, function(val) {
+						return Math.min(val, amount);
+					});
 				} else {
-					doc[field] = Math.min(doc[field], amount);
+					var currentValue = getProp(doc, field);
+					setProp(doc, field, Math.min(currentValue, amount));
 				}
 			}
 		} else if (key == "$max") {
@@ -290,14 +403,34 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 				if (hasFilteredPositionalOperator(field)) {
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$max', arrayFilters);
+				} else if (hasAllPositional(field)) {
+					// Handle $[] all-positional operator
+					applyToAllPositional(doc, field, function(val) {
+						return Math.max(val, amount);
+					});
 				} else {
-					doc[field] = Math.max(doc[field], amount);
+					var currentValue = getProp(doc, field);
+					setProp(doc, field, Math.max(currentValue, amount));
 				}
 			}
-		} else if (key == "$currentDate") {  // TODO not the same as mongo
+		} else if (key == "$currentDate") {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
-				doc[fields[j]] = new Date();
+				var field = fields[j];
+				var typeSpec = value[field];
+				
+				// Handle boolean true or { $type: "date" }
+				if (typeSpec === true || (typeof typeSpec === 'object' && typeSpec.$type === 'date')) {
+					setProp(doc, field, new Date());
+				}
+				// Handle { $type: "timestamp" }
+				else if (typeof typeSpec === 'object' && typeSpec.$type === 'timestamp') {
+					setProp(doc, field, new Timestamp());
+				}
+				// Default to Date for backwards compatibility
+				else {
+					setProp(doc, field, new Date());
+				}
 			}
 		} else if (key == "$addToSet") {
 			var fields = Object.keys(value);
@@ -316,6 +449,43 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 				} else if (value == -1) {
 					doc[field].shift();
 				}
+			}
+		} else if (key == "$pull") {
+			var fields = Object.keys(value);
+			for (var j = 0; j < fields.length; j++) {
+				var field = fields[j];
+				var condition = value[field];
+				var src = getProp(doc, field);
+				
+				// Skip if field doesn't exist or is not an array
+				if (src == undefined || !Array.isArray(src)) continue;
+				
+				var notRemoved = [];
+				for (var k = 0; k < src.length; k++) {
+					var element = src[k];
+					var shouldRemove = false;
+					
+					// Determine how to match the condition against the element
+					if (typeof condition === 'object' && condition !== null && !Array.isArray(condition)) {
+						// Condition is an object (could be a query or a value to match)
+						if (typeof element === 'object' && element !== null && !Array.isArray(element)) {
+							// Element is also an object - use query matching
+							// This handles both {price: null}, {name: "test"}, and {price: {$gte: 10}}
+							shouldRemove = matches(element, condition);
+						} else {
+							// Element is a primitive but condition is an object with operators like {$gte: 5}
+							var tempDoc = { __temp: element };
+							shouldRemove = opMatches(tempDoc, "__temp", condition);
+						}
+					} else {
+						// Condition is a simple value (string, number, boolean, null, etc.)
+						// Do direct comparison
+						shouldRemove = element == condition;
+					}
+					
+					if (!shouldRemove) notRemoved.push(element);
+				}
+				setProp(doc, field, notRemoved);
 			}
 		} else if (key == "$pullAll") {
 			var fields = Object.keys(value);
@@ -348,7 +518,78 @@ export function applyUpdates(updates, doc, setOnInsert, arrayFilters) {
 			var fields = Object.keys(value);
 			for (var j = 0; j < fields.length; j++) {
 				var field = fields[j];
-				doc[field].push(value[field]);
+				var pushValue = value[field];
+				
+				// Check if this is a modifier-based push
+				var isModifierPush = pushValue !== null && typeof pushValue === 'object' && 
+					(pushValue.$each !== undefined || pushValue.$position !== undefined || 
+					 pushValue.$slice !== undefined || pushValue.$sort !== undefined);
+				
+				if (isModifierPush) {
+					// Initialize array if it doesn't exist
+					if (!doc[field]) {
+						doc[field] = [];
+					}
+					
+					// Get the values to push (either from $each or wrap single value)
+					var valuesToPush = pushValue.$each !== undefined ? pushValue.$each : [pushValue];
+					
+					// Get position (default to end of array)
+					var position = pushValue.$position !== undefined ? pushValue.$position : doc[field].length;
+					
+					// Handle negative position (from end)
+					if (position < 0) {
+						position = Math.max(0, doc[field].length + position);
+					}
+					
+					// Insert values at specified position
+					doc[field].splice(position, 0, ...valuesToPush);
+					
+					// Apply $sort if specified
+					if (pushValue.$sort !== undefined) {
+						var sortSpec = pushValue.$sort;
+						if (typeof sortSpec === 'number') {
+							// Simple numeric sort
+							doc[field].sort(function(a, b) {
+								if (a < b) return sortSpec > 0 ? -1 : 1;
+								if (a > b) return sortSpec > 0 ? 1 : -1;
+								return 0;
+							});
+						} else if (typeof sortSpec === 'object') {
+							// Sort by subdocument fields
+							doc[field].sort(function(a, b) {
+								var sortKeys = Object.keys(sortSpec);
+								for (var k = 0; k < sortKeys.length; k++) {
+									var sortKey = sortKeys[k];
+									var sortDir = sortSpec[sortKey];
+									var aVal = getProp(a, sortKey);
+									var bVal = getProp(b, sortKey);
+									if (aVal < bVal) return sortDir > 0 ? -1 : 1;
+									if (aVal > bVal) return sortDir > 0 ? 1 : -1;
+								}
+								return 0;
+							});
+						}
+					}
+					
+					// Apply $slice if specified
+					if (pushValue.$slice !== undefined) {
+						var sliceValue = pushValue.$slice;
+						if (sliceValue < 0) {
+							// Keep last N elements
+							doc[field] = doc[field].slice(sliceValue);
+						} else if (sliceValue === 0) {
+							// Empty the array
+							doc[field] = [];
+						} else {
+							// Keep first N elements
+							doc[field] = doc[field].slice(0, sliceValue);
+						}
+					}
+				} else {
+					// Simple push (original behavior)
+					doc[field].push(pushValue);
+				}
 			}
 		} else if (key == "$bit") {
 			var field = Object.keys(value)[0];
