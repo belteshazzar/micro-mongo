@@ -1329,6 +1329,7 @@ describe("DB", function() {
 				// Test with $inc operator
 				db[collectionName].update({ me: 8 }, { $inc: { "items.$[].quantity": 5 } });
 				doc = await db[collectionName].findOne({ me: 8 });
+        console.log(doc);
 				if (doc.items[0].quantity != 5) throw "items[0].quantity should be 5";
 				if (doc.items[1].quantity != 5) throw "items[1].quantity should be 5";
 				if (doc.items[2].quantity != 5) throw "items[2].quantity should be 5";
@@ -1336,6 +1337,7 @@ describe("DB", function() {
 				// Test with $mul operator
 				db[collectionName].update({ me: 8 }, { $mul: { "items.$[].quantity": 2 } });
 				doc = await db[collectionName].findOne({ me: 8 });
+        console.log(doc);
 				if (doc.items[0].quantity != 10) throw "items[0].quantity should be 10";
 				if (doc.items[1].quantity != 10) throw "items[1].quantity should be 10";
 				if (doc.items[2].quantity != 10) throw "items[2].quantity should be 10";
