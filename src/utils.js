@@ -128,8 +128,14 @@ export function getFieldValues(obj, name) {
  * Set a property on an object using dot notation
  * Creates intermediate objects as needed
  * Supports array element access via numeric indices
+ * Supports $[] operator to update all array elements
  */
 export function setProp(obj, name, value) {
+	// Check if path contains $[] operator
+	if (name.indexOf('$[]') !== -1) {
+		return setPropWithAllPositional(obj, name, value);
+	}
+	
 	var path = name.split(".");
 	var current = obj;
 	
@@ -183,6 +189,65 @@ export function setProp(obj, name, value) {
 		current[lastNumericIndex] = value;
 	} else {
 		current[lastSegment] = value;
+	}
+}
+
+/**
+ * Set a property using the $[] all positional operator
+ * Updates all elements in an array
+ */
+function setPropWithAllPositional(obj, name, value) {
+	var path = name.split(".");
+	var current = obj;
+	
+	// Navigate to the $[] operator
+	for (var i = 0; i < path.length; i++) {
+		var pathSegment = path[i];
+		
+		if (pathSegment === '$[]') {
+			// Current should be an array - update all elements
+			if (!Array.isArray(current)) {
+				throw new Error("The positional operator did not find the match needed from the query.");
+			}
+			
+			// Build the remaining path after $[]
+			var remainingPath = path.slice(i + 1).join('.');
+			
+			// Update all array elements
+			for (var j = 0; j < current.length; j++) {
+				if (remainingPath) {
+					// There's more path after $[], recursively set on each element
+					setProp(current[j], remainingPath, value);
+				} else {
+					// $[] is the last segment, replace each element with value
+					current[j] = value;
+				}
+			}
+			return;
+		}
+		
+		// Navigate to the next level
+		var numericIndex = parseInt(pathSegment, 10);
+		
+		if (isArray(current) && !isNaN(numericIndex) && numericIndex >= 0) {
+			current = current[numericIndex];
+		} else {
+			if (current[pathSegment] == undefined || current[pathSegment] == null) {
+				// Create intermediate object or array
+				var nextSegment = i + 1 < path.length ? path[i + 1] : null;
+				if (nextSegment === '$[]') {
+					current[pathSegment] = [];
+				} else {
+					var nextNumeric = parseInt(nextSegment, 10);
+					if (!isNaN(nextNumeric) && nextNumeric >= 0) {
+						current[pathSegment] = [];
+					} else {
+						current[pathSegment] = {};
+					}
+				}
+			}
+			current = current[pathSegment];
+		}
 	}
 }
 

@@ -1070,6 +1070,54 @@ describe("DB", function() {
 				if (!doc.now) throw "now should have been set to date";
 			});
 
+			it('should testUpdate_Op_CurrentDate with boolean true', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 1 });
+				await db[collectionName].updateOne({test: 'currentDate'}, { $currentDate: { timestamp: true } });
+				var doc = await db[collectionName].findOne({test: 'currentDate'});
+				expect(doc.timestamp).to.be.instanceOf(Date);
+			});
+
+			it('should testUpdate_Op_CurrentDate with $type date', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 2 });
+				await db[collectionName].updateOne({test: 'currentDate', value: 2}, { $currentDate: { dateField: { $type: 'date' } } });
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 2});
+				expect(doc.dateField).to.be.instanceOf(Date);
+			});
+
+			it('should testUpdate_Op_CurrentDate with $type timestamp', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 3 });
+				await db[collectionName].updateOne({test: 'currentDate', value: 3}, { $currentDate: { timestampField: { $type: 'timestamp' } } });
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 3});
+				expect(doc.timestampField).to.be.instanceOf(mongo.Timestamp);
+				expect(doc.timestampField.high).to.be.greaterThan(0);
+			});
+
+			it('should testUpdate_Op_CurrentDate with multiple fields', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 4 });
+				await db[collectionName].updateOne(
+					{test: 'currentDate', value: 4}, 
+					{ $currentDate: { 
+						dateField: { $type: 'date' },
+						timestampField: { $type: 'timestamp' },
+						boolField: true
+					}}
+				);
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 4});
+				expect(doc.dateField).to.be.instanceOf(Date);
+				expect(doc.timestampField).to.be.instanceOf(mongo.Timestamp);
+				expect(doc.boolField).to.be.instanceOf(Date);
+			});
+
+			it('should testUpdate_Op_CurrentDate with dot notation', async function() {
+				await db[collectionName].insert({ test: 'currentDate', value: 5, nested: {} });
+				await db[collectionName].updateOne(
+					{test: 'currentDate', value: 5}, 
+					{ $currentDate: { 'nested.timestamp': { $type: 'timestamp' } }}
+				);
+				var doc = await db[collectionName].findOne({test: 'currentDate', value: 5});
+				expect(doc.nested.timestamp).to.be.instanceOf(mongo.Timestamp);
+			});
+
 			it('should testUpdate_Op_AddToSet', async function() {
 				await db[collectionName].insert({ me: 7, nums: [3] });
 				var orig = await db[collectionName].findOne({me:7});
@@ -1105,6 +1153,139 @@ describe("DB", function() {
 			});
 
 			it('should testUpdate_Op_Pull', async function() {
+				// Test 1: Simple value matching
+				await db[collectionName].insert({ me: 1, nums: [1, 2, 3, 4, 5] });
+				db[collectionName].update({me:1},{ $pull : {nums: 3} });
+				var doc = await db[collectionName].findOne({me:1});
+				if (doc.nums.length!=4) throw "Test 1: incorrect length";
+				if (doc.nums.includes(3)) throw "Test 1: should have removed 3";
+				if (doc.nums[0]!=1 || doc.nums[1]!=2 || doc.nums[2]!=4 || doc.nums[3]!=5) throw "Test 1: wrong values";
+				
+				// Test 2: Query condition with $gte
+				await db[collectionName].insert({ me: 2, nums: [1, 2, 3, 4, 5, 6] });
+				db[collectionName].update({me:2},{ $pull : {nums: {$gte: 5}} });
+				doc = await db[collectionName].findOne({me:2});
+				if (doc.nums.length!=4) throw "Test 2: incorrect length, got " + doc.nums.length;
+				if (doc.nums.includes(5) || doc.nums.includes(6)) throw "Test 2: should have removed values >= 5";
+				if (doc.nums[0]!=1 || doc.nums[1]!=2 || doc.nums[2]!=3 || doc.nums[3]!=4) throw "Test 2: wrong remaining values";
+				
+				// Test 3: Query condition with $lt
+				await db[collectionName].insert({ me: 3, nums: [1, 2, 3, 4, 5] });
+				db[collectionName].update({me:3},{ $pull : {nums: {$lt: 3}} });
+				doc = await db[collectionName].findOne({me:3});
+				if (doc.nums.length!=3) throw "Test 3: incorrect length";
+				if (doc.nums.includes(1) || doc.nums.includes(2)) throw "Test 3: should have removed values < 3";
+				
+				// Test 4: Nested object matching with query conditions
+				await db[collectionName].insert({ 
+					me: 4, 
+					items: [
+						{name: "apple", price: 10},
+						{name: "banana", price: 5},
+						{name: "cherry", price: 15},
+						{name: "date", price: 8}
+					]
+				});
+				db[collectionName].update({me:4},{ $pull : {items: {price: {$gte: 10}}} });
+				doc = await db[collectionName].findOne({me:4});
+				if (doc.items.length!=2) throw "Test 4: incorrect length, got " + doc.items.length;
+				if (doc.items.some(item => item.price >= 10)) throw "Test 4: should have removed items with price >= 10";
+				
+				// Test 5: Plain object matching (exact match)
+				await db[collectionName].insert({ 
+					me: 5, 
+					items: [
+						{name: "apple", price: 10},
+						{name: "banana", price: 5},
+						{name: "apple", price: 10}
+					]
+				});
+				db[collectionName].update({me:5},{ $pull : {items: {name: "apple", price: 10}} });
+				doc = await db[collectionName].findOne({me:5});
+				if (doc.items.length!=1) throw "Test 5: incorrect length, got " + doc.items.length;
+				if (doc.items[0].name != "banana" || doc.items[0].price != 5) throw "Test 5: wrong remaining item";
+				
+				// Test 6: Multiple values matching same condition
+				await db[collectionName].insert({ me: 6, nums: [3, 5, 3, 7, 3] });
+				db[collectionName].update({me:6},{ $pull : {nums: 3} });
+				doc = await db[collectionName].findOne({me:6});
+				if (doc.nums.length!=2) throw "Test 6: incorrect length";
+				if (doc.nums.includes(3)) throw "Test 6: should have removed all 3s";
+				if (doc.nums[0]!=5 || doc.nums[1]!=7) throw "Test 6: wrong values";
+				
+				// Test 7: No matches (array unchanged)
+				await db[collectionName].insert({ me: 7, nums: [1, 2, 3] });
+				db[collectionName].update({me:7},{ $pull : {nums: 10} });
+				doc = await db[collectionName].findOne({me:7});
+				if (doc.nums.length!=3) throw "Test 7: incorrect length";
+				
+				// Test 8: Empty array after pull
+				await db[collectionName].insert({ me: 8, nums: [5, 5, 5] });
+				db[collectionName].update({me:8},{ $pull : {nums: 5} });
+				doc = await db[collectionName].findOne({me:8});
+				if (doc.nums.length!=0) throw "Test 8: should be empty array";
+			});
+
+			it('should testUpdate_Op_Pull_EdgeCases', async function() {
+				// Test with $in operator
+				await db[collectionName].insert({ me: 1, nums: [1, 2, 3, 4, 5, 6] });
+				db[collectionName].update({me:1},{ $pull : {nums: {$in: [2, 4, 6]}} });
+				var doc = await db[collectionName].findOne({me:1});
+				if (doc.nums.length!=3) throw "Test $in: incorrect length";
+				if (doc.nums.includes(2) || doc.nums.includes(4) || doc.nums.includes(6)) throw "Test $in: should have removed even numbers in list";
+				
+				// Test with $nin operator
+				await db[collectionName].insert({ me: 2, nums: [1, 2, 3, 4, 5] });
+				db[collectionName].update({me:2},{ $pull : {nums: {$nin: [2, 4]}} });
+				doc = await db[collectionName].findOne({me:2});
+				if (doc.nums.length!=2) throw "Test $nin: incorrect length";
+				if (!doc.nums.includes(2) || !doc.nums.includes(4)) throw "Test $nin: should only keep 2 and 4";
+				
+				// Test with $ne operator
+				await db[collectionName].insert({ me: 3, nums: [1, 2, 3, 2, 1] });
+				db[collectionName].update({me:3},{ $pull : {nums: {$ne: 2}} });
+				doc = await db[collectionName].findOne({me:3});
+				if (doc.nums.length!=2) throw "Test $ne: incorrect length";
+				if (doc.nums[0]!=2 || doc.nums[1]!=2) throw "Test $ne: should only keep 2s";
+				
+				// Test with nested object and multiple conditions
+				await db[collectionName].insert({ 
+					me: 4, 
+					items: [
+						{name: "apple", price: 10, qty: 5},
+						{name: "banana", price: 5, qty: 10},
+						{name: "cherry", price: 15, qty: 3},
+						{name: "date", price: 8, qty: 20}
+					]
+				});
+				db[collectionName].update({me:4},{ $pull : {items: {price: {$lt: 10}, qty: {$gt: 5}}} });
+				doc = await db[collectionName].findOne({me:4});
+				if (doc.items.length!=2) throw "Test multiple conditions: incorrect length, got " + doc.items.length;
+				// Should remove banana (price 5 < 10 AND qty 10 > 5) and date (price 8 < 10 AND qty 20 > 5)
+				if (doc.items.some(item => item.name === "date")) throw "Test multiple conditions: should have removed date";
+				if (doc.items.some(item => item.name === "banana")) throw "Test multiple conditions: should have removed banana";
+				if (!doc.items.some(item => item.name === "apple")) throw "Test multiple conditions: should have kept apple";
+				if (!doc.items.some(item => item.name === "cherry")) throw "Test multiple conditions: should have kept cherry";
+				
+				// Test with $mod operator
+				await db[collectionName].insert({ me: 5, nums: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+				db[collectionName].update({me:5},{ $pull : {nums: {$mod: [3, 0]}} });
+				doc = await db[collectionName].findOne({me:5});
+				// Should remove 3, 6, 9 (divisible by 3)
+				if (doc.nums.includes(3) || doc.nums.includes(6) || doc.nums.includes(9)) throw "Test $mod: should have removed multiples of 3";
+				if (doc.nums.length!=7) throw "Test $mod: incorrect length";
+				
+				// Test on non-existent field (should not error)
+				await db[collectionName].insert({ me: 6 });
+				db[collectionName].update({me:6},{ $pull : {nonexistent: 5} });
+				doc = await db[collectionName].findOne({me:6});
+				if (doc.nonexistent !== undefined) throw "Test non-existent: field should remain undefined";
+				
+				// Test on non-array field (should not error)
+				await db[collectionName].insert({ me: 7, notArray: "string" });
+				db[collectionName].update({me:7},{ $pull : {notArray: "s"} });
+				doc = await db[collectionName].findOne({me:7});
+				if (doc.notArray !== "string") throw "Test non-array: should not modify non-array field";
 			});
 
 			it('should testUpdate_Op_PushAll', async function() {
@@ -1126,16 +1307,209 @@ describe("DB", function() {
 				if (doc.nums[1]!=4) throw "[1] element should be 4";
 			});
 
+			it('should testUpdate_Op_AllPositional', async function() {
+				// Test $[] operator - update all array elements
+				await db[collectionName].insert({ 
+					me: 8, 
+					items: [
+						{ name: "apple", quantity: 5 },
+						{ name: "banana", quantity: 10 },
+						{ name: "cherry", quantity: 15 }
+					]
+				});
+				
+				// Update quantity of all items
+				db[collectionName].update({ me: 8 }, { $set: { "items.$[].quantity": 0 } });
+				var doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items.length != 3) throw "should have 3 items";
+				if (doc.items[0].quantity != 0) throw "items[0].quantity should be 0";
+				if (doc.items[1].quantity != 0) throw "items[1].quantity should be 0";
+				if (doc.items[2].quantity != 0) throw "items[2].quantity should be 0";
+				
+				// Test with $inc operator
+				db[collectionName].update({ me: 8 }, { $inc: { "items.$[].quantity": 5 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 5) throw "items[0].quantity should be 5";
+				if (doc.items[1].quantity != 5) throw "items[1].quantity should be 5";
+				if (doc.items[2].quantity != 5) throw "items[2].quantity should be 5";
+				
+				// Test with $mul operator
+				db[collectionName].update({ me: 8 }, { $mul: { "items.$[].quantity": 2 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 10) throw "items[0].quantity should be 10";
+				if (doc.items[1].quantity != 10) throw "items[1].quantity should be 10";
+				if (doc.items[2].quantity != 10) throw "items[2].quantity should be 10";
+				
+				// Test with $min operator
+				db[collectionName].update({ me: 8 }, { $min: { "items.$[].quantity": 7 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 7) throw "items[0].quantity should be 7";
+				if (doc.items[1].quantity != 7) throw "items[1].quantity should be 7";
+				if (doc.items[2].quantity != 7) throw "items[2].quantity should be 7";
+				
+				// Test with $max operator
+				db[collectionName].update({ me: 8 }, { $max: { "items.$[].quantity": 12 } });
+				doc = await db[collectionName].findOne({ me: 8 });
+				if (doc.items[0].quantity != 12) throw "items[0].quantity should be 12";
+				if (doc.items[1].quantity != 12) throw "items[1].quantity should be 12";
+				if (doc.items[2].quantity != 12) throw "items[2].quantity should be 12";
+				
+				// Test simple array update
+				await db[collectionName].insert({ me: 9, scores: [10, 20, 30] });
+				db[collectionName].update({ me: 9 }, { $set: { "scores.$[]": 100 } });
+				doc = await db[collectionName].findOne({ me: 9 });
+				if (doc.scores.length != 3) throw "should have 3 scores";
+				if (doc.scores[0] != 100) throw "scores[0] should be 100";
+				if (doc.scores[1] != 100) throw "scores[1] should be 100";
+				if (doc.scores[2] != 100) throw "scores[2] should be 100";
+				
+				// Test nested array update
+				await db[collectionName].insert({ 
+					me: 10, 
+					students: [
+						{ grades: [70, 80, 90] },
+						{ grades: [60, 75, 85] }
+					]
+				});
+				db[collectionName].update({ me: 10 }, { $inc: { "students.$[].grades.$[]": 5 } });
+				doc = await db[collectionName].findOne({ me: 10 });
+				if (doc.students[0].grades[0] != 75) throw "students[0].grades[0] should be 75";
+				if (doc.students[0].grades[1] != 85) throw "students[0].grades[1] should be 85";
+				if (doc.students[0].grades[2] != 95) throw "students[0].grades[2] should be 95";
+				if (doc.students[1].grades[0] != 65) throw "students[1].grades[0] should be 65";
+				if (doc.students[1].grades[1] != 80) throw "students[1].grades[1] should be 80";
+				if (doc.students[1].grades[2] != 90) throw "students[1].grades[2] should be 90";
+			});
+
 			it('should testUpdate_Op_Each', async function() {
+				await db[collectionName].insert({ me: 7, nums: [1, 2] });
+				await db[collectionName].update({me:7}, { $push: { nums: { $each: [3, 4, 5] } } });
+				var doc = await db[collectionName].findOne({me:7});
+				if (doc.nums.length !== 5) throw "incorrect length: " + doc.nums.length;
+				if (doc.nums[0] !== 1) throw "[0] element should be 1";
+				if (doc.nums[1] !== 2) throw "[1] element should be 2";
+				if (doc.nums[2] !== 3) throw "[2] element should be 3";
+				if (doc.nums[3] !== 4) throw "[3] element should be 4";
+				if (doc.nums[4] !== 5) throw "[4] element should be 5";
 			});
 
 			it('should testUpdate_Op_Slice', async function() {
+				// Test positive slice (keep first N)
+				await db[collectionName].insert({ me: 8, nums: [1, 2, 3] });
+				await db[collectionName].update({me:8}, { $push: { nums: { $each: [4, 5], $slice: 3 } } });
+				var doc = await db[collectionName].findOne({me:8});
+				if (doc.nums.length !== 3) throw "incorrect length: " + doc.nums.length;
+				if (doc.nums[0] !== 1) throw "[0] element should be 1";
+				if (doc.nums[1] !== 2) throw "[1] element should be 2";
+				if (doc.nums[2] !== 3) throw "[2] element should be 3";
+				
+				// Test negative slice (keep last N)
+				await db[collectionName].remove({me:8});
+				await db[collectionName].insert({ me: 8, nums: [1, 2, 3] });
+				await db[collectionName].update({me:8}, { $push: { nums: { $each: [4, 5], $slice: -3 } } });
+				doc = await db[collectionName].findOne({me:8});
+				if (doc.nums.length !== 3) throw "incorrect length for negative slice: " + doc.nums.length;
+				if (doc.nums[0] !== 3) throw "[0] element should be 3";
+				if (doc.nums[1] !== 4) throw "[1] element should be 4";
+				if (doc.nums[2] !== 5) throw "[2] element should be 5";
 			});
 
 			it('should testUpdate_Op_Sort', async function() {
+				// Test numeric sort ascending
+				await db[collectionName].insert({ me: 9, nums: [5, 2, 8] });
+				await db[collectionName].update({me:9}, { $push: { nums: { $each: [1, 9], $sort: 1 } } });
+				var doc = await db[collectionName].findOne({me:9});
+				if (doc.nums.length !== 5) throw "incorrect length: " + doc.nums.length;
+				if (doc.nums[0] !== 1) throw "[0] element should be 1";
+				if (doc.nums[1] !== 2) throw "[1] element should be 2";
+				if (doc.nums[2] !== 5) throw "[2] element should be 5";
+				if (doc.nums[3] !== 8) throw "[3] element should be 8";
+				if (doc.nums[4] !== 9) throw "[4] element should be 9";
+				
+				// Test numeric sort descending
+				await db[collectionName].remove({me:9});
+				await db[collectionName].insert({ me: 9, nums: [5, 2, 8] });
+				await db[collectionName].update({me:9}, { $push: { nums: { $each: [1, 9], $sort: -1 } } });
+				doc = await db[collectionName].findOne({me:9});
+				if (doc.nums.length !== 5) throw "incorrect length for desc sort: " + doc.nums.length;
+				if (doc.nums[0] !== 9) throw "[0] element should be 9";
+				if (doc.nums[1] !== 8) throw "[1] element should be 8";
+				if (doc.nums[2] !== 5) throw "[2] element should be 5";
+				if (doc.nums[3] !== 2) throw "[3] element should be 2";
+				if (doc.nums[4] !== 1) throw "[4] element should be 1";
+				
+				// Test sort by subdocument field
+				await db[collectionName].remove({me:9});
+				await db[collectionName].insert({ me: 9, items: [{score: 5}, {score: 2}] });
+				await db[collectionName].update({me:9}, { $push: { items: { $each: [{score: 8}, {score: 1}], $sort: {score: 1} } } });
+				doc = await db[collectionName].findOne({me:9});
+				if (doc.items.length !== 4) throw "incorrect length for object sort: " + doc.items.length;
+				if (doc.items[0].score !== 1) throw "[0] score should be 1";
+				if (doc.items[1].score !== 2) throw "[1] score should be 2";
+				if (doc.items[2].score !== 5) throw "[2] score should be 5";
+				if (doc.items[3].score !== 8) throw "[3] score should be 8";
 			});
 
 			it('should testUpdate_Op_Position', async function() {
+				// Test position at beginning
+				await db[collectionName].insert({ me: 10, nums: [1, 2, 3] });
+				await db[collectionName].update({me:10}, { $push: { nums: { $each: [4, 5], $position: 0 } } });
+				var doc = await db[collectionName].findOne({me:10});
+				if (doc.nums.length !== 5) throw "incorrect length: " + doc.nums.length;
+				if (doc.nums[0] !== 4) throw "[0] element should be 4";
+				if (doc.nums[1] !== 5) throw "[1] element should be 5";
+				if (doc.nums[2] !== 1) throw "[2] element should be 1";
+				if (doc.nums[3] !== 2) throw "[3] element should be 2";
+				if (doc.nums[4] !== 3) throw "[4] element should be 3";
+				
+				// Test position in middle
+				await db[collectionName].remove({me:10});
+				await db[collectionName].insert({ me: 10, nums: [1, 2, 3] });
+				await db[collectionName].update({me:10}, { $push: { nums: { $each: [4, 5], $position: 1 } } });
+				doc = await db[collectionName].findOne({me:10});
+				if (doc.nums.length !== 5) throw "incorrect length for middle position: " + doc.nums.length;
+				if (doc.nums[0] !== 1) throw "[0] element should be 1";
+				if (doc.nums[1] !== 4) throw "[1] element should be 4";
+				if (doc.nums[2] !== 5) throw "[2] element should be 5";
+				if (doc.nums[3] !== 2) throw "[3] element should be 2";
+				if (doc.nums[4] !== 3) throw "[4] element should be 3";
+				
+				// Test negative position (from end)
+				await db[collectionName].remove({me:10});
+				await db[collectionName].insert({ me: 10, nums: [1, 2, 3] });
+				await db[collectionName].update({me:10}, { $push: { nums: { $each: [4, 5], $position: -1 } } });
+				doc = await db[collectionName].findOne({me:10});
+				if (doc.nums.length !== 5) throw "incorrect length for negative position: " + doc.nums.length;
+				if (doc.nums[0] !== 1) throw "[0] element should be 1";
+				if (doc.nums[1] !== 2) throw "[1] element should be 2";
+				if (doc.nums[2] !== 4) throw "[2] element should be 4";
+				if (doc.nums[3] !== 5) throw "[3] element should be 5";
+				if (doc.nums[4] !== 3) throw "[4] element should be 3";
+			});
+
+			it('should testUpdate_Op_Push_Combined_Modifiers', async function() {
+				// Test combining $each, $position, $sort, and $slice
+				// This should: insert at position, add values, sort, then slice
+				await db[collectionName].insert({ me: 11, nums: [40, 30, 20] });
+				await db[collectionName].update({me:11}, { 
+					$push: { 
+						nums: { 
+							$each: [60, 50, 10], 
+							$position: 0,
+							$sort: 1,
+							$slice: 4
+						} 
+					} 
+				});
+				var doc = await db[collectionName].findOne({me:11});
+				// After position: [60, 50, 10, 40, 30, 20]
+				// After sort: [10, 20, 30, 40, 50, 60]
+				// After slice(4): [10, 20, 30, 40]
+				if (doc.nums.length !== 4) throw "incorrect length for combined: " + doc.nums.length;
+				if (doc.nums[0] !== 10) throw "[0] element should be 10, got " + doc.nums[0];
+				if (doc.nums[1] !== 20) throw "[1] element should be 20, got " + doc.nums[1];
+				if (doc.nums[2] !== 30) throw "[2] element should be 30, got " + doc.nums[2];
+				if (doc.nums[3] !== 40) throw "[3] element should be 40, got " + doc.nums[3];
 			});
 
 			it('should testUpdate_Op_Bit', async function() {
