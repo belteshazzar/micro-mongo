@@ -1,6 +1,6 @@
 import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
 import { TextIndex } from './TextIndex.js';
-import { ObjectId } from './ObjectId.js';
+import { ObjectId } from 'bjson';
 import { evaluateExpression } from './aggregationExpressions.js';
 
 /**
@@ -171,17 +171,8 @@ function validateJsonSchema(doc, schema) {
  */
 function valuesEqual(a, b) {
 	// Handle ObjectId comparison
-	if (a instanceof ObjectId || b instanceof ObjectId) {
-		if (a instanceof ObjectId && b instanceof ObjectId) {
-			return a.equals(b);
-		}
-		if (a instanceof ObjectId && typeof b === 'string') {
-			return a.equals(b);
-		}
-		if (b instanceof ObjectId && typeof a === 'string') {
-			return b.equals(a);
-		}
-		return false;
+	if (a instanceof ObjectId && b instanceof ObjectId) {
+    return a.equals(b);
 	}
 	
 	// Regular equality

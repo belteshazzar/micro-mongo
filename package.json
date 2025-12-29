@@ -52,7 +52,9 @@
     "vite": "^7.2.2"
   },
   "dependencies": {
+    "bjson": "github:belteshazzar/bjson",
     "events": "^3.3.0",
+    "node-opfs": "github:belteshazzar/node-opfs",
     "stemmer": "^2.0.1"
   }
 }

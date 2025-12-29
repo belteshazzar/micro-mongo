@@ -1,6 +1,6 @@
 import { Collection } from './Collection.js';
 import { StorageEngine } from './StorageEngine.js';
-import { ObjectId } from './ObjectId.js';
+import { ObjectId } from 'bjson';
 import { ChangeStream } from './ChangeStream.js';
 import { NotImplementedError } from './errors.js';
 

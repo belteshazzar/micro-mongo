@@ -4,7 +4,7 @@
 
 // Export classes
 export { MongoClient } from './src/MongoClient.js';
-export { ObjectId } from './src/ObjectId.js';
+export { ObjectId } from 'bjson';
 export { Timestamp } from './src/Timestamp.js';
 export { IndexedDbStorageEngine } from './src/IndexedDbStorageEngine.js';
 export { StorageEngine } from './src/StorageEngine.js';

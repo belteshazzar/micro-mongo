@@ -376,6 +376,8 @@ class ObjectId {
         throw new Error(`Argument passed in must be a string of 24 hex characters, got: ${id}`);
       }
       this.id = id.toLowerCase();
+    } else if (id instanceof Uint8Array && id.length === 12) {
+      this.id = Array.from(id).map((b) => b.toString(16).padStart(2, "0")).join("");
     } else if (id instanceof ObjectId) {
       this.id = id.id;
     } else {
@@ -401,21 +403,20 @@ class ObjectId {
     const timestamp = parseInt(this.id.substring(0, 8), 16);
     return new Date(timestamp * 1e3);
   }
+  equals(other) {
+    if (!(other instanceof ObjectId)) {
+      throw new Error("Can only compare with another ObjectId");
+    }
+    return this.id === other.id;
+  }
   /**
    * Compares this ObjectId with another for equality
    */
-  equals(other) {
-    if (!other) return false;
-    if (other instanceof ObjectId) {
-      return this.id === other.id;
+  compare(other) {
+    if (!(other instanceof ObjectId)) {
+      throw new Error("Can only compare with another ObjectId");
     }
-    if (typeof other === "string") {
-      return this.id === other.toLowerCase();
-    }
-    if (other.id) {
-      return this.id === other.id;
-    }
-    return false;
+    return this.id.localeCompare(other.id);
   }
   /**
    * Returns the ObjectId in JSON format (as hex string)
@@ -428,6 +429,13 @@ class ObjectId {
    */
   inspect() {
     return `ObjectId("${this.id}")`;
+  }
+  toBytes() {
+    const bytes = new Uint8Array(12);
+    for (let i = 0; i < 12; i++) {
+      bytes[i] = parseInt(this.id.substring(i * 2, i * 2 + 2), 16);
+    }
+    return bytes;
   }
   /**
    * Validates if a string is a valid ObjectId hex string
@@ -543,6 +551,9 @@ function getFieldValues(obj, name) {
   return results;
 }
 function setProp(obj, name, value) {
+  if (name.indexOf("$[]") !== -1) {
+    return setPropWithAllPositional(obj, name, value);
+  }
   var path = name.split(".");
   var current = obj;
   for (var i = 0; i < path.length - 1; i++) {
@@ -584,6 +595,46 @@ function setProp(obj, name, value) {
     current[lastNumericIndex] = value;
   } else {
     current[lastSegment] = value;
+  }
+}
+function setPropWithAllPositional(obj, name, value) {
+  var path = name.split(".");
+  var current = obj;
+  for (var i = 0; i < path.length; i++) {
+    var pathSegment = path[i];
+    if (pathSegment === "$[]") {
+      if (!Array.isArray(current)) {
+        throw new Error("The positional operator did not find the match needed from the query.");
+      }
+      var remainingPath = path.slice(i + 1).join(".");
+      for (var j = 0; j < current.length; j++) {
+        if (remainingPath) {
+          setProp(current[j], remainingPath, value);
+        } else {
+          current[j] = value;
+        }
+      }
+      return;
+    }
+    var numericIndex = parseInt(pathSegment, 10);
+    if (isArray(current) && !isNaN(numericIndex) && numericIndex >= 0) {
+      current = current[numericIndex];
+    } else {
+      if (current[pathSegment] == void 0 || current[pathSegment] == null) {
+        var nextSegment = i + 1 < path.length ? path[i + 1] : null;
+        if (nextSegment === "$[]") {
+          current[pathSegment] = [];
+        } else {
+          var nextNumeric = parseInt(nextSegment, 10);
+          if (!isNaN(nextNumeric) && nextNumeric >= 0) {
+            current[pathSegment] = [];
+          } else {
+            current[pathSegment] = {};
+          }
+        }
+      }
+      current = current[pathSegment];
+    }
   }
 }
 function isArray(o) {
@@ -704,6 +755,331 @@ function applyProjection(projection, doc) {
   }
   return result;
 }
+const ErrorCodes = {
+  // General errors
+  OK: 0,
+  INTERNAL_ERROR: 1,
+  BAD_VALUE: 2,
+  NO_SUCH_KEY: 4,
+  GRAPH_CONTAINS_CYCLE: 5,
+  HOST_UNREACHABLE: 6,
+  HOST_NOT_FOUND: 7,
+  UNKNOWN_ERROR: 8,
+  FAILED_TO_PARSE: 17287,
+  // Using test-compatible error code
+  CANNOT_MUTATE_OBJECT: 10,
+  USER_NOT_FOUND: 11,
+  UNSUPPORTED_FORMAT: 12,
+  UNAUTHORIZED: 13,
+  TYPE_MISMATCH: 14,
+  OVERFLOW: 15,
+  INVALID_LENGTH: 16,
+  PROTOCOL_ERROR: 17,
+  AUTHENTICATION_FAILED: 18,
+  ILLEGAL_OPERATION: 20,
+  NAMESPACE_NOT_FOUND: 26,
+  INDEX_NOT_FOUND: 27,
+  PATH_NOT_VIABLE: 28,
+  CANNOT_CREATE_INDEX: 67,
+  INDEX_ALREADY_EXISTS: 68,
+  INDEX_EXISTS: 68,
+  COMMAND_NOT_FOUND: 59,
+  NAMESPACE_EXISTS: 48,
+  INVALID_NAMESPACE: 73,
+  INDEX_OPTIONS_CONFLICT: 85,
+  INVALID_INDEX_SPECIFICATION_OPTION: 197,
+  // Write errors
+  WRITE_CONFLICT: 112,
+  DUPLICATE_KEY: 11e3,
+  DUPLICATE_KEY_UPDATE: 11001,
+  // Validation errors
+  DOCUMENT_VALIDATION_FAILURE: 121,
+  // Query errors
+  BAD_QUERY: 2,
+  CANNOT_INDEX_PARALLEL_ARRAYS: 171,
+  // Cursor errors
+  CURSOR_NOT_FOUND: 43,
+  // Collection errors
+  COLLECTION_IS_EMPTY: 26,
+  // Not implemented (custom code)
+  NOT_IMPLEMENTED: 999,
+  OPERATION_NOT_SUPPORTED: 998
+};
+class MongoError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "MongoError";
+    this.code = options.code || ErrorCodes.UNKNOWN_ERROR;
+    this.codeName = this._getCodeName(this.code);
+    this.$err = message;
+    if (options.collection) this.collection = options.collection;
+    if (options.database) this.database = options.database;
+    if (options.operation) this.operation = options.operation;
+    if (options.query) this.query = options.query;
+    if (options.document) this.document = options.document;
+    if (options.field) this.field = options.field;
+    if (options.index) this.index = options.index;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+  _getCodeName(code) {
+    const codeToName = {
+      0: "OK",
+      1: "InternalError",
+      2: "BadValue",
+      4: "NoSuchKey",
+      5: "GraphContainsCycle",
+      6: "HostUnreachable",
+      7: "HostNotFound",
+      8: "UnknownError",
+      10: "CannotMutateObject",
+      11: "UserNotFound",
+      12: "UnsupportedFormat",
+      13: "Unauthorized",
+      14: "TypeMismatch",
+      15: "Overflow",
+      16: "InvalidLength",
+      17: "ProtocolError",
+      18: "AuthenticationFailed",
+      20: "IllegalOperation",
+      26: "NamespaceNotFound",
+      27: "IndexNotFound",
+      28: "PathNotViable",
+      43: "CursorNotFound",
+      48: "NamespaceExists",
+      59: "CommandNotFound",
+      67: "CannotCreateIndex",
+      68: "IndexExists",
+      73: "InvalidNamespace",
+      85: "IndexOptionsConflict",
+      112: "WriteConflict",
+      121: "DocumentValidationFailure",
+      171: "CannotIndexParallelArrays",
+      197: "InvalidIndexSpecificationOption",
+      998: "OperationNotSupported",
+      999: "NotImplemented",
+      11e3: "DuplicateKey",
+      11001: "DuplicateKeyUpdate",
+      17287: "FailedToParse"
+    };
+    return codeToName[code] || "UnknownError";
+  }
+  toJSON() {
+    const json = {
+      name: this.name,
+      message: this.message,
+      code: this.code,
+      codeName: this.codeName
+    };
+    if (this.collection) json.collection = this.collection;
+    if (this.database) json.database = this.database;
+    if (this.operation) json.operation = this.operation;
+    if (this.index) json.index = this.index;
+    if (this.indexName) json.indexName = this.indexName;
+    if (this.field) json.field = this.field;
+    if (this.query) json.query = this.query;
+    if (this.document) json.document = this.document;
+    if (this.namespace) json.namespace = this.namespace;
+    if (this.cursorId) json.cursorId = this.cursorId;
+    if (this.feature) json.feature = this.feature;
+    if (this.keyPattern) json.keyPattern = this.keyPattern;
+    if (this.keyValue) json.keyValue = this.keyValue;
+    if (this.writeErrors) json.writeErrors = this.writeErrors;
+    return json;
+  }
+}
+class MongoServerError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "MongoServerError";
+  }
+}
+class MongoDriverError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "MongoDriverError";
+    this.code = options.code || ErrorCodes.INTERNAL_ERROR;
+  }
+}
+class WriteError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "WriteError";
+    this.code = options.code || ErrorCodes.WRITE_CONFLICT;
+  }
+}
+class DuplicateKeyError extends WriteError {
+  constructor(key, options = {}) {
+    const keyStr = JSON.stringify(key);
+    const message = `E11000 duplicate key error${options.collection ? ` collection: ${options.collection}` : ""} index: ${keyStr} dup key: ${keyStr}`;
+    super(message, { ...options, code: ErrorCodes.DUPLICATE_KEY });
+    this.name = "DuplicateKeyError";
+    this.keyPattern = key;
+    this.keyValue = options.keyValue || key;
+  }
+}
+class ValidationError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "ValidationError";
+    this.code = options.code || ErrorCodes.DOCUMENT_VALIDATION_FAILURE;
+    this.validationErrors = options.validationErrors || [];
+  }
+}
+class IndexError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "IndexError";
+  }
+}
+class IndexExistsError extends IndexError {
+  constructor(indexName, options = {}) {
+    super(`Index with name '${indexName}' already exists`, {
+      ...options,
+      code: ErrorCodes.INDEX_EXISTS
+    });
+    this.name = "IndexExistsError";
+    this.indexName = indexName;
+  }
+}
+class IndexNotFoundError extends IndexError {
+  constructor(indexName, options = {}) {
+    super(`Index '${indexName}' not found`, {
+      ...options,
+      code: ErrorCodes.INDEX_NOT_FOUND,
+      index: indexName
+    });
+    this.name = "IndexNotFoundError";
+    this.indexName = indexName;
+  }
+}
+class CannotCreateIndexError extends IndexError {
+  constructor(reason, options = {}) {
+    super(`Cannot create index: ${reason}`, {
+      ...options,
+      code: ErrorCodes.CANNOT_CREATE_INDEX
+    });
+    this.name = "CannotCreateIndexError";
+  }
+}
+class QueryError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "QueryError";
+    this.code = options.code || ErrorCodes.BAD_QUERY;
+  }
+}
+class TypeMismatchError extends MongoError {
+  constructor(field, expectedType, actualType, options = {}) {
+    super(
+      `Type mismatch for field '${field}': expected ${expectedType}, got ${actualType}`,
+      { ...options, code: ErrorCodes.TYPE_MISMATCH, field }
+    );
+    this.name = "TypeMismatchError";
+    this.expectedType = expectedType;
+    this.actualType = actualType;
+  }
+}
+class NamespaceError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "NamespaceError";
+  }
+}
+class NamespaceNotFoundError extends NamespaceError {
+  constructor(namespace, options = {}) {
+    super(`Namespace '${namespace}' not found`, {
+      ...options,
+      code: ErrorCodes.NAMESPACE_NOT_FOUND
+    });
+    this.name = "NamespaceNotFoundError";
+    this.namespace = namespace;
+  }
+}
+class InvalidNamespaceError extends NamespaceError {
+  constructor(namespace, reason, options = {}) {
+    if (typeof reason === "object" && !options) {
+      options = reason;
+      reason = void 0;
+    }
+    const msg = reason ? `Invalid namespace '${namespace}': ${reason}` : `Invalid namespace '${namespace}'`;
+    super(msg, {
+      ...options,
+      code: ErrorCodes.INVALID_NAMESPACE
+    });
+    this.name = "InvalidNamespaceError";
+    this.namespace = namespace;
+  }
+}
+class CursorError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "CursorError";
+  }
+}
+class CursorNotFoundError extends CursorError {
+  constructor(cursorId, options = {}) {
+    super(`Cursor ${cursorId} not found`, {
+      ...options,
+      code: ErrorCodes.CURSOR_NOT_FOUND
+    });
+    this.name = "CursorNotFoundError";
+    this.cursorId = cursorId;
+  }
+}
+class NotImplementedError extends MongoError {
+  constructor(feature, options = {}) {
+    super(`${feature} is not implemented in micro-mongo`, {
+      ...options,
+      code: ErrorCodes.NOT_IMPLEMENTED
+    });
+    this.name = "NotImplementedError";
+    this.feature = feature;
+  }
+}
+class OperationNotSupportedError extends MongoError {
+  constructor(operation, reason, options = {}) {
+    if (typeof reason === "object" && !options) {
+      options = reason;
+      reason = void 0;
+    }
+    const msg = reason ? `Operation '${operation}' is not supported: ${reason}` : `Operation '${operation}' is not supported`;
+    super(msg, {
+      ...options,
+      code: ErrorCodes.OPERATION_NOT_SUPPORTED,
+      operation
+    });
+    this.name = "OperationNotSupportedError";
+  }
+}
+class BadValueError extends MongoError {
+  constructor(field, value, reason, options = {}) {
+    super(`Bad value for field '${field}': ${reason}`, {
+      ...options,
+      code: ErrorCodes.BAD_VALUE,
+      field
+    });
+    this.name = "BadValueError";
+    this.value = value;
+  }
+}
+class BulkWriteError extends MongoError {
+  constructor(writeErrors = [], options = {}) {
+    const message = `Bulk write operation error: ${writeErrors.length} error(s)`;
+    super(message, options);
+    this.name = "BulkWriteError";
+    this.writeErrors = writeErrors;
+    this.code = options.code || ErrorCodes.WRITE_CONFLICT;
+  }
+}
+class MongoNetworkError extends MongoError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "MongoNetworkError";
+    this.code = options.code || ErrorCodes.HOST_UNREACHABLE;
+  }
+}
 class Cursor {
   constructor(collection, query, projection, documents, SortedCursor2) {
     this.collection = collection;
@@ -721,26 +1097,55 @@ class Cursor {
         else hasExclusion = true;
       }
       if (hasInclusion && hasExclusion) {
-        throw { $err: "Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.", code: 17287 };
+        throw new QueryError("Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.", {
+          code: ErrorCodes.FAILED_TO_PARSE,
+          collection: collection.name
+        });
       }
     }
     this.pos = 0;
-    this.max = 0;
+    this._limit = 0;
+    this._skip = 0;
+    this._closed = false;
   }
-  batchSize() {
-    throw "Not Implemented";
+  batchSize(size) {
+    this._batchSize = size;
+    return this;
   }
   close() {
-    throw "Not Implemented";
+    this._closed = true;
+    this.pos = this.documents.length;
+    return void 0;
   }
-  comment() {
-    throw "Not Implemented";
+  comment(commentString) {
+    this._comment = commentString;
+    return this;
   }
   count() {
     return this.documents.length;
   }
-  explain() {
-    throw "Not Implemented";
+  explain(verbosity = "queryPlanner") {
+    return {
+      queryPlanner: {
+        plannerVersion: 1,
+        namespace: `${this.collection.db?.name || "db"}.${this.collection.name}`,
+        indexFilterSet: false,
+        parsedQuery: this.query,
+        winningPlan: {
+          stage: "COLLSCAN",
+          filter: this.query,
+          direction: "forward"
+        }
+      },
+      executionStats: verbosity === "executionStats" || verbosity === "allPlansExecution" ? {
+        executionSuccess: true,
+        nReturned: this.documents.length,
+        executionTimeMillis: 0,
+        totalKeysExamined: 0,
+        totalDocsExamined: this.documents.length
+      } : void 0,
+      ok: 1
+    };
   }
   async forEach(fn) {
     while (this.hasNext()) {
@@ -748,17 +1153,29 @@ class Cursor {
     }
   }
   hasNext() {
-    const effectiveMax = this.max > 0 ? Math.min(this.max, this.documents.length) : this.documents.length;
+    if (this._closed) return false;
+    let effectiveMax;
+    if (this._limit > 0) {
+      effectiveMax = Math.min(this._skip + this._limit, this.documents.length);
+    } else {
+      effectiveMax = this.documents.length;
+    }
     return this.pos < effectiveMax;
   }
-  hint() {
-    throw "Not Implemented";
+  hint(index) {
+    this._hint = index;
+    return this;
   }
   itcount() {
-    throw "Not Implemented";
+    let count = 0;
+    while (this.hasNext()) {
+      this.next();
+      count++;
+    }
+    return count;
   }
   limit(_max) {
-    this.max = _max;
+    this._limit = _max;
     return this;
   }
   map(fn) {
@@ -768,21 +1185,27 @@ class Cursor {
     }
     return results;
   }
-  maxScan() {
-    throw "Not Implemented";
+  maxScan(maxScan) {
+    this._maxScan = maxScan;
+    return this;
   }
-  maxTimeMS() {
-    throw "Not Implemented";
+  maxTimeMS(ms) {
+    this._maxTimeMS = ms;
+    return this;
   }
-  max() {
-    throw "Not Implemented";
+  max(indexBounds) {
+    this._maxIndexBounds = indexBounds;
+    return this;
   }
-  min() {
-    throw "Not Implemented";
+  min(indexBounds) {
+    this._minIndexBounds = indexBounds;
+    return this;
   }
   next() {
     if (!this.hasNext()) {
-      throw "Error: error hasNext: false";
+      throw new QueryError("Error: error hasNext: false", {
+        collection: this.collection.name
+      });
     }
     const result = this.documents[this.pos++];
     if (this.projection) {
@@ -791,41 +1214,66 @@ class Cursor {
     return result;
   }
   noCursorTimeout() {
-    throw "Not Implemented";
-  }
-  objsLeftInBatch() {
-    throw "Not Implemented";
-  }
-  pretty() {
-    throw "Not Implemented";
-  }
-  readConcern() {
-    throw "Not Implemented";
-  }
-  readPref() {
-    throw "Not Implemented";
-  }
-  returnKey() {
-    throw "Not Implemented";
-  }
-  showRecordId() {
-    throw "Not Implemented";
-  }
-  size() {
-    throw "Not Implemented";
-  }
-  skip(num) {
-    this.pos = Math.min(this.pos + num, this.documents.length);
+    this._noCursorTimeout = true;
     return this;
   }
+  objsLeftInBatch() {
+    return this.size();
+  }
+  pretty() {
+    this._pretty = true;
+    return this;
+  }
+  readConcern(level) {
+    this._readConcern = level;
+    return this;
+  }
+  readPref(mode, tagSet) {
+    this._readPref = { mode, tagSet };
+    return this;
+  }
+  returnKey(enabled = true) {
+    this._returnKey = enabled;
+    return this;
+  }
+  showRecordId(enabled = true) {
+    this._showRecordId = enabled;
+    return this;
+  }
+  size() {
+    const remaining = this.documents.length - this.pos;
+    if (this._limit > 0) {
+      const maxPos = this._skip + this._limit;
+      return Math.min(maxPos - this.pos, remaining);
+    }
+    return remaining;
+  }
+  skip(num) {
+    this._skip = num;
+    if (this.pos === 0) {
+      this.pos = Math.min(num, this.documents.length);
+    }
+    return this;
+  }
+  isClosed() {
+    return this._closed === true;
+  }
   snapshot() {
-    throw "Not Implemented";
+    throw new NotImplementedError("snapshot");
   }
   sort(s) {
     return new this.SortedCursor(this.collection, this.query, this, s);
   }
+  allowDiskUse(enabled = true) {
+    this._allowDiskUse = enabled;
+    return this;
+  }
+  collation(collationDocument) {
+    this._collation = collationDocument;
+    return this;
+  }
   tailable() {
-    throw "Not Implemented";
+    throw new NotImplementedError("tailable");
   }
   async toArray() {
     const results = [];
@@ -1404,18 +1852,980 @@ class TextIndex {
     this.documentLengths.clear();
   }
 }
-function valuesEqual(a, b) {
-  if (a instanceof ObjectId || b instanceof ObjectId) {
-    if (a instanceof ObjectId && b instanceof ObjectId) {
-      return a.equals(b);
+function evaluateExpression(expr, doc) {
+  if (expr === null || expr === void 0) {
+    return expr;
+  }
+  if (typeof expr === "boolean" || typeof expr === "number") {
+    return expr;
+  }
+  if (typeof expr === "string") {
+    if (expr.startsWith("$$")) {
+      if (expr === "$$KEEP" || expr === "$$PRUNE" || expr === "$$DESCEND") {
+        return expr;
+      }
+      return getProp(doc, expr.substring(2));
+    } else if (expr.charAt(0) === "$") {
+      return getProp(doc, expr.substring(1));
     }
-    if (a instanceof ObjectId && typeof b === "string") {
-      return a.equals(b);
+    return expr;
+  }
+  if (typeof expr === "object") {
+    if (Array.isArray(expr)) {
+      return expr.map((item) => evaluateExpression(item, doc));
     }
-    if (b instanceof ObjectId && typeof a === "string") {
-      return b.equals(a);
+    const keys = Object.keys(expr);
+    if (keys.length === 0) {
+      return expr;
+    }
+    const operator = keys[0];
+    if (operator.charAt(0) === "$") {
+      const operand = expr[operator];
+      return evaluateOperator(operator, operand, doc);
+    } else {
+      const result = {};
+      for (const key of keys) {
+        result[key] = evaluateExpression(expr[key], doc);
+      }
+      return result;
+    }
+  }
+  return expr;
+}
+function evaluateOperator(operator, operand, doc) {
+  switch (operator) {
+    // Arithmetic operators
+    case "$add":
+      return evalAdd(operand, doc);
+    case "$subtract":
+      return evalSubtract(operand, doc);
+    case "$multiply":
+      return evalMultiply(operand, doc);
+    case "$divide":
+      return evalDivide(operand, doc);
+    case "$mod":
+      return evalMod(operand, doc);
+    case "$pow":
+      return evalPow(operand, doc);
+    case "$sqrt":
+      return evalSqrt(operand, doc);
+    case "$abs":
+      return evalAbs(operand, doc);
+    case "$ceil":
+      return evalCeil(operand, doc);
+    case "$floor":
+      return evalFloor(operand, doc);
+    case "$trunc":
+      return evalTrunc(operand, doc);
+    case "$round":
+      return evalRound(operand, doc);
+    // String operators
+    case "$concat":
+      return evalConcat(operand, doc);
+    case "$substr":
+      return evalSubstr(operand, doc);
+    case "$toLower":
+      return evalToLower(operand, doc);
+    case "$toUpper":
+      return evalToUpper(operand, doc);
+    case "$trim":
+      return evalTrim(operand, doc);
+    case "$ltrim":
+      return evalLtrim(operand, doc);
+    case "$rtrim":
+      return evalRtrim(operand, doc);
+    case "$split":
+      return evalSplit(operand, doc);
+    case "$strLenCP":
+      return evalStrLenCP(operand, doc);
+    case "$strcasecmp":
+      return evalStrcasecmp(operand, doc);
+    case "$indexOfCP":
+      return evalIndexOfCP(operand, doc);
+    case "$replaceOne":
+      return evalReplaceOne(operand, doc);
+    case "$replaceAll":
+      return evalReplaceAll(operand, doc);
+    // Comparison operators
+    case "$cmp":
+      return evalCmp(operand, doc);
+    case "$eq":
+      return evalEq(operand, doc);
+    case "$ne":
+      return evalNe(operand, doc);
+    case "$gt":
+      return evalGt(operand, doc);
+    case "$gte":
+      return evalGte(operand, doc);
+    case "$lt":
+      return evalLt(operand, doc);
+    case "$lte":
+      return evalLte(operand, doc);
+    // Logical operators
+    case "$and":
+      return evalAnd(operand, doc);
+    case "$or":
+      return evalOr(operand, doc);
+    case "$not":
+      return evalNot(operand, doc);
+    // Conditional operators
+    case "$cond":
+      return evalCond(operand, doc);
+    case "$ifNull":
+      return evalIfNull(operand, doc);
+    case "$switch":
+      return evalSwitch(operand, doc);
+    // Date operators
+    case "$year":
+      return evalYear(operand, doc);
+    case "$month":
+      return evalMonth(operand, doc);
+    case "$dayOfMonth":
+      return evalDayOfMonth(operand, doc);
+    case "$dayOfWeek":
+      return evalDayOfWeek(operand, doc);
+    case "$dayOfYear":
+      return evalDayOfYear(operand, doc);
+    case "$hour":
+      return evalHour(operand, doc);
+    case "$minute":
+      return evalMinute(operand, doc);
+    case "$second":
+      return evalSecond(operand, doc);
+    case "$millisecond":
+      return evalMillisecond(operand, doc);
+    case "$week":
+      return evalWeek(operand, doc);
+    case "$isoWeek":
+      return evalIsoWeek(operand, doc);
+    case "$isoWeekYear":
+      return evalIsoWeekYear(operand, doc);
+    case "$dateToString":
+      return evalDateToString(operand, doc);
+    case "$toDate":
+      return evalToDate(operand, doc);
+    // Array operators
+    case "$arrayElemAt":
+      return evalArrayElemAt(operand, doc);
+    case "$concatArrays":
+      return evalConcatArrays(operand, doc);
+    case "$filter":
+      return evalFilter(operand, doc);
+    case "$in":
+      return evalIn(operand, doc);
+    case "$indexOfArray":
+      return evalIndexOfArray(operand, doc);
+    case "$isArray":
+      return evalIsArray(operand, doc);
+    case "$map":
+      return evalMap(operand, doc);
+    case "$reduce":
+      return evalReduce(operand, doc);
+    case "$size":
+      return evalSize(operand, doc);
+    case "$slice":
+      return evalSlice(operand, doc);
+    case "$reverseArray":
+      return evalReverseArray(operand, doc);
+    case "$zip":
+      return evalZip(operand, doc);
+    // Type operators
+    case "$type":
+      return evalType(operand, doc);
+    case "$convert":
+      return evalConvert(operand, doc);
+    case "$toBool":
+      return evalToBool(operand, doc);
+    case "$toDecimal":
+      return evalToDecimal(operand, doc);
+    case "$toDouble":
+      return evalToDouble(operand, doc);
+    case "$toInt":
+      return evalToInt(operand, doc);
+    case "$toLong":
+      return evalToLong(operand, doc);
+    case "$toString":
+      return evalToString(operand, doc);
+    // Object operators
+    case "$objectToArray":
+      return evalObjectToArray(operand, doc);
+    case "$arrayToObject":
+      return evalArrayToObject(operand, doc);
+    case "$mergeObjects":
+      return evalMergeObjects(operand, doc);
+    // Literal operator
+    case "$literal":
+      return operand;
+    default:
+      throw new Error(`Unsupported aggregation operator: ${operator}`);
+  }
+}
+function evalAdd(operands, doc) {
+  if (!Array.isArray(operands)) return null;
+  let sum = 0;
+  for (const operand of operands) {
+    const val = evaluateExpression(operand, doc);
+    if (val instanceof Date) {
+      sum += val.getTime();
+    } else if (typeof val === "number") {
+      sum += val;
+    }
+  }
+  return sum;
+}
+function evalSubtract(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  if (val1 instanceof Date && val2 instanceof Date) {
+    return val1.getTime() - val2.getTime();
+  } else if (val1 instanceof Date && typeof val2 === "number") {
+    return new Date(val1.getTime() - val2);
+  } else if (typeof val1 === "number" && typeof val2 === "number") {
+    return val1 - val2;
+  }
+  return null;
+}
+function evalMultiply(operands, doc) {
+  if (!Array.isArray(operands)) return null;
+  let product = 1;
+  for (const operand of operands) {
+    const val = evaluateExpression(operand, doc);
+    if (typeof val === "number") {
+      product *= val;
+    }
+  }
+  return product;
+}
+function evalDivide(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  if (typeof val1 === "number" && typeof val2 === "number" && val2 !== 0) {
+    return val1 / val2;
+  }
+  return null;
+}
+function evalMod(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  if (typeof val1 === "number" && typeof val2 === "number" && val2 !== 0) {
+    return val1 % val2;
+  }
+  return null;
+}
+function evalPow(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const base = evaluateExpression(operands[0], doc);
+  const exponent = evaluateExpression(operands[1], doc);
+  if (typeof base === "number" && typeof exponent === "number") {
+    return Math.pow(base, exponent);
+  }
+  return null;
+}
+function evalSqrt(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (typeof val === "number" && val >= 0) {
+    return Math.sqrt(val);
+  }
+  return null;
+}
+function evalAbs(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (typeof val === "number") {
+    return Math.abs(val);
+  }
+  return null;
+}
+function evalCeil(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (typeof val === "number") {
+    return Math.ceil(val);
+  }
+  return null;
+}
+function evalFloor(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (typeof val === "number") {
+    return Math.floor(val);
+  }
+  return null;
+}
+function evalTrunc(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (typeof val === "number") {
+    return Math.trunc(val);
+  }
+  return null;
+}
+function evalRound(operands, doc) {
+  const val = evaluateExpression(Array.isArray(operands) ? operands[0] : operands, doc);
+  const place = Array.isArray(operands) && operands[1] !== void 0 ? evaluateExpression(operands[1], doc) : 0;
+  if (typeof val === "number" && typeof place === "number") {
+    const multiplier = Math.pow(10, place);
+    return Math.round(val * multiplier) / multiplier;
+  }
+  return null;
+}
+function evalConcat(operands, doc) {
+  if (!Array.isArray(operands)) return null;
+  let result = "";
+  for (const operand of operands) {
+    const val = evaluateExpression(operand, doc);
+    if (val !== null && val !== void 0) {
+      result += String(val);
+    }
+  }
+  return result;
+}
+function evalSubstr(operands, doc) {
+  if (!Array.isArray(operands) || operands.length < 3) return null;
+  const str = String(evaluateExpression(operands[0], doc) || "");
+  const start = evaluateExpression(operands[1], doc);
+  const length = evaluateExpression(operands[2], doc);
+  if (typeof start === "number" && typeof length === "number") {
+    return str.substr(start, length);
+  }
+  return null;
+}
+function evalToLower(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return val !== null && val !== void 0 ? String(val).toLowerCase() : "";
+}
+function evalToUpper(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return val !== null && val !== void 0 ? String(val).toUpperCase() : "";
+}
+function evalTrim(operand, doc) {
+  const val = evaluateExpression(typeof operand === "object" && operand.input ? operand.input : operand, doc);
+  const chars = operand.chars ? evaluateExpression(operand.chars, doc) : null;
+  let str = val !== null && val !== void 0 ? String(val) : "";
+  if (chars) {
+    const charsRegex = new RegExp(`^[${escapeRegex(chars)}]+|[${escapeRegex(chars)}]+$`, "g");
+    return str.replace(charsRegex, "");
+  }
+  return str.trim();
+}
+function evalLtrim(operand, doc) {
+  const val = evaluateExpression(typeof operand === "object" && operand.input ? operand.input : operand, doc);
+  const chars = operand.chars ? evaluateExpression(operand.chars, doc) : null;
+  let str = val !== null && val !== void 0 ? String(val) : "";
+  if (chars) {
+    const charsRegex = new RegExp(`^[${escapeRegex(chars)}]+`, "g");
+    return str.replace(charsRegex, "");
+  }
+  return str.replace(/^\s+/, "");
+}
+function evalRtrim(operand, doc) {
+  const val = evaluateExpression(typeof operand === "object" && operand.input ? operand.input : operand, doc);
+  const chars = operand.chars ? evaluateExpression(operand.chars, doc) : null;
+  let str = val !== null && val !== void 0 ? String(val) : "";
+  if (chars) {
+    const charsRegex = new RegExp(`[${escapeRegex(chars)}]+$`, "g");
+    return str.replace(charsRegex, "");
+  }
+  return str.replace(/\s+$/, "");
+}
+function evalSplit(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const str = String(evaluateExpression(operands[0], doc) || "");
+  const delimiter = String(evaluateExpression(operands[1], doc) || "");
+  return str.split(delimiter);
+}
+function evalStrLenCP(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return val !== null && val !== void 0 ? String(val).length : 0;
+}
+function evalStrcasecmp(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const str1 = String(evaluateExpression(operands[0], doc) || "").toLowerCase();
+  const str2 = String(evaluateExpression(operands[1], doc) || "").toLowerCase();
+  if (str1 < str2) return -1;
+  if (str1 > str2) return 1;
+  return 0;
+}
+function evalIndexOfCP(operands, doc) {
+  if (!Array.isArray(operands) || operands.length < 2) return null;
+  const str = String(evaluateExpression(operands[0], doc) || "");
+  const substr = String(evaluateExpression(operands[1], doc) || "");
+  const start = operands[2] !== void 0 ? evaluateExpression(operands[2], doc) : 0;
+  const end = operands[3] !== void 0 ? evaluateExpression(operands[3], doc) : str.length;
+  const searchStr = str.substring(start, end);
+  const index = searchStr.indexOf(substr);
+  return index === -1 ? -1 : index + start;
+}
+function evalReplaceOne(operand, doc) {
+  const input = String(evaluateExpression(operand.input, doc) || "");
+  const find = String(evaluateExpression(operand.find, doc) || "");
+  const replacement = String(evaluateExpression(operand.replacement, doc) || "");
+  return input.replace(find, replacement);
+}
+function evalReplaceAll(operand, doc) {
+  const input = String(evaluateExpression(operand.input, doc) || "");
+  const find = String(evaluateExpression(operand.find, doc) || "");
+  const replacement = String(evaluateExpression(operand.replacement, doc) || "");
+  return input.split(find).join(replacement);
+}
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function evalCmp(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  if (val1 < val2) return -1;
+  if (val1 > val2) return 1;
+  return 0;
+}
+function evalEq(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  return val1 === val2;
+}
+function evalNe(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  return val1 !== val2;
+}
+function evalGt(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  return val1 > val2;
+}
+function evalGte(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  return val1 >= val2;
+}
+function evalLt(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  return val1 < val2;
+}
+function evalLte(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const val1 = evaluateExpression(operands[0], doc);
+  const val2 = evaluateExpression(operands[1], doc);
+  return val1 <= val2;
+}
+function evalAnd(operands, doc) {
+  if (!Array.isArray(operands)) return null;
+  for (const operand of operands) {
+    const val = evaluateExpression(operand, doc);
+    if (!val) return false;
+  }
+  return true;
+}
+function evalOr(operands, doc) {
+  if (!Array.isArray(operands)) return null;
+  for (const operand of operands) {
+    const val = evaluateExpression(operand, doc);
+    if (val) return true;
+  }
+  return false;
+}
+function evalNot(operand, doc) {
+  const val = evaluateExpression(Array.isArray(operand) ? operand[0] : operand, doc);
+  return !val;
+}
+function evalCond(operand, doc) {
+  let ifExpr, thenExpr, elseExpr;
+  if (Array.isArray(operand)) {
+    if (operand.length !== 3) return null;
+    [ifExpr, thenExpr, elseExpr] = operand;
+  } else if (typeof operand === "object") {
+    ifExpr = operand.if;
+    thenExpr = operand.then;
+    elseExpr = operand.else;
+  } else {
+    return null;
+  }
+  const condition = evaluateExpression(ifExpr, doc);
+  return condition ? evaluateExpression(thenExpr, doc) : evaluateExpression(elseExpr, doc);
+}
+function evalIfNull(operands, doc) {
+  if (!Array.isArray(operands) || operands.length < 2) return null;
+  for (let i = 0; i < operands.length; i++) {
+    const val = evaluateExpression(operands[i], doc);
+    if (val !== null && val !== void 0) {
+      return val;
+    }
+  }
+  return null;
+}
+function evalSwitch(operand, doc) {
+  if (typeof operand !== "object" || !Array.isArray(operand.branches)) {
+    return null;
+  }
+  for (const branch of operand.branches) {
+    const caseResult = evaluateExpression(branch.case, doc);
+    if (caseResult) {
+      return evaluateExpression(branch.then, doc);
+    }
+  }
+  return operand.default !== void 0 ? evaluateExpression(operand.default, doc) : null;
+}
+function evalYear(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCFullYear();
+  }
+  return null;
+}
+function evalMonth(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCMonth() + 1;
+  }
+  return null;
+}
+function evalDayOfMonth(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCDate();
+  }
+  return null;
+}
+function evalDayOfWeek(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCDay() + 1;
+  }
+  return null;
+}
+function evalDayOfYear(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
+    const diff = date - start;
+    const oneDay = 1e3 * 60 * 60 * 24;
+    return Math.floor(diff / oneDay);
+  }
+  return null;
+}
+function evalHour(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCHours();
+  }
+  return null;
+}
+function evalMinute(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCMinutes();
+  }
+  return null;
+}
+function evalSecond(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCSeconds();
+  }
+  return null;
+}
+function evalMillisecond(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    return date.getUTCMilliseconds();
+  }
+  return null;
+}
+function evalWeek(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    const onejan = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const week = Math.ceil(((date - onejan) / 864e5 + onejan.getUTCDay() + 1) / 7);
+    return week - 1;
+  }
+  return null;
+}
+function evalIsoWeek(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    const target = new Date(date.valueOf());
+    const dayNr = (date.getUTCDay() + 6) % 7;
+    target.setUTCDate(target.getUTCDate() - dayNr + 3);
+    const firstThursday = target.valueOf();
+    target.setUTCMonth(0, 1);
+    if (target.getUTCDay() !== 4) {
+      target.setUTCMonth(0, 1 + (4 - target.getUTCDay() + 7) % 7);
+    }
+    return 1 + Math.ceil((firstThursday - target) / 6048e5);
+  }
+  return null;
+}
+function evalIsoWeekYear(operand, doc) {
+  const date = evaluateExpression(operand, doc);
+  if (date instanceof Date) {
+    const target = new Date(date.valueOf());
+    target.setUTCDate(target.getUTCDate() - (date.getUTCDay() + 6) % 7 + 3);
+    return target.getUTCFullYear();
+  }
+  return null;
+}
+function evalDateToString(operand, doc) {
+  const format = operand.format ? evaluateExpression(operand.format, doc) : "%Y-%m-%dT%H:%M:%S.%LZ";
+  const date = evaluateExpression(operand.date, doc);
+  if (!(date instanceof Date)) return null;
+  return format.replace("%Y", date.getUTCFullYear()).replace("%m", String(date.getUTCMonth() + 1).padStart(2, "0")).replace("%d", String(date.getUTCDate()).padStart(2, "0")).replace("%H", String(date.getUTCHours()).padStart(2, "0")).replace("%M", String(date.getUTCMinutes()).padStart(2, "0")).replace("%S", String(date.getUTCSeconds()).padStart(2, "0")).replace("%L", String(date.getUTCMilliseconds()).padStart(3, "0"));
+}
+function evalToDate(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (val instanceof Date) return val;
+  if (typeof val === "string" || typeof val === "number") {
+    const date = new Date(val);
+    return isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+}
+function evalArrayElemAt(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const arr = evaluateExpression(operands[0], doc);
+  const idx = evaluateExpression(operands[1], doc);
+  if (!Array.isArray(arr) || typeof idx !== "number") return null;
+  const index = idx < 0 ? arr.length + idx : idx;
+  return arr[index];
+}
+function evalConcatArrays(operands, doc) {
+  if (!Array.isArray(operands)) return null;
+  const result = [];
+  for (const operand of operands) {
+    const arr = evaluateExpression(operand, doc);
+    if (Array.isArray(arr)) {
+      result.push(...arr);
+    }
+  }
+  return result;
+}
+function evalFilter(operand, doc) {
+  const input = evaluateExpression(operand.input, doc);
+  const asVar = operand.as || "this";
+  const cond = operand.cond;
+  if (!Array.isArray(input)) return null;
+  return input.filter((item) => {
+    const itemDoc = { ...doc, [asVar]: item };
+    return evaluateExpression(cond, itemDoc);
+  });
+}
+function evalIn(operands, doc) {
+  if (!Array.isArray(operands) || operands.length !== 2) return null;
+  const value = evaluateExpression(operands[0], doc);
+  const arr = evaluateExpression(operands[1], doc);
+  if (!Array.isArray(arr)) return false;
+  return arr.includes(value);
+}
+function evalIndexOfArray(operands, doc) {
+  if (!Array.isArray(operands) || operands.length < 2) return null;
+  const arr = evaluateExpression(operands[0], doc);
+  const search = evaluateExpression(operands[1], doc);
+  const start = operands[2] !== void 0 ? evaluateExpression(operands[2], doc) : 0;
+  const end = operands[3] !== void 0 ? evaluateExpression(operands[3], doc) : arr.length;
+  if (!Array.isArray(arr)) return null;
+  for (let i = start; i < end && i < arr.length; i++) {
+    if (arr[i] === search) return i;
+  }
+  return -1;
+}
+function evalIsArray(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return Array.isArray(val);
+}
+function evalMap(operand, doc) {
+  const input = evaluateExpression(operand.input, doc);
+  const asVar = operand.as || "this";
+  const inExpr = operand.in;
+  if (!Array.isArray(input)) return null;
+  return input.map((item) => {
+    const itemDoc = { ...doc, [asVar]: item };
+    return evaluateExpression(inExpr, itemDoc);
+  });
+}
+function evalReduce(operand, doc) {
+  const input = evaluateExpression(operand.input, doc);
+  const initialValue = evaluateExpression(operand.initialValue, doc);
+  const inExpr = operand.in;
+  if (!Array.isArray(input)) return null;
+  let value = initialValue;
+  for (const item of input) {
+    const itemDoc = { ...doc, value, this: item };
+    value = evaluateExpression(inExpr, itemDoc);
+  }
+  return value;
+}
+function evalSize(operand, doc) {
+  const arr = evaluateExpression(operand, doc);
+  return Array.isArray(arr) ? arr.length : null;
+}
+function evalSlice(operands, doc) {
+  if (!Array.isArray(operands) || operands.length < 2) return null;
+  const arr = evaluateExpression(operands[0], doc);
+  if (!Array.isArray(arr)) return null;
+  if (operands.length === 2) {
+    const n = evaluateExpression(operands[1], doc);
+    return n >= 0 ? arr.slice(0, n) : arr.slice(n);
+  } else {
+    const position = evaluateExpression(operands[1], doc);
+    const n = evaluateExpression(operands[2], doc);
+    return arr.slice(position, position + n);
+  }
+}
+function evalReverseArray(operand, doc) {
+  const arr = evaluateExpression(operand, doc);
+  return Array.isArray(arr) ? arr.slice().reverse() : null;
+}
+function evalZip(operand, doc) {
+  const inputs = operand.inputs ? evaluateExpression(operand.inputs, doc) : null;
+  const useLongestLength = operand.useLongestLength || false;
+  const defaults = operand.defaults;
+  if (!Array.isArray(inputs)) return null;
+  const arrays = inputs.map((input) => evaluateExpression(input, doc));
+  if (!arrays.every((arr) => Array.isArray(arr))) return null;
+  const maxLength = Math.max(...arrays.map((arr) => arr.length));
+  const length = useLongestLength ? maxLength : Math.min(...arrays.map((arr) => arr.length));
+  const result = [];
+  for (let i = 0; i < length; i++) {
+    const tuple = [];
+    for (let j = 0; j < arrays.length; j++) {
+      if (i < arrays[j].length) {
+        tuple.push(arrays[j][i]);
+      } else if (defaults && j < defaults.length) {
+        tuple.push(defaults[j]);
+      } else {
+        tuple.push(null);
+      }
+    }
+    result.push(tuple);
+  }
+  return result;
+}
+function evalType(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (val === null) return "null";
+  if (val === void 0) return "missing";
+  if (typeof val === "boolean") return "bool";
+  if (typeof val === "number") return Number.isInteger(val) ? "int" : "double";
+  if (typeof val === "string") return "string";
+  if (val instanceof Date) return "date";
+  if (Array.isArray(val)) return "array";
+  if (typeof val === "object") return "object";
+  return "unknown";
+}
+function evalConvert(operand, doc) {
+  const input = evaluateExpression(operand.input, doc);
+  const to = operand.to;
+  const onError = operand.onError;
+  const onNull = operand.onNull;
+  if (input === null) {
+    return onNull !== void 0 ? evaluateExpression(onNull, doc) : null;
+  }
+  try {
+    switch (to) {
+      case "double":
+      case "decimal":
+        return parseFloat(input);
+      case "int":
+      case "long":
+        return parseInt(input);
+      case "bool":
+        return Boolean(input);
+      case "string":
+        return String(input);
+      case "date":
+        return new Date(input);
+      default:
+        return input;
+    }
+  } catch (e) {
+    return onError !== void 0 ? evaluateExpression(onError, doc) : null;
+  }
+}
+function evalToBool(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return Boolean(val);
+}
+function evalToDecimal(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return parseFloat(val);
+}
+function evalToDouble(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return parseFloat(val);
+}
+function evalToInt(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return parseInt(val);
+}
+function evalToLong(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  return parseInt(val);
+}
+function evalToString(operand, doc) {
+  const val = evaluateExpression(operand, doc);
+  if (val === null || val === void 0) return null;
+  return String(val);
+}
+function evalObjectToArray(operand, doc) {
+  const obj = evaluateExpression(operand, doc);
+  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+    return null;
+  }
+  return Object.keys(obj).map((key) => ({ k: key, v: obj[key] }));
+}
+function evalArrayToObject(operand, doc) {
+  const arr = evaluateExpression(operand, doc);
+  if (!Array.isArray(arr)) return null;
+  const result = {};
+  for (const item of arr) {
+    if (Array.isArray(item) && item.length === 2) {
+      result[item[0]] = item[1];
+    } else if (typeof item === "object" && item.k !== void 0 && item.v !== void 0) {
+      result[item.k] = item.v;
+    }
+  }
+  return result;
+}
+function evalMergeObjects(operands, doc) {
+  if (!Array.isArray(operands)) {
+    return evaluateExpression(operands, doc);
+  }
+  const result = {};
+  for (const operand of operands) {
+    const obj = evaluateExpression(operand, doc);
+    if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) {
+      Object.assign(result, obj);
+    }
+  }
+  return result;
+}
+const BSON_TYPES = {
+  1: "double",
+  2: "string",
+  3: "object",
+  4: "array",
+  5: "binData",
+  6: "undefined",
+  7: "objectId",
+  8: "bool",
+  9: "date",
+  10: "null",
+  11: "regex",
+  13: "javascript",
+  15: "javascriptWithScope",
+  16: "int",
+  17: "timestamp",
+  18: "long",
+  19: "decimal",
+  127: "maxKey",
+  "-1": "minKey"
+};
+const TYPE_ALIASES = Object.entries(BSON_TYPES).reduce((acc, [code, name]) => {
+  acc[name] = parseInt(code);
+  return acc;
+}, {});
+function matchesType(value, typeSpec) {
+  if (isArray(typeSpec)) {
+    for (let i = 0; i < typeSpec.length; i++) {
+      if (matchesType(value, typeSpec[i])) return true;
     }
     return false;
+  }
+  const typeCode = typeof typeSpec === "number" ? typeSpec : TYPE_ALIASES[typeSpec];
+  const typeName = BSON_TYPES[typeCode] || typeSpec;
+  if (value === null) return typeName === "null" || typeCode === 10;
+  if (value === void 0) return typeName === "undefined" || typeCode === 6;
+  if (typeof value === "number") {
+    if (Number.isInteger(value)) return typeName === "int" || typeCode === 16;
+    return typeName === "double" || typeCode === 1;
+  }
+  if (typeof value === "string") return typeName === "string" || typeCode === 2;
+  if (typeof value === "boolean") return typeName === "bool" || typeCode === 8;
+  if (value instanceof Date) return typeName === "date" || typeCode === 9;
+  if (value instanceof ObjectId) return typeName === "objectId" || typeCode === 7;
+  if (value instanceof RegExp) return typeName === "regex" || typeCode === 11;
+  if (isArray(value)) return typeName === "array" || typeCode === 4;
+  if (typeof value === "object") return typeName === "object" || typeCode === 3;
+  return typeof value === typeSpec;
+}
+function toBitMask(positions) {
+  if (isArray(positions)) {
+    let mask = 0;
+    for (let i = 0; i < positions.length; i++) {
+      mask |= 1 << positions[i];
+    }
+    return mask;
+  } else if (typeof positions === "number") {
+    return positions;
+  }
+  return 0;
+}
+function matchesBitsAllSet(value, positions) {
+  if (typeof value !== "number") return false;
+  const mask = toBitMask(positions);
+  return (value & mask) === mask;
+}
+function matchesBitsAllClear(value, positions) {
+  if (typeof value !== "number") return false;
+  const mask = toBitMask(positions);
+  return (value & mask) === 0;
+}
+function matchesBitsAnySet(value, positions) {
+  if (typeof value !== "number") return false;
+  const mask = toBitMask(positions);
+  return (value & mask) !== 0;
+}
+function matchesBitsAnyClear(value, positions) {
+  if (typeof value !== "number") return false;
+  const mask = toBitMask(positions);
+  return (value & mask) !== mask;
+}
+function validateJsonSchema(doc, schema) {
+  if (schema.type) {
+    const docType = isArray(doc) ? "array" : doc === null ? "null" : typeof doc;
+    if (schema.type !== docType) return false;
+  }
+  if (schema.required && isArray(schema.required)) {
+    for (let i = 0; i < schema.required.length; i++) {
+      if (!(schema.required[i] in doc)) return false;
+    }
+  }
+  if (schema.properties) {
+    for (const key in schema.properties) {
+      if (!(key in doc)) return false;
+      const propSchema = schema.properties[key];
+      if (!validateJsonSchema(doc[key], propSchema)) return false;
+    }
+  }
+  if (schema.minimum !== void 0 && typeof doc === "number") {
+    if (doc < schema.minimum) return false;
+  }
+  if (schema.maximum !== void 0 && typeof doc === "number") {
+    if (doc > schema.maximum) return false;
+  }
+  if (schema.minLength !== void 0 && typeof doc === "string") {
+    if (doc.length < schema.minLength) return false;
+  }
+  if (schema.maxLength !== void 0 && typeof doc === "string") {
+    if (doc.length > schema.maxLength) return false;
+  }
+  if (schema.pattern && typeof doc === "string") {
+    const regex = new RegExp(schema.pattern);
+    if (!regex.test(doc)) return false;
+  }
+  if (schema.enum && isArray(schema.enum)) {
+    if (!schema.enum.includes(doc)) return false;
+  }
+  return true;
+}
+function valuesEqual(a, b) {
+  if (a instanceof ObjectId && b instanceof ObjectId) {
+    return a.equals(b);
   }
   return a == b;
 }
@@ -1442,7 +2852,8 @@ function compareValues(a, b, operator) {
   }
 }
 function fieldValueMatches(fieldValue, checkFn) {
-  if (fieldValue == void 0) return false;
+  if (fieldValue === void 0) return false;
+  if (fieldValue === null) return checkFn(fieldValue);
   if (isArray(fieldValue)) {
     for (var i = 0; i < fieldValue.length; i++) {
       if (checkFn(fieldValue[i])) return true;
@@ -1532,7 +2943,15 @@ function tlMatches(doc, query) {
     else if (key == "$not") return not(doc, value);
     else if (key == "$nor") return nor(doc, value);
     else if (key == "$where") return where(doc, value);
-    else throw { $err: "Can't canonicalize query: BadValue unknown top level operator: " + key, code: 17287 };
+    else if (key == "$comment") return true;
+    else if (key == "$jsonSchema") return validateJsonSchema(doc, value);
+    else if (key == "$expr") {
+      try {
+        return evaluateExpression(value, doc);
+      } catch (e) {
+        return false;
+      }
+    } else throw { $err: "Can't canonicalize query: BadValue unknown top level operator: " + key, code: 17287 };
   } else {
     return opMatches(doc, key, value);
   }
@@ -1600,22 +3019,37 @@ function opMatches(doc, key, value) {
             var rawValue = getProp(doc, key);
             if (operand ? rawValue == void 0 : rawValue != void 0) return false;
           } else if (operator == "$type") {
-            if (!fieldValueMatches(fieldValue, function(v) {
-              return typeof v == operand;
-            })) return false;
+            if (fieldValue === void 0) {
+              const expectedTypeCode = typeof operand === "number" ? operand : TYPE_ALIASES[operand];
+              if (expectedTypeCode !== 6) return false;
+            } else {
+              if (!matchesType(fieldValue, operand)) return false;
+            }
           } else if (operator == "$mod") {
             if (operand.length != 2) throw { $err: "Can't canonicalize query: BadValue malformed mod, not enough elements", code: 17287 };
             if (!fieldValueMatches(fieldValue, function(v) {
               return v != void 0 && v % operand[0] == operand[1];
             })) return false;
           } else if (operator == "$regex") {
+            var pattern = operand;
+            var flags = value.$options || "";
+            var regex = typeof pattern === "string" ? new RegExp(pattern, flags) : pattern;
             if (!fieldValueMatches(fieldValue, function(v) {
-              return v != void 0 && v.match(operand);
+              return v != void 0 && regex.test(v);
             })) return false;
+          } else if (operator == "$options") {
+            continue;
           } else if (operator == "$text") {
             if (!fieldValueMatches(fieldValue, function(v) {
               return v != void 0 && text(v, operand);
             })) return false;
+          } else if (operator == "$expr") {
+            try {
+              const result = evaluateExpression(operand, doc);
+              if (!result) return false;
+            } catch (e) {
+              return false;
+            }
           } else if (operator == "$geoWithin") {
             if (!fieldValueMatches(fieldValue, function(v) {
               return v != void 0 && geoWithin(v, operand);
@@ -1666,6 +3100,22 @@ function opMatches(doc, key, value) {
             var sizeFieldValue = getProp(doc, key);
             if (sizeFieldValue == void 0 || !isArray(sizeFieldValue)) return false;
             if (sizeFieldValue.length != operand) return false;
+          } else if (operator == "$bitsAllSet") {
+            if (!fieldValueMatches(fieldValue, function(v) {
+              return matchesBitsAllSet(v, operand);
+            })) return false;
+          } else if (operator == "$bitsAllClear") {
+            if (!fieldValueMatches(fieldValue, function(v) {
+              return matchesBitsAllClear(v, operand);
+            })) return false;
+          } else if (operator == "$bitsAnySet") {
+            if (!fieldValueMatches(fieldValue, function(v) {
+              return matchesBitsAnySet(v, operand);
+            })) return false;
+          } else if (operator == "$bitsAnyClear") {
+            if (!fieldValueMatches(fieldValue, function(v) {
+              return matchesBitsAnyClear(v, operand);
+            })) return false;
           } else {
             throw { $err: "Can't canonicalize query: BadValue unknown operator: " + operator, code: 17287 };
           }
@@ -1703,7 +3153,465 @@ function nor(doc, els) {
 function matches(doc, query) {
   return and(doc, toArray(query));
 }
-function applyUpdates(updates, doc, setOnInsert) {
+function matchWithArrayIndices(doc, query) {
+  const arrayFilters = {};
+  const matched = andWithTracking(doc, toArray(query), arrayFilters);
+  return { matched, arrayFilters };
+}
+function andWithTracking(doc, els, arrayFilters) {
+  for (var i = 0; i < els.length; i++) {
+    if (!tlMatchesWithTracking(doc, els[i], arrayFilters)) {
+      return false;
+    }
+  }
+  return true;
+}
+function tlMatchesWithTracking(doc, query, arrayFilters) {
+  var key = Object.keys(query)[0];
+  var value = query[key];
+  if (key.charAt(0) == "$") {
+    if (key == "$and") return andWithTracking(doc, value, arrayFilters);
+    else if (key == "$or") return orWithTracking(doc, value, arrayFilters);
+    else if (key == "$not") {
+      return !tlMatches(doc, value);
+    } else if (key == "$nor") return norWithTracking(doc, value, arrayFilters);
+    else if (key == "$where") return where(doc, value);
+    else if (key == "$comment") return true;
+    else if (key == "$jsonSchema") return validateJsonSchema(doc, value);
+    else if (key == "$expr") {
+      try {
+        return evaluateExpression(value, doc);
+      } catch (e) {
+        return false;
+      }
+    } else throw { $err: "Can't canonicalize query: BadValue unknown top level operator: " + key, code: 17287 };
+  } else {
+    return opMatchesWithTracking(doc, key, value, arrayFilters);
+  }
+}
+function orWithTracking(doc, els, arrayFilters) {
+  for (var i = 0; i < els.length; i++) {
+    if (tlMatchesWithTracking(doc, els[i], arrayFilters)) {
+      return true;
+    }
+  }
+  return false;
+}
+function norWithTracking(doc, els, arrayFilters) {
+  for (var i = 0; i < els.length; i++) {
+    if (tlMatchesWithTracking(doc, els[i], arrayFilters)) {
+      return false;
+    }
+  }
+  return true;
+}
+function opMatchesWithTracking(doc, key, value, arrayFilters) {
+  const baseField = key.split(".")[0];
+  const fieldValue = getFieldValues(doc, key);
+  const trackMatchingIndex = (fieldValue2, checkFn) => {
+    if (fieldValue2 === void 0) return false;
+    if (fieldValue2 === null) return checkFn(fieldValue2);
+    if (isArray(fieldValue2)) {
+      const baseValue = getProp(doc, baseField);
+      if (isArray(baseValue)) {
+        for (var i2 = 0; i2 < fieldValue2.length; i2++) {
+          if (checkFn(fieldValue2[i2])) {
+            arrayFilters[key] = i2;
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+    return fieldValueMatches(fieldValue2, checkFn);
+  };
+  if (typeof value == "string") return trackMatchingIndex(fieldValue, function(v) {
+    return valuesEqual(v, value);
+  });
+  else if (typeof value == "number") return trackMatchingIndex(fieldValue, function(v) {
+    return valuesEqual(v, value);
+  });
+  else if (typeof value == "boolean") return trackMatchingIndex(fieldValue, function(v) {
+    return valuesEqual(v, value);
+  });
+  else if (value instanceof ObjectId) return trackMatchingIndex(fieldValue, function(v) {
+    return valuesEqual(v, value);
+  });
+  else if (typeof value == "object") {
+    if (value instanceof RegExp) return fieldValue != void 0 && trackMatchingIndex(fieldValue, function(v) {
+      return v && v.match(value);
+    });
+    else if (isArray(value)) return fieldValue != void 0 && trackMatchingIndex(fieldValue, function(v) {
+      return v && arrayMatches(v, value);
+    });
+    else {
+      var keys = Object.keys(value);
+      if (keys[0].charAt(0) == "$") {
+        for (var i = 0; i < keys.length; i++) {
+          var operator = keys[i];
+          var operand = value[operator];
+          if (operator == "$eq") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return valuesEqual(v, operand);
+            })) return false;
+          } else if (operator == "$gt") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return compareValues(v, operand, ">");
+            })) return false;
+          } else if (operator == "$gte") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return compareValues(v, operand, ">=");
+            })) return false;
+          } else if (operator == "$lt") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return compareValues(v, operand, "<");
+            })) return false;
+          } else if (operator == "$lte") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return compareValues(v, operand, "<=");
+            })) return false;
+          } else if (operator == "$ne") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return !valuesEqual(v, operand);
+            })) return false;
+          } else if (operator == "$in") {
+            if (!trackMatchingIndex(fieldValue, function(v) {
+              return isIn(v, operand);
+            })) return false;
+          } else if (operator == "$nin") {
+            if (trackMatchingIndex(fieldValue, function(v) {
+              return isIn(v, operand);
+            })) return false;
+          } else if (operator == "$elemMatch") {
+            var arrayFieldValue = getProp(doc, key);
+            if (arrayFieldValue == void 0 || !isArray(arrayFieldValue)) return false;
+            for (var j = 0; j < arrayFieldValue.length; j++) {
+              var element = arrayFieldValue[j];
+              if (typeof element === "object" && !isArray(element)) {
+                if (matches(element, operand)) {
+                  arrayFilters[key] = j;
+                  return true;
+                }
+              } else {
+                var matchesPrimitive = true;
+                var opKeys = Object.keys(operand);
+                for (var k = 0; k < opKeys.length; k++) {
+                  var op = opKeys[k];
+                  var opValue = operand[op];
+                  if (op == "$gte" && !(element >= opValue)) matchesPrimitive = false;
+                  else if (op == "$gt" && !(element > opValue)) matchesPrimitive = false;
+                  else if (op == "$lte" && !(element <= opValue)) matchesPrimitive = false;
+                  else if (op == "$lt" && !(element < opValue)) matchesPrimitive = false;
+                  else if (op == "$eq" && element != opValue) matchesPrimitive = false;
+                  else if (op == "$ne" && element == opValue) matchesPrimitive = false;
+                }
+                if (matchesPrimitive) {
+                  arrayFilters[key] = j;
+                  return true;
+                }
+              }
+            }
+            return false;
+          } else {
+            if (!opMatches(doc, key, value)) return false;
+          }
+        }
+        return true;
+      } else {
+        return fieldValue != void 0 && trackMatchingIndex(fieldValue, function(v) {
+          return objectMatches(v, value);
+        });
+      }
+    }
+  }
+  return false;
+}
+class Timestamp {
+  constructor(low, high) {
+    if (arguments.length === 0) {
+      this.low = 0;
+      this.high = Math.floor(Date.now() / 1e3);
+    } else if (arguments.length === 1) {
+      if (typeof low === "object" && low !== null) {
+        this.low = low.low || 0;
+        this.high = low.high || 0;
+      } else {
+        this.low = 0;
+        this.high = low;
+      }
+    } else {
+      this.low = low >>> 0;
+      this.high = high >>> 0;
+    }
+  }
+  /**
+   * Returns the timestamp in a comparable form
+   */
+  valueOf() {
+    return this.high * 4294967296 + this.low;
+  }
+  /**
+   * Returns the timestamp as a string
+   */
+  toString() {
+    return `Timestamp(${this.high}, ${this.low})`;
+  }
+  /**
+   * Returns the timestamp as a JSON object
+   */
+  toJSON() {
+    return {
+      $timestamp: {
+        t: this.high,
+        i: this.low
+      }
+    };
+  }
+  /**
+   * Custom inspect for Node.js console.log
+   */
+  inspect() {
+    return this.toString();
+  }
+  /**
+   * Compares this Timestamp with another for equality
+   */
+  equals(other) {
+    if (!other) return false;
+    if (other instanceof Timestamp) {
+      return this.low === other.low && this.high === other.high;
+    }
+    if (typeof other === "object" && other.low !== void 0 && other.high !== void 0) {
+      return this.low === other.low && this.high === other.high;
+    }
+    return false;
+  }
+  /**
+   * Get the seconds part of the timestamp
+   */
+  getHighBits() {
+    return this.high;
+  }
+  /**
+   * Get the increment part of the timestamp
+   */
+  getLowBits() {
+    return this.low;
+  }
+  /**
+   * Returns a Date object representing the timestamp
+   */
+  toDate() {
+    return new Date(this.high * 1e3);
+  }
+  /**
+   * Creates a Timestamp from a Date object
+   */
+  static fromDate(date) {
+    const seconds = Math.floor(date.getTime() / 1e3);
+    return new Timestamp(0, seconds);
+  }
+  /**
+   * Creates a Timestamp for the current time
+   */
+  static now() {
+    return new Timestamp();
+  }
+}
+function extractFilteredPositionalIdentifier(pathSegment) {
+  const match = pathSegment.match(/^\$\[([^\]]+)\]$/);
+  return match ? match[1] : null;
+}
+function parseFieldPath(fieldPath) {
+  const segments = fieldPath.split(".");
+  return segments.map((segment) => {
+    const identifier = extractFilteredPositionalIdentifier(segment);
+    return {
+      segment,
+      isFilteredPositional: identifier !== null,
+      identifier
+    };
+  });
+}
+function applyToFilteredArrayElements(doc, parsedPath, value, operation, arrayFilters) {
+  function traverse(current, pathIndex, filterContext) {
+    if (pathIndex >= parsedPath.length) {
+      return;
+    }
+    const pathInfo = parsedPath[pathIndex];
+    const isLastSegment = pathIndex === parsedPath.length - 1;
+    if (pathInfo.isFilteredPositional) {
+      const identifier = pathInfo.identifier;
+      const filter = arrayFilters ? arrayFilters.find((f) => {
+        const filterKeys = Object.keys(f);
+        return filterKeys.some((key) => key.startsWith(identifier + ".") || key === identifier);
+      }) : null;
+      if (!arrayFilters) {
+        if (!current[pathInfo.segment]) {
+          const nextPath = parsedPath[pathIndex + 1];
+          if (nextPath && nextPath.isFilteredPositional) {
+            current[pathInfo.segment] = [];
+          } else {
+            current[pathInfo.segment] = {};
+          }
+        }
+        if (isLastSegment) {
+          applyOperationToValue(current, pathInfo.segment, value, operation);
+        } else {
+          traverse(current[pathInfo.segment], pathIndex + 1);
+        }
+        return;
+      }
+      if (!isArray(current)) {
+        if (!current[pathInfo.segment]) {
+          current[pathInfo.segment] = {};
+        }
+        if (isLastSegment) {
+          applyOperationToValue(current, pathInfo.segment, value, operation);
+        } else {
+          traverse(current[pathInfo.segment], pathIndex + 1);
+        }
+        return;
+      }
+      for (let i = 0; i < current.length; i++) {
+        const element = current[i];
+        let shouldUpdate = true;
+        if (filter) {
+          let transformedFilter = {};
+          let hasDirectMatch = false;
+          Object.keys(filter).forEach((key) => {
+            if (key.startsWith(identifier + ".")) {
+              const fieldPath = key.substring(identifier.length + 1);
+              transformedFilter[fieldPath] = filter[key];
+            } else if (key === identifier) {
+              transformedFilter = filter[key];
+              hasDirectMatch = true;
+            }
+          });
+          if (hasDirectMatch) {
+            const testDoc = { value: element };
+            const testFilter = { value: transformedFilter };
+            shouldUpdate = matches(testDoc, testFilter);
+          } else {
+            shouldUpdate = matches(element, transformedFilter);
+          }
+        }
+        if (shouldUpdate) {
+          if (isLastSegment) {
+            applyOperationToValue(current, i, value, operation);
+          } else {
+            if (element !== null && element !== void 0) {
+              traverse(current[i], pathIndex + 1);
+            }
+          }
+        }
+      }
+    } else {
+      if (current[pathInfo.segment] === void 0 || current[pathInfo.segment] === null) {
+        if (!isLastSegment) {
+          const nextPath = parsedPath[pathIndex + 1];
+          if (nextPath && nextPath.isFilteredPositional) {
+            current[pathInfo.segment] = [];
+          } else {
+            current[pathInfo.segment] = {};
+          }
+        }
+      }
+      if (isLastSegment) {
+        applyOperationToValue(current, pathInfo.segment, value, operation);
+      } else {
+        if (current[pathInfo.segment] !== void 0 && current[pathInfo.segment] !== null) {
+          traverse(current[pathInfo.segment], pathIndex + 1);
+        }
+      }
+    }
+  }
+  traverse(doc, 0);
+}
+function applyOperationToValue(container, key, value, operation) {
+  switch (operation) {
+    case "$set":
+      container[key] = value;
+      break;
+    case "$inc":
+      if (container[key] === void 0) container[key] = 0;
+      container[key] += value;
+      break;
+    case "$mul":
+      container[key] = container[key] * value;
+      break;
+    case "$min":
+      container[key] = Math.min(container[key], value);
+      break;
+    case "$max":
+      container[key] = Math.max(container[key], value);
+      break;
+    case "$unset":
+      delete container[key];
+      break;
+    default:
+      container[key] = value;
+  }
+}
+function hasFilteredPositionalOperator(fieldPath) {
+  return /\$\[[^\]]+\]/.test(fieldPath);
+}
+function hasAllPositional(field) {
+  return field.indexOf("$[]") !== -1;
+}
+function applyToAllPositional(doc, field, updateFn) {
+  var path = field.split(".");
+  var current = doc;
+  for (var i = 0; i < path.length; i++) {
+    var pathSegment = path[i];
+    if (pathSegment === "$[]") {
+      if (!Array.isArray(current)) {
+        return;
+      }
+      var remainingPath = path.slice(i + 1).join(".");
+      for (var j = 0; j < current.length; j++) {
+        if (remainingPath) {
+          if (remainingPath.indexOf("$[]") !== -1) {
+            applyToAllPositional(current[j], remainingPath, updateFn);
+          } else {
+            var currentValue = getProp(current[j], remainingPath);
+            var newValue = updateFn(currentValue);
+            setProp(current[j], remainingPath, newValue);
+          }
+        } else {
+          current[j] = updateFn(current[j]);
+        }
+      }
+      return;
+    }
+    if (current == null || current == void 0) return;
+    current = current[pathSegment];
+  }
+}
+function replacePositionalOperator(fieldPath, arrayFilters) {
+  if (!arrayFilters || !fieldPath.includes("$")) {
+    return fieldPath;
+  }
+  const parts = fieldPath.split(".");
+  const dollarIndex = parts.indexOf("$");
+  if (dollarIndex === -1) {
+    return fieldPath;
+  }
+  const pathBeforeDollar = parts.slice(0, dollarIndex).join(".");
+  let matchedIndex = null;
+  for (const filterPath in arrayFilters) {
+    if (filterPath === pathBeforeDollar || filterPath.startsWith(pathBeforeDollar + ".")) {
+      matchedIndex = arrayFilters[filterPath];
+      break;
+    }
+  }
+  if (matchedIndex !== null && matchedIndex !== void 0) {
+    parts[dollarIndex] = matchedIndex.toString();
+    return parts.join(".");
+  }
+  return fieldPath;
+}
+function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, userArrayFilters) {
   var keys = Object.keys(updates);
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
@@ -1711,84 +3619,171 @@ function applyUpdates(updates, doc, setOnInsert) {
     if (key == "$inc") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var amount = value[field];
-        var currentValue = getProp(doc, field);
-        if (currentValue == void 0) currentValue = 0;
-        setProp(doc, field, currentValue + amount);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var amount = value[fields[j]];
+        if (hasFilteredPositionalOperator(field)) {
+          const parsedPath = parseFieldPath(field);
+          applyToFilteredArrayElements(doc, parsedPath, amount, "$inc", userArrayFilters);
+        } else if (hasAllPositional(field)) {
+          applyToAllPositional(doc, field, function(val) {
+            return (val === void 0 ? 0 : val) + amount;
+          });
+        } else {
+          var currentValue = getProp(doc, field);
+          if (currentValue == void 0) currentValue = 0;
+          setProp(doc, field, currentValue + amount);
+        }
       }
     } else if (key == "$mul") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var amount = value[field];
-        doc[field] = doc[field] * amount;
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var amount = value[fields[j]];
+        if (hasFilteredPositionalOperator(field)) {
+          const parsedPath = parseFieldPath(field);
+          applyToFilteredArrayElements(doc, parsedPath, amount, "$mul", userArrayFilters);
+        } else if (hasAllPositional(field)) {
+          applyToAllPositional(doc, field, function(val) {
+            return val * amount;
+          });
+        } else {
+          var currentValue = getProp(doc, field);
+          if (currentValue == void 0) currentValue = 0;
+          setProp(doc, field, currentValue * amount);
+        }
       }
     } else if (key == "$rename") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var newName = value[field];
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var newName = replacePositionalOperator(value[fields[j]], positionalMatchInfo);
         doc[newName] = doc[field];
         delete doc[field];
       }
     } else if (key == "$setOnInsert" && setOnInsert) {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        doc[fields[j]] = value[fields[j]];
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        doc[field] = value[fields[j]];
       }
     } else if (key == "$set") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        setProp(doc, field, value[field]);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        if (hasFilteredPositionalOperator(field)) {
+          const parsedPath = parseFieldPath(field);
+          applyToFilteredArrayElements(doc, parsedPath, value[fields[j]], "$set", userArrayFilters);
+        } else {
+          setProp(doc, field, value[fields[j]]);
+        }
       }
     } else if (key == "$unset") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        delete doc[fields[j]];
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        delete doc[field];
       }
     } else if (key == "$min") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var amount = value[field];
-        doc[field] = Math.min(doc[field], amount);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var amount = value[fields[j]];
+        if (hasFilteredPositionalOperator(field)) {
+          const parsedPath = parseFieldPath(field);
+          applyToFilteredArrayElements(doc, parsedPath, amount, "$min", userArrayFilters);
+        } else if (hasAllPositional(field)) {
+          applyToAllPositional(doc, field, function(val) {
+            return Math.min(val, amount);
+          });
+        } else {
+          var currentValue = getProp(doc, field);
+          setProp(doc, field, Math.min(currentValue, amount));
+        }
       }
     } else if (key == "$max") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var amount = value[field];
-        doc[field] = Math.max(doc[field], amount);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var amount = value[fields[j]];
+        if (hasFilteredPositionalOperator(field)) {
+          const parsedPath = parseFieldPath(field);
+          applyToFilteredArrayElements(doc, parsedPath, amount, "$max", userArrayFilters);
+        } else if (hasAllPositional(field)) {
+          applyToAllPositional(doc, field, function(val) {
+            return Math.max(val, amount);
+          });
+        } else {
+          var currentValue = getProp(doc, field);
+          setProp(doc, field, Math.max(currentValue, amount));
+        }
       }
     } else if (key == "$currentDate") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        doc[fields[j]] = /* @__PURE__ */ new Date();
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var typeSpec = value[fields[j]];
+        if (typeSpec === true || typeof typeSpec === "object" && typeSpec.$type === "date") {
+          setProp(doc, field, /* @__PURE__ */ new Date());
+        } else if (typeof typeSpec === "object" && typeSpec.$type === "timestamp") {
+          setProp(doc, field, new Timestamp());
+        } else {
+          setProp(doc, field, /* @__PURE__ */ new Date());
+        }
       }
     } else if (key == "$addToSet") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var value = value[field];
-        doc[field].push(value);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var addValue = value[fields[j]];
+        var currentArray = getProp(doc, field);
+        if (currentArray && Array.isArray(currentArray)) {
+          currentArray.push(addValue);
+        }
       }
     } else if (key == "$pop") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var value = value[field];
-        if (value == 1) {
-          doc[field].pop();
-        } else if (value == -1) {
-          doc[field].shift();
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var popValue = value[fields[j]];
+        var currentArray = getProp(doc, field);
+        if (currentArray && Array.isArray(currentArray)) {
+          if (popValue == 1) {
+            currentArray.pop();
+          } else if (popValue == -1) {
+            currentArray.shift();
+          }
         }
+      }
+    } else if (key == "$pull") {
+      var fields = Object.keys(value);
+      for (var j = 0; j < fields.length; j++) {
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var condition = value[fields[j]];
+        var src = getProp(doc, field);
+        if (src == void 0 || !Array.isArray(src)) continue;
+        var notRemoved = [];
+        for (var k = 0; k < src.length; k++) {
+          var element = src[k];
+          var shouldRemove = false;
+          if (typeof condition === "object" && condition !== null && !Array.isArray(condition)) {
+            if (typeof element === "object" && element !== null && !Array.isArray(element)) {
+              shouldRemove = matches(element, condition);
+            } else {
+              var tempDoc = { __temp: element };
+              shouldRemove = opMatches(tempDoc, "__temp", condition);
+            }
+          } else {
+            shouldRemove = element == condition;
+          }
+          if (!shouldRemove) notRemoved.push(element);
+        }
+        setProp(doc, field, notRemoved);
       }
     } else if (key == "$pullAll") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var src = doc[fields[j]];
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var src = getProp(doc, field);
         var toRemove = value[fields[j]];
         var notRemoved = [];
         for (var k = 0; k < src.length; k++) {
@@ -1801,34 +3796,93 @@ function applyUpdates(updates, doc, setOnInsert) {
           }
           if (!removed) notRemoved.push(src[k]);
         }
-        doc[fields[j]] = notRemoved;
+        setProp(doc, field, notRemoved);
       }
     } else if (key == "$pushAll") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        var values = value[field];
-        for (var k = 0; k < values.length; k++) {
-          doc[field].push(values[k]);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var values = value[fields[j]];
+        var currentArray = getProp(doc, field);
+        if (currentArray && Array.isArray(currentArray)) {
+          for (var k = 0; k < values.length; k++) {
+            currentArray.push(values[k]);
+          }
         }
       }
     } else if (key == "$push") {
       var fields = Object.keys(value);
       for (var j = 0; j < fields.length; j++) {
-        var field = fields[j];
-        doc[field].push(value[field]);
+        var field = replacePositionalOperator(fields[j], positionalMatchInfo);
+        var pushValue = value[fields[j]];
+        var isModifierPush = pushValue !== null && typeof pushValue === "object" && (pushValue.$each !== void 0 || pushValue.$position !== void 0 || pushValue.$slice !== void 0 || pushValue.$sort !== void 0);
+        if (isModifierPush) {
+          var currentArray = getProp(doc, field);
+          if (!currentArray) {
+            currentArray = [];
+            setProp(doc, field, currentArray);
+          }
+          var valuesToPush = pushValue.$each !== void 0 ? pushValue.$each : [pushValue];
+          var position = pushValue.$position !== void 0 ? pushValue.$position : currentArray.length;
+          if (position < 0) {
+            position = Math.max(0, currentArray.length + position);
+          }
+          currentArray.splice(position, 0, ...valuesToPush);
+          if (pushValue.$sort !== void 0) {
+            var sortSpec = pushValue.$sort;
+            if (typeof sortSpec === "number") {
+              currentArray.sort(function(a, b) {
+                if (a < b) return sortSpec > 0 ? -1 : 1;
+                if (a > b) return sortSpec > 0 ? 1 : -1;
+                return 0;
+              });
+            } else if (typeof sortSpec === "object") {
+              currentArray.sort(function(a, b) {
+                var sortKeys = Object.keys(sortSpec);
+                for (var k2 = 0; k2 < sortKeys.length; k2++) {
+                  var sortKey = sortKeys[k2];
+                  var sortDir = sortSpec[sortKey];
+                  var aVal = getProp(a, sortKey);
+                  var bVal = getProp(b, sortKey);
+                  if (aVal < bVal) return sortDir > 0 ? -1 : 1;
+                  if (aVal > bVal) return sortDir > 0 ? 1 : -1;
+                }
+                return 0;
+              });
+            }
+          }
+          if (pushValue.$slice !== void 0) {
+            var sliceValue = pushValue.$slice;
+            if (sliceValue < 0) {
+              var sliced = currentArray.slice(sliceValue);
+              setProp(doc, field, sliced);
+            } else if (sliceValue === 0) {
+              setProp(doc, field, []);
+            } else {
+              var sliced = currentArray.slice(0, sliceValue);
+              setProp(doc, field, sliced);
+            }
+          }
+        } else {
+          var currentArray = getProp(doc, field);
+          if (currentArray && Array.isArray(currentArray)) {
+            currentArray.push(pushValue);
+          }
+        }
       }
     } else if (key == "$bit") {
-      var field = Object.keys(value)[0];
-      var operation = value[field];
+      var fields = Object.keys(value);
+      var field = replacePositionalOperator(fields[0], positionalMatchInfo);
+      var operation = value[fields[0]];
       var operator = Object.keys(operation)[0];
       var operand = operation[operator];
+      var currentValue = getProp(doc, field);
       if (operator == "and") {
-        doc[field] = doc[field] & operand;
+        setProp(doc, field, currentValue & operand);
       } else if (operator == "or") {
-        doc[field] = doc[field] | operand;
+        setProp(doc, field, currentValue | operand);
       } else if (operator == "xor") {
-        doc[field] = doc[field] ^ operand;
+        setProp(doc, field, currentValue ^ operand);
       } else {
         throw "unknown $bit operator: " + operator;
       }
@@ -3634,9 +5688,8 @@ class QueryPlanner {
           const plan = new QueryPlan();
           plan.type = "index_scan";
           plan.indexes = [indexName];
-          const docIds = index.search(textQuery);
-          plan.indexScans = [{ indexName, docIds }];
-          plan.estimatedCost = docIds.length;
+          plan.indexScans = [{ indexName, index, textQuery }];
+          plan.estimatedCost = 100;
           plan.indexOnly = true;
           return plan;
         }
@@ -3664,16 +5717,13 @@ class QueryPlanner {
   _planGeoQuery(query, analysis) {
     for (const [indexName, index] of this.indexes) {
       if (index instanceof GeospatialCollectionIndex) {
-        const docIds = index.query(query);
-        if (docIds !== null) {
-          const plan = new QueryPlan();
-          plan.type = "index_scan";
-          plan.indexes = [indexName];
-          plan.indexScans = [{ indexName, docIds }];
-          plan.estimatedCost = docIds.length;
-          plan.indexOnly = true;
-          return plan;
-        }
+        const plan = new QueryPlan();
+        plan.type = "index_scan";
+        plan.indexes = [indexName];
+        plan.indexScans = [{ indexName, index, query }];
+        plan.estimatedCost = 100;
+        plan.indexOnly = true;
+        return plan;
       }
     }
     return null;
@@ -3701,14 +5751,14 @@ class QueryPlanner {
       plan.type = "index_intersection";
       plan.indexScans = indexableConditions;
       plan.indexes = indexableConditions.map((scan) => scan.indexName);
-      plan.estimatedCost = Math.min(...indexableConditions.map((scan) => scan.docIds.length));
+      plan.estimatedCost = 50;
       return plan;
     }
     if (indexableConditions.length === 1) {
       plan.type = "index_scan";
       plan.indexScans = [indexableConditions[0]];
       plan.indexes = [indexableConditions[0].indexName];
-      plan.estimatedCost = indexableConditions[0].docIds.length;
+      plan.estimatedCost = 50;
       return plan;
     }
     return plan;
@@ -3734,7 +5784,7 @@ class QueryPlanner {
       plan.type = "index_union";
       plan.indexScans = indexableConditions;
       plan.indexes = indexableConditions.map((scan) => scan.indexName);
-      plan.estimatedCost = indexableConditions.reduce((sum, scan) => sum + scan.docIds.length, 0);
+      plan.estimatedCost = 100 * indexableConditions.length;
       return plan;
     }
     return plan;
@@ -3753,16 +5803,49 @@ class QueryPlanner {
       if (index instanceof TextCollectionIndex || index instanceof GeospatialCollectionIndex) {
         continue;
       }
-      const docIds = index.query(query);
-      if (docIds !== null && docIds.length >= 0) {
+      if (this._canIndexHandleQuery(index, query)) {
         plan.type = "index_scan";
         plan.indexes = [indexName];
-        plan.indexScans = [{ indexName, docIds }];
-        plan.estimatedCost = docIds.length;
+        plan.indexScans = [{ indexName, index, query }];
+        plan.estimatedCost = 50;
         return plan;
       }
     }
     return plan;
+  }
+  /**
+   * Execute a single index scan that was deferred from planning
+   * @private
+   */
+  _executeIndexScan(scan) {
+    const { index, query, textQuery } = scan;
+    if (textQuery !== void 0) {
+      return index.search(textQuery);
+    }
+    if (query !== void 0) {
+      const docIds = index.query(query);
+      return docIds !== null ? docIds : [];
+    }
+    if (scan.docIds !== void 0) {
+      return scan.docIds;
+    }
+    return [];
+  }
+  /**
+   * Check if an index can handle a query (without executing it)
+   * @private
+   */
+  _canIndexHandleQuery(index, query) {
+    const queryKeys = Object.keys(query);
+    const indexFields = Object.keys(index.keys);
+    if (indexFields.length !== 1) {
+      return false;
+    }
+    const field = indexFields[0];
+    if (queryKeys.indexOf(field) === -1) {
+      return false;
+    }
+    return true;
   }
   /**
    * Execute a query plan and return document IDs
@@ -3774,11 +5857,16 @@ class QueryPlanner {
       return null;
     }
     if (plan.type === "index_scan") {
-      return plan.indexScans[0].docIds;
+      const scan = plan.indexScans[0];
+      return this._executeIndexScan(scan);
     }
     if (plan.type === "index_intersection") {
       if (plan.indexScans.length === 0) return null;
-      const sorted = plan.indexScans.slice().sort((a, b) => a.docIds.length - b.docIds.length);
+      const results = plan.indexScans.map((scan) => ({
+        docIds: this._executeIndexScan(scan),
+        indexName: scan.indexName
+      }));
+      const sorted = results.slice().sort((a, b) => a.docIds.length - b.docIds.length);
       let result = new Set(sorted[0].docIds);
       for (let i = 1; i < sorted.length; i++) {
         const currentSet = new Set(sorted[i].docIds);
@@ -3790,853 +5878,13 @@ class QueryPlanner {
     if (plan.type === "index_union") {
       const result = /* @__PURE__ */ new Set();
       for (const scan of plan.indexScans) {
-        scan.docIds.forEach((id) => result.add(id));
+        const docIds = this._executeIndexScan(scan);
+        docIds.forEach((id) => result.add(id));
       }
       return Array.from(result);
     }
     return null;
   }
-}
-function evaluateExpression(expr, doc) {
-  if (expr === null || expr === void 0) {
-    return expr;
-  }
-  if (typeof expr === "boolean" || typeof expr === "number") {
-    return expr;
-  }
-  if (typeof expr === "string") {
-    if (expr.startsWith("$$")) {
-      return getProp(doc, expr.substring(2));
-    } else if (expr.charAt(0) === "$") {
-      return getProp(doc, expr.substring(1));
-    }
-    return expr;
-  }
-  if (typeof expr === "object") {
-    if (Array.isArray(expr)) {
-      return expr.map((item) => evaluateExpression(item, doc));
-    }
-    const keys = Object.keys(expr);
-    if (keys.length === 0) {
-      return expr;
-    }
-    const operator = keys[0];
-    const operand = expr[operator];
-    return evaluateOperator(operator, operand, doc);
-  }
-  return expr;
-}
-function evaluateOperator(operator, operand, doc) {
-  switch (operator) {
-    // Arithmetic operators
-    case "$add":
-      return evalAdd(operand, doc);
-    case "$subtract":
-      return evalSubtract(operand, doc);
-    case "$multiply":
-      return evalMultiply(operand, doc);
-    case "$divide":
-      return evalDivide(operand, doc);
-    case "$mod":
-      return evalMod(operand, doc);
-    case "$pow":
-      return evalPow(operand, doc);
-    case "$sqrt":
-      return evalSqrt(operand, doc);
-    case "$abs":
-      return evalAbs(operand, doc);
-    case "$ceil":
-      return evalCeil(operand, doc);
-    case "$floor":
-      return evalFloor(operand, doc);
-    case "$trunc":
-      return evalTrunc(operand, doc);
-    case "$round":
-      return evalRound(operand, doc);
-    // String operators
-    case "$concat":
-      return evalConcat(operand, doc);
-    case "$substr":
-      return evalSubstr(operand, doc);
-    case "$toLower":
-      return evalToLower(operand, doc);
-    case "$toUpper":
-      return evalToUpper(operand, doc);
-    case "$trim":
-      return evalTrim(operand, doc);
-    case "$ltrim":
-      return evalLtrim(operand, doc);
-    case "$rtrim":
-      return evalRtrim(operand, doc);
-    case "$split":
-      return evalSplit(operand, doc);
-    case "$strLenCP":
-      return evalStrLenCP(operand, doc);
-    case "$strcasecmp":
-      return evalStrcasecmp(operand, doc);
-    case "$indexOfCP":
-      return evalIndexOfCP(operand, doc);
-    case "$replaceOne":
-      return evalReplaceOne(operand, doc);
-    case "$replaceAll":
-      return evalReplaceAll(operand, doc);
-    // Comparison operators
-    case "$cmp":
-      return evalCmp(operand, doc);
-    case "$eq":
-      return evalEq(operand, doc);
-    case "$ne":
-      return evalNe(operand, doc);
-    case "$gt":
-      return evalGt(operand, doc);
-    case "$gte":
-      return evalGte(operand, doc);
-    case "$lt":
-      return evalLt(operand, doc);
-    case "$lte":
-      return evalLte(operand, doc);
-    // Logical operators
-    case "$and":
-      return evalAnd(operand, doc);
-    case "$or":
-      return evalOr(operand, doc);
-    case "$not":
-      return evalNot(operand, doc);
-    // Conditional operators
-    case "$cond":
-      return evalCond(operand, doc);
-    case "$ifNull":
-      return evalIfNull(operand, doc);
-    case "$switch":
-      return evalSwitch(operand, doc);
-    // Date operators
-    case "$year":
-      return evalYear(operand, doc);
-    case "$month":
-      return evalMonth(operand, doc);
-    case "$dayOfMonth":
-      return evalDayOfMonth(operand, doc);
-    case "$dayOfWeek":
-      return evalDayOfWeek(operand, doc);
-    case "$dayOfYear":
-      return evalDayOfYear(operand, doc);
-    case "$hour":
-      return evalHour(operand, doc);
-    case "$minute":
-      return evalMinute(operand, doc);
-    case "$second":
-      return evalSecond(operand, doc);
-    case "$millisecond":
-      return evalMillisecond(operand, doc);
-    case "$week":
-      return evalWeek(operand, doc);
-    case "$isoWeek":
-      return evalIsoWeek(operand, doc);
-    case "$isoWeekYear":
-      return evalIsoWeekYear(operand, doc);
-    case "$dateToString":
-      return evalDateToString(operand, doc);
-    case "$toDate":
-      return evalToDate(operand, doc);
-    // Array operators
-    case "$arrayElemAt":
-      return evalArrayElemAt(operand, doc);
-    case "$concatArrays":
-      return evalConcatArrays(operand, doc);
-    case "$filter":
-      return evalFilter(operand, doc);
-    case "$in":
-      return evalIn(operand, doc);
-    case "$indexOfArray":
-      return evalIndexOfArray(operand, doc);
-    case "$isArray":
-      return evalIsArray(operand, doc);
-    case "$map":
-      return evalMap(operand, doc);
-    case "$reduce":
-      return evalReduce(operand, doc);
-    case "$size":
-      return evalSize(operand, doc);
-    case "$slice":
-      return evalSlice(operand, doc);
-    case "$reverseArray":
-      return evalReverseArray(operand, doc);
-    case "$zip":
-      return evalZip(operand, doc);
-    // Type operators
-    case "$type":
-      return evalType(operand, doc);
-    case "$convert":
-      return evalConvert(operand, doc);
-    case "$toBool":
-      return evalToBool(operand, doc);
-    case "$toDecimal":
-      return evalToDecimal(operand, doc);
-    case "$toDouble":
-      return evalToDouble(operand, doc);
-    case "$toInt":
-      return evalToInt(operand, doc);
-    case "$toLong":
-      return evalToLong(operand, doc);
-    case "$toString":
-      return evalToString(operand, doc);
-    // Object operators
-    case "$objectToArray":
-      return evalObjectToArray(operand, doc);
-    case "$arrayToObject":
-      return evalArrayToObject(operand, doc);
-    case "$mergeObjects":
-      return evalMergeObjects(operand, doc);
-    // Literal operator
-    case "$literal":
-      return operand;
-    default:
-      throw new Error(`Unsupported aggregation operator: ${operator}`);
-  }
-}
-function evalAdd(operands, doc) {
-  if (!Array.isArray(operands)) return null;
-  let sum = 0;
-  for (const operand of operands) {
-    const val = evaluateExpression(operand, doc);
-    if (val instanceof Date) {
-      sum += val.getTime();
-    } else if (typeof val === "number") {
-      sum += val;
-    }
-  }
-  return sum;
-}
-function evalSubtract(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  if (val1 instanceof Date && val2 instanceof Date) {
-    return val1.getTime() - val2.getTime();
-  } else if (val1 instanceof Date && typeof val2 === "number") {
-    return new Date(val1.getTime() - val2);
-  } else if (typeof val1 === "number" && typeof val2 === "number") {
-    return val1 - val2;
-  }
-  return null;
-}
-function evalMultiply(operands, doc) {
-  if (!Array.isArray(operands)) return null;
-  let product = 1;
-  for (const operand of operands) {
-    const val = evaluateExpression(operand, doc);
-    if (typeof val === "number") {
-      product *= val;
-    }
-  }
-  return product;
-}
-function evalDivide(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  if (typeof val1 === "number" && typeof val2 === "number" && val2 !== 0) {
-    return val1 / val2;
-  }
-  return null;
-}
-function evalMod(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  if (typeof val1 === "number" && typeof val2 === "number" && val2 !== 0) {
-    return val1 % val2;
-  }
-  return null;
-}
-function evalPow(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const base = evaluateExpression(operands[0], doc);
-  const exponent = evaluateExpression(operands[1], doc);
-  if (typeof base === "number" && typeof exponent === "number") {
-    return Math.pow(base, exponent);
-  }
-  return null;
-}
-function evalSqrt(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (typeof val === "number" && val >= 0) {
-    return Math.sqrt(val);
-  }
-  return null;
-}
-function evalAbs(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (typeof val === "number") {
-    return Math.abs(val);
-  }
-  return null;
-}
-function evalCeil(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (typeof val === "number") {
-    return Math.ceil(val);
-  }
-  return null;
-}
-function evalFloor(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (typeof val === "number") {
-    return Math.floor(val);
-  }
-  return null;
-}
-function evalTrunc(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (typeof val === "number") {
-    return Math.trunc(val);
-  }
-  return null;
-}
-function evalRound(operands, doc) {
-  const val = evaluateExpression(Array.isArray(operands) ? operands[0] : operands, doc);
-  const place = Array.isArray(operands) && operands[1] !== void 0 ? evaluateExpression(operands[1], doc) : 0;
-  if (typeof val === "number" && typeof place === "number") {
-    const multiplier = Math.pow(10, place);
-    return Math.round(val * multiplier) / multiplier;
-  }
-  return null;
-}
-function evalConcat(operands, doc) {
-  if (!Array.isArray(operands)) return null;
-  let result = "";
-  for (const operand of operands) {
-    const val = evaluateExpression(operand, doc);
-    if (val !== null && val !== void 0) {
-      result += String(val);
-    }
-  }
-  return result;
-}
-function evalSubstr(operands, doc) {
-  if (!Array.isArray(operands) || operands.length < 3) return null;
-  const str = String(evaluateExpression(operands[0], doc) || "");
-  const start = evaluateExpression(operands[1], doc);
-  const length = evaluateExpression(operands[2], doc);
-  if (typeof start === "number" && typeof length === "number") {
-    return str.substr(start, length);
-  }
-  return null;
-}
-function evalToLower(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return val !== null && val !== void 0 ? String(val).toLowerCase() : "";
-}
-function evalToUpper(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return val !== null && val !== void 0 ? String(val).toUpperCase() : "";
-}
-function evalTrim(operand, doc) {
-  const val = evaluateExpression(typeof operand === "object" && operand.input ? operand.input : operand, doc);
-  const chars = operand.chars ? evaluateExpression(operand.chars, doc) : null;
-  let str = val !== null && val !== void 0 ? String(val) : "";
-  if (chars) {
-    const charsRegex = new RegExp(`^[${escapeRegex(chars)}]+|[${escapeRegex(chars)}]+$`, "g");
-    return str.replace(charsRegex, "");
-  }
-  return str.trim();
-}
-function evalLtrim(operand, doc) {
-  const val = evaluateExpression(typeof operand === "object" && operand.input ? operand.input : operand, doc);
-  const chars = operand.chars ? evaluateExpression(operand.chars, doc) : null;
-  let str = val !== null && val !== void 0 ? String(val) : "";
-  if (chars) {
-    const charsRegex = new RegExp(`^[${escapeRegex(chars)}]+`, "g");
-    return str.replace(charsRegex, "");
-  }
-  return str.replace(/^\s+/, "");
-}
-function evalRtrim(operand, doc) {
-  const val = evaluateExpression(typeof operand === "object" && operand.input ? operand.input : operand, doc);
-  const chars = operand.chars ? evaluateExpression(operand.chars, doc) : null;
-  let str = val !== null && val !== void 0 ? String(val) : "";
-  if (chars) {
-    const charsRegex = new RegExp(`[${escapeRegex(chars)}]+$`, "g");
-    return str.replace(charsRegex, "");
-  }
-  return str.replace(/\s+$/, "");
-}
-function evalSplit(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const str = String(evaluateExpression(operands[0], doc) || "");
-  const delimiter = String(evaluateExpression(operands[1], doc) || "");
-  return str.split(delimiter);
-}
-function evalStrLenCP(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return val !== null && val !== void 0 ? String(val).length : 0;
-}
-function evalStrcasecmp(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const str1 = String(evaluateExpression(operands[0], doc) || "").toLowerCase();
-  const str2 = String(evaluateExpression(operands[1], doc) || "").toLowerCase();
-  if (str1 < str2) return -1;
-  if (str1 > str2) return 1;
-  return 0;
-}
-function evalIndexOfCP(operands, doc) {
-  if (!Array.isArray(operands) || operands.length < 2) return null;
-  const str = String(evaluateExpression(operands[0], doc) || "");
-  const substr = String(evaluateExpression(operands[1], doc) || "");
-  const start = operands[2] !== void 0 ? evaluateExpression(operands[2], doc) : 0;
-  const end = operands[3] !== void 0 ? evaluateExpression(operands[3], doc) : str.length;
-  const searchStr = str.substring(start, end);
-  const index = searchStr.indexOf(substr);
-  return index === -1 ? -1 : index + start;
-}
-function evalReplaceOne(operand, doc) {
-  const input = String(evaluateExpression(operand.input, doc) || "");
-  const find = String(evaluateExpression(operand.find, doc) || "");
-  const replacement = String(evaluateExpression(operand.replacement, doc) || "");
-  return input.replace(find, replacement);
-}
-function evalReplaceAll(operand, doc) {
-  const input = String(evaluateExpression(operand.input, doc) || "");
-  const find = String(evaluateExpression(operand.find, doc) || "");
-  const replacement = String(evaluateExpression(operand.replacement, doc) || "");
-  return input.split(find).join(replacement);
-}
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function evalCmp(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  if (val1 < val2) return -1;
-  if (val1 > val2) return 1;
-  return 0;
-}
-function evalEq(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  return val1 === val2;
-}
-function evalNe(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  return val1 !== val2;
-}
-function evalGt(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  return val1 > val2;
-}
-function evalGte(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  return val1 >= val2;
-}
-function evalLt(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  return val1 < val2;
-}
-function evalLte(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const val1 = evaluateExpression(operands[0], doc);
-  const val2 = evaluateExpression(operands[1], doc);
-  return val1 <= val2;
-}
-function evalAnd(operands, doc) {
-  if (!Array.isArray(operands)) return null;
-  for (const operand of operands) {
-    const val = evaluateExpression(operand, doc);
-    if (!val) return false;
-  }
-  return true;
-}
-function evalOr(operands, doc) {
-  if (!Array.isArray(operands)) return null;
-  for (const operand of operands) {
-    const val = evaluateExpression(operand, doc);
-    if (val) return true;
-  }
-  return false;
-}
-function evalNot(operand, doc) {
-  const val = evaluateExpression(Array.isArray(operand) ? operand[0] : operand, doc);
-  return !val;
-}
-function evalCond(operand, doc) {
-  let ifExpr, thenExpr, elseExpr;
-  if (Array.isArray(operand)) {
-    if (operand.length !== 3) return null;
-    [ifExpr, thenExpr, elseExpr] = operand;
-  } else if (typeof operand === "object") {
-    ifExpr = operand.if;
-    thenExpr = operand.then;
-    elseExpr = operand.else;
-  } else {
-    return null;
-  }
-  const condition = evaluateExpression(ifExpr, doc);
-  return condition ? evaluateExpression(thenExpr, doc) : evaluateExpression(elseExpr, doc);
-}
-function evalIfNull(operands, doc) {
-  if (!Array.isArray(operands) || operands.length < 2) return null;
-  for (let i = 0; i < operands.length; i++) {
-    const val = evaluateExpression(operands[i], doc);
-    if (val !== null && val !== void 0) {
-      return val;
-    }
-  }
-  return null;
-}
-function evalSwitch(operand, doc) {
-  if (typeof operand !== "object" || !Array.isArray(operand.branches)) {
-    return null;
-  }
-  for (const branch of operand.branches) {
-    const caseResult = evaluateExpression(branch.case, doc);
-    if (caseResult) {
-      return evaluateExpression(branch.then, doc);
-    }
-  }
-  return operand.default !== void 0 ? evaluateExpression(operand.default, doc) : null;
-}
-function evalYear(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCFullYear();
-  }
-  return null;
-}
-function evalMonth(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCMonth() + 1;
-  }
-  return null;
-}
-function evalDayOfMonth(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCDate();
-  }
-  return null;
-}
-function evalDayOfWeek(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCDay() + 1;
-  }
-  return null;
-}
-function evalDayOfYear(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
-    const diff = date - start;
-    const oneDay = 1e3 * 60 * 60 * 24;
-    return Math.floor(diff / oneDay);
-  }
-  return null;
-}
-function evalHour(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCHours();
-  }
-  return null;
-}
-function evalMinute(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCMinutes();
-  }
-  return null;
-}
-function evalSecond(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCSeconds();
-  }
-  return null;
-}
-function evalMillisecond(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    return date.getUTCMilliseconds();
-  }
-  return null;
-}
-function evalWeek(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    const onejan = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-    const week = Math.ceil(((date - onejan) / 864e5 + onejan.getUTCDay() + 1) / 7);
-    return week - 1;
-  }
-  return null;
-}
-function evalIsoWeek(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    const target = new Date(date.valueOf());
-    const dayNr = (date.getUTCDay() + 6) % 7;
-    target.setUTCDate(target.getUTCDate() - dayNr + 3);
-    const firstThursday = target.valueOf();
-    target.setUTCMonth(0, 1);
-    if (target.getUTCDay() !== 4) {
-      target.setUTCMonth(0, 1 + (4 - target.getUTCDay() + 7) % 7);
-    }
-    return 1 + Math.ceil((firstThursday - target) / 6048e5);
-  }
-  return null;
-}
-function evalIsoWeekYear(operand, doc) {
-  const date = evaluateExpression(operand, doc);
-  if (date instanceof Date) {
-    const target = new Date(date.valueOf());
-    target.setUTCDate(target.getUTCDate() - (date.getUTCDay() + 6) % 7 + 3);
-    return target.getUTCFullYear();
-  }
-  return null;
-}
-function evalDateToString(operand, doc) {
-  const format = operand.format ? evaluateExpression(operand.format, doc) : "%Y-%m-%dT%H:%M:%S.%LZ";
-  const date = evaluateExpression(operand.date, doc);
-  if (!(date instanceof Date)) return null;
-  return format.replace("%Y", date.getUTCFullYear()).replace("%m", String(date.getUTCMonth() + 1).padStart(2, "0")).replace("%d", String(date.getUTCDate()).padStart(2, "0")).replace("%H", String(date.getUTCHours()).padStart(2, "0")).replace("%M", String(date.getUTCMinutes()).padStart(2, "0")).replace("%S", String(date.getUTCSeconds()).padStart(2, "0")).replace("%L", String(date.getUTCMilliseconds()).padStart(3, "0"));
-}
-function evalToDate(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (val instanceof Date) return val;
-  if (typeof val === "string" || typeof val === "number") {
-    const date = new Date(val);
-    return isNaN(date.getTime()) ? null : date;
-  }
-  return null;
-}
-function evalArrayElemAt(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const arr = evaluateExpression(operands[0], doc);
-  const idx = evaluateExpression(operands[1], doc);
-  if (!Array.isArray(arr) || typeof idx !== "number") return null;
-  const index = idx < 0 ? arr.length + idx : idx;
-  return arr[index];
-}
-function evalConcatArrays(operands, doc) {
-  if (!Array.isArray(operands)) return null;
-  const result = [];
-  for (const operand of operands) {
-    const arr = evaluateExpression(operand, doc);
-    if (Array.isArray(arr)) {
-      result.push(...arr);
-    }
-  }
-  return result;
-}
-function evalFilter(operand, doc) {
-  const input = evaluateExpression(operand.input, doc);
-  const asVar = operand.as || "this";
-  const cond = operand.cond;
-  if (!Array.isArray(input)) return null;
-  return input.filter((item) => {
-    const itemDoc = { ...doc, [asVar]: item };
-    return evaluateExpression(cond, itemDoc);
-  });
-}
-function evalIn(operands, doc) {
-  if (!Array.isArray(operands) || operands.length !== 2) return null;
-  const value = evaluateExpression(operands[0], doc);
-  const arr = evaluateExpression(operands[1], doc);
-  if (!Array.isArray(arr)) return false;
-  return arr.includes(value);
-}
-function evalIndexOfArray(operands, doc) {
-  if (!Array.isArray(operands) || operands.length < 2) return null;
-  const arr = evaluateExpression(operands[0], doc);
-  const search = evaluateExpression(operands[1], doc);
-  const start = operands[2] !== void 0 ? evaluateExpression(operands[2], doc) : 0;
-  const end = operands[3] !== void 0 ? evaluateExpression(operands[3], doc) : arr.length;
-  if (!Array.isArray(arr)) return null;
-  for (let i = start; i < end && i < arr.length; i++) {
-    if (arr[i] === search) return i;
-  }
-  return -1;
-}
-function evalIsArray(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return Array.isArray(val);
-}
-function evalMap(operand, doc) {
-  const input = evaluateExpression(operand.input, doc);
-  const asVar = operand.as || "this";
-  const inExpr = operand.in;
-  if (!Array.isArray(input)) return null;
-  return input.map((item) => {
-    const itemDoc = { ...doc, [asVar]: item };
-    return evaluateExpression(inExpr, itemDoc);
-  });
-}
-function evalReduce(operand, doc) {
-  const input = evaluateExpression(operand.input, doc);
-  const initialValue = evaluateExpression(operand.initialValue, doc);
-  const inExpr = operand.in;
-  if (!Array.isArray(input)) return null;
-  let value = initialValue;
-  for (const item of input) {
-    const itemDoc = { ...doc, value, this: item };
-    value = evaluateExpression(inExpr, itemDoc);
-  }
-  return value;
-}
-function evalSize(operand, doc) {
-  const arr = evaluateExpression(operand, doc);
-  return Array.isArray(arr) ? arr.length : null;
-}
-function evalSlice(operands, doc) {
-  if (!Array.isArray(operands) || operands.length < 2) return null;
-  const arr = evaluateExpression(operands[0], doc);
-  if (!Array.isArray(arr)) return null;
-  if (operands.length === 2) {
-    const n = evaluateExpression(operands[1], doc);
-    return n >= 0 ? arr.slice(0, n) : arr.slice(n);
-  } else {
-    const position = evaluateExpression(operands[1], doc);
-    const n = evaluateExpression(operands[2], doc);
-    return arr.slice(position, position + n);
-  }
-}
-function evalReverseArray(operand, doc) {
-  const arr = evaluateExpression(operand, doc);
-  return Array.isArray(arr) ? arr.slice().reverse() : null;
-}
-function evalZip(operand, doc) {
-  const inputs = operand.inputs ? evaluateExpression(operand.inputs, doc) : null;
-  const useLongestLength = operand.useLongestLength || false;
-  const defaults = operand.defaults;
-  if (!Array.isArray(inputs)) return null;
-  const arrays = inputs.map((input) => evaluateExpression(input, doc));
-  if (!arrays.every((arr) => Array.isArray(arr))) return null;
-  const maxLength = Math.max(...arrays.map((arr) => arr.length));
-  const length = useLongestLength ? maxLength : Math.min(...arrays.map((arr) => arr.length));
-  const result = [];
-  for (let i = 0; i < length; i++) {
-    const tuple = [];
-    for (let j = 0; j < arrays.length; j++) {
-      if (i < arrays[j].length) {
-        tuple.push(arrays[j][i]);
-      } else if (defaults && j < defaults.length) {
-        tuple.push(defaults[j]);
-      } else {
-        tuple.push(null);
-      }
-    }
-    result.push(tuple);
-  }
-  return result;
-}
-function evalType(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (val === null) return "null";
-  if (val === void 0) return "missing";
-  if (typeof val === "boolean") return "bool";
-  if (typeof val === "number") return Number.isInteger(val) ? "int" : "double";
-  if (typeof val === "string") return "string";
-  if (val instanceof Date) return "date";
-  if (Array.isArray(val)) return "array";
-  if (typeof val === "object") return "object";
-  return "unknown";
-}
-function evalConvert(operand, doc) {
-  const input = evaluateExpression(operand.input, doc);
-  const to = operand.to;
-  const onError = operand.onError;
-  const onNull = operand.onNull;
-  if (input === null) {
-    return onNull !== void 0 ? evaluateExpression(onNull, doc) : null;
-  }
-  try {
-    switch (to) {
-      case "double":
-      case "decimal":
-        return parseFloat(input);
-      case "int":
-      case "long":
-        return parseInt(input);
-      case "bool":
-        return Boolean(input);
-      case "string":
-        return String(input);
-      case "date":
-        return new Date(input);
-      default:
-        return input;
-    }
-  } catch (e) {
-    return onError !== void 0 ? evaluateExpression(onError, doc) : null;
-  }
-}
-function evalToBool(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return Boolean(val);
-}
-function evalToDecimal(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return parseFloat(val);
-}
-function evalToDouble(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return parseFloat(val);
-}
-function evalToInt(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return parseInt(val);
-}
-function evalToLong(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  return parseInt(val);
-}
-function evalToString(operand, doc) {
-  const val = evaluateExpression(operand, doc);
-  if (val === null || val === void 0) return null;
-  return String(val);
-}
-function evalObjectToArray(operand, doc) {
-  const obj = evaluateExpression(operand, doc);
-  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
-    return null;
-  }
-  return Object.keys(obj).map((key) => ({ k: key, v: obj[key] }));
-}
-function evalArrayToObject(operand, doc) {
-  const arr = evaluateExpression(operand, doc);
-  if (!Array.isArray(arr)) return null;
-  const result = {};
-  for (const item of arr) {
-    if (Array.isArray(item) && item.length === 2) {
-      result[item[0]] = item[1];
-    } else if (typeof item === "object" && item.k !== void 0 && item.v !== void 0) {
-      result[item.k] = item.v;
-    }
-  }
-  return result;
-}
-function evalMergeObjects(operands, doc) {
-  if (!Array.isArray(operands)) {
-    return evaluateExpression(operands, doc);
-  }
-  const result = {};
-  for (const operand of operands) {
-    const obj = evaluateExpression(operand, doc);
-    if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) {
-      Object.assign(result, obj);
-    }
-  }
-  return result;
 }
 class ChangeStream extends eventsExports.EventEmitter {
   constructor(target, pipeline = [], options = {}) {
@@ -5124,7 +6372,10 @@ class Collection extends eventsExports.EventEmitter {
   // Collection methods
   aggregate(pipeline) {
     if (!pipeline || !isArray(pipeline)) {
-      throw { $err: "Pipeline must be an array", code: 17287 };
+      throw new QueryError("Pipeline must be an array", {
+        collection: this.name,
+        code: ErrorCodes.FAILED_TO_PARSE
+      });
     }
     let results = [];
     const cursor = this.find({});
@@ -5135,7 +6386,10 @@ class Collection extends eventsExports.EventEmitter {
       const stage = pipeline[i];
       const stageKeys = Object.keys(stage);
       if (stageKeys.length !== 1) {
-        throw { $err: "Each pipeline stage must have exactly one key", code: 17287 };
+        throw new QueryError("Each pipeline stage must have exactly one key", {
+          collection: this.name,
+          code: ErrorCodes.FAILED_TO_PARSE
+        });
       }
       const stageType = stageKeys[0];
       const stageSpec = stage[stageType];
@@ -5381,14 +6635,685 @@ class Collection extends eventsExports.EventEmitter {
           }
         }
         results = unwound;
+      } else if (stageType === "$sortByCount") {
+        const groups = {};
+        for (let j = 0; j < results.length; j++) {
+          const doc = results[j];
+          const value = evaluateExpression(stageSpec, doc);
+          const key = JSON.stringify(value);
+          if (!groups[key]) {
+            groups[key] = {
+              _id: value,
+              count: 0
+            };
+          }
+          groups[key].count++;
+        }
+        results = Object.values(groups).sort((a, b) => b.count - a.count);
+      } else if (stageType === "$replaceRoot" || stageType === "$replaceWith") {
+        const modified = [];
+        const newRootSpec = stageType === "$replaceRoot" ? stageSpec.newRoot : stageSpec;
+        for (let j = 0; j < results.length; j++) {
+          const newRoot = evaluateExpression(newRootSpec, results[j]);
+          if (typeof newRoot === "object" && newRoot !== null && !Array.isArray(newRoot)) {
+            modified.push(newRoot);
+          } else {
+            throw new QueryError("$replaceRoot expression must evaluate to an object", {
+              collection: this.name,
+              code: ErrorCodes.FAILED_TO_PARSE
+            });
+          }
+        }
+        results = modified;
+      } else if (stageType === "$sample") {
+        const size = stageSpec.size || 1;
+        if (typeof size !== "number" || size < 0) {
+          throw new QueryError("$sample size must be a non-negative number", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const shuffled = [...results];
+        for (let j = shuffled.length - 1; j > 0; j--) {
+          const k = Math.floor(Math.random() * (j + 1));
+          [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+        }
+        results = shuffled.slice(0, Math.min(size, shuffled.length));
+      } else if (stageType === "$bucket") {
+        if (!stageSpec.groupBy || !stageSpec.boundaries) {
+          throw new QueryError("$bucket requires groupBy and boundaries", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const boundaries = stageSpec.boundaries;
+        const defaultBucket = stageSpec.default;
+        const output = stageSpec.output || { count: { $sum: 1 } };
+        const buckets = {};
+        for (let j = 0; j < boundaries.length - 1; j++) {
+          const key = JSON.stringify(boundaries[j]);
+          buckets[key] = {
+            _id: boundaries[j],
+            docs: []
+          };
+        }
+        if (defaultBucket !== void 0) {
+          buckets["default"] = {
+            _id: defaultBucket,
+            docs: []
+          };
+        }
+        for (let j = 0; j < results.length; j++) {
+          const doc = results[j];
+          const value = evaluateExpression(stageSpec.groupBy, doc);
+          let placed = false;
+          for (let k = 0; k < boundaries.length - 1; k++) {
+            if (value >= boundaries[k] && value < boundaries[k + 1]) {
+              const key = JSON.stringify(boundaries[k]);
+              buckets[key].docs.push(doc);
+              placed = true;
+              break;
+            }
+          }
+          if (!placed && defaultBucket !== void 0) {
+            buckets["default"].docs.push(doc);
+          }
+        }
+        const bucketed = [];
+        for (const bucketKey in buckets) {
+          const bucket = buckets[bucketKey];
+          if (bucket.docs.length === 0) continue;
+          const result = { _id: bucket._id };
+          for (const field in output) {
+            const accumulator = output[field];
+            const accKeys = Object.keys(accumulator);
+            if (accKeys.length !== 1) continue;
+            const accType = accKeys[0];
+            const accExpr = accumulator[accType];
+            if (accType === "$sum") {
+              let sum = 0;
+              for (let k = 0; k < bucket.docs.length; k++) {
+                const val = evaluateExpression(accExpr, bucket.docs[k]);
+                if (typeof val === "number") {
+                  sum += val;
+                } else if (val !== null && val !== void 0) {
+                  sum += Number(val) || 0;
+                }
+              }
+              result[field] = sum;
+            } else if (accType === "$avg") {
+              let sum = 0;
+              let count = 0;
+              for (let k = 0; k < bucket.docs.length; k++) {
+                const val = evaluateExpression(accExpr, bucket.docs[k]);
+                if (val !== void 0 && val !== null) {
+                  sum += Number(val) || 0;
+                  count++;
+                }
+              }
+              result[field] = count > 0 ? sum / count : 0;
+            } else if (accType === "$push") {
+              const arr = [];
+              for (let k = 0; k < bucket.docs.length; k++) {
+                const val = evaluateExpression(accExpr, bucket.docs[k]);
+                arr.push(val);
+              }
+              result[field] = arr;
+            } else if (accType === "$addToSet") {
+              const set = {};
+              for (let k = 0; k < bucket.docs.length; k++) {
+                const val = evaluateExpression(accExpr, bucket.docs[k]);
+                set[JSON.stringify(val)] = val;
+              }
+              result[field] = Object.values(set);
+            }
+          }
+          bucketed.push(result);
+        }
+        results = bucketed.sort((a, b) => {
+          if (a._id < b._id) return -1;
+          if (a._id > b._id) return 1;
+          return 0;
+        });
+      } else if (stageType === "$bucketAuto") {
+        if (!stageSpec.groupBy || !stageSpec.buckets) {
+          throw new QueryError("$bucketAuto requires groupBy and buckets", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const numBuckets = stageSpec.buckets;
+        const output = stageSpec.output || { count: { $sum: 1 } };
+        if (results.length === 0) {
+          results = [];
+        } else {
+          const values = results.map((doc) => ({
+            value: evaluateExpression(stageSpec.groupBy, doc),
+            doc
+          })).sort((a, b) => {
+            if (a.value < b.value) return -1;
+            if (a.value > b.value) return 1;
+            return 0;
+          });
+          const bucketSize = Math.ceil(values.length / numBuckets);
+          const buckets = [];
+          for (let j = 0; j < numBuckets && j * bucketSize < values.length; j++) {
+            const startIdx = j * bucketSize;
+            const endIdx = Math.min((j + 1) * bucketSize, values.length);
+            const bucketDocs = values.slice(startIdx, endIdx);
+            if (bucketDocs.length === 0) continue;
+            const bucket = {
+              _id: {
+                min: bucketDocs[0].value,
+                max: endIdx < values.length ? bucketDocs[bucketDocs.length - 1].value : bucketDocs[bucketDocs.length - 1].value
+              },
+              docs: bucketDocs.map((v) => v.doc)
+            };
+            buckets.push(bucket);
+          }
+          const bucketed = [];
+          for (let j = 0; j < buckets.length; j++) {
+            const bucket = buckets[j];
+            const result = { _id: bucket._id };
+            for (const field in output) {
+              const accumulator = output[field];
+              const accKeys = Object.keys(accumulator);
+              if (accKeys.length !== 1) continue;
+              const accType = accKeys[0];
+              const accExpr = accumulator[accType];
+              if (accType === "$sum") {
+                let sum = 0;
+                for (let k = 0; k < bucket.docs.length; k++) {
+                  const val = evaluateExpression(accExpr, bucket.docs[k]);
+                  if (typeof val === "number") {
+                    sum += val;
+                  } else if (val !== null && val !== void 0) {
+                    sum += Number(val) || 0;
+                  }
+                }
+                result[field] = sum;
+              } else if (accType === "$avg") {
+                let sum = 0;
+                let count = 0;
+                for (let k = 0; k < bucket.docs.length; k++) {
+                  const val = evaluateExpression(accExpr, bucket.docs[k]);
+                  if (val !== void 0 && val !== null) {
+                    sum += Number(val) || 0;
+                    count++;
+                  }
+                }
+                result[field] = count > 0 ? sum / count : 0;
+              } else if (accType === "$push") {
+                const arr = [];
+                for (let k = 0; k < bucket.docs.length; k++) {
+                  const val = evaluateExpression(accExpr, bucket.docs[k]);
+                  arr.push(val);
+                }
+                result[field] = arr;
+              }
+            }
+            bucketed.push(result);
+          }
+          results = bucketed;
+        }
+      } else if (stageType === "$out") {
+        const targetCollectionName = stageSpec;
+        if (typeof targetCollectionName !== "string") {
+          throw new QueryError("$out requires a string collection name", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        if (this.db[targetCollectionName]) {
+          this.db.dropCollection(targetCollectionName);
+        }
+        this.db.createCollection(targetCollectionName);
+        const targetCollection = this.db[targetCollectionName];
+        for (let j = 0; j < results.length; j++) {
+          const doc = results[j];
+          const docId = doc._id;
+          const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
+          targetCollection.storage.set(key, doc);
+        }
+        results = [];
+      } else if (stageType === "$merge") {
+        let targetCollectionName;
+        let on = "_id";
+        let whenMatched = "merge";
+        let whenNotMatched = "insert";
+        if (typeof stageSpec === "string") {
+          targetCollectionName = stageSpec;
+        } else if (typeof stageSpec === "object") {
+          targetCollectionName = stageSpec.into;
+          on = stageSpec.on || on;
+          whenMatched = stageSpec.whenMatched || whenMatched;
+          whenNotMatched = stageSpec.whenNotMatched || whenNotMatched;
+        }
+        if (!targetCollectionName) {
+          throw new QueryError("$merge requires a target collection", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        if (!this.db[targetCollectionName]) {
+          this.db.createCollection(targetCollectionName);
+        }
+        const targetCollection = this.db[targetCollectionName];
+        for (let j = 0; j < results.length; j++) {
+          const doc = results[j];
+          const matchField = typeof on === "string" ? on : on[0];
+          const matchValue = getProp(doc, matchField);
+          const existingCursor = targetCollection.find({ [matchField]: matchValue });
+          const existing = existingCursor.hasNext() ? existingCursor.next() : null;
+          if (existing) {
+            if (whenMatched === "replace") {
+              const docId = doc._id;
+              const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
+              targetCollection.storage.set(key, doc);
+            } else if (whenMatched === "merge") {
+              const merged = Object.assign({}, existing, doc);
+              const docId = merged._id;
+              const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
+              targetCollection.storage.set(key, merged);
+            } else if (whenMatched === "keepExisting") ;
+            else if (whenMatched === "fail") {
+              throw new QueryError("$merge failed: duplicate key", {
+                collection: this.name,
+                code: ErrorCodes.DUPLICATE_KEY
+              });
+            }
+          } else {
+            if (whenNotMatched === "insert") {
+              const docId = doc._id;
+              const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
+              targetCollection.storage.set(key, doc);
+            } else if (whenNotMatched === "discard") ;
+            else if (whenNotMatched === "fail") {
+              throw new QueryError("$merge failed: document not found", {
+                collection: this.name,
+                code: ErrorCodes.FAILED_TO_PARSE
+              });
+            }
+          }
+        }
+        results = [];
+      } else if (stageType === "$lookup") {
+        if (!stageSpec.from || !stageSpec.localField || !stageSpec.foreignField || !stageSpec.as) {
+          throw new QueryError("$lookup requires from, localField, foreignField, and as", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const collectionNames = this.db.getCollectionNames();
+        if (!collectionNames.includes(stageSpec.from)) {
+          throw new QueryError("$lookup: collection not found: " + stageSpec.from, {
+            collection: this.name,
+            code: ErrorCodes.NAMESPACE_NOT_FOUND
+          });
+        }
+        const fromCollection = this.db[stageSpec.from];
+        const joined = [];
+        for (let j = 0; j < results.length; j++) {
+          const doc = copy(results[j]);
+          const localValue = getProp(doc, stageSpec.localField);
+          const matches2 = [];
+          const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+          while (foreignCursor.hasNext()) {
+            matches2.push(foreignCursor.next());
+          }
+          doc[stageSpec.as] = matches2;
+          joined.push(doc);
+        }
+        results = joined;
+      } else if (stageType === "$graphLookup") {
+        if (!stageSpec.from || !stageSpec.startWith || !stageSpec.connectFromField || !stageSpec.connectToField || !stageSpec.as) {
+          throw new QueryError("$graphLookup requires from, startWith, connectFromField, connectToField, and as", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const collectionNames = this.db.getCollectionNames();
+        if (!collectionNames.includes(stageSpec.from)) {
+          throw new QueryError("$graphLookup: collection not found: " + stageSpec.from, {
+            collection: this.name,
+            code: ErrorCodes.NAMESPACE_NOT_FOUND
+          });
+        }
+        const fromCollection = this.db[stageSpec.from];
+        const maxDepth = stageSpec.maxDepth !== void 0 ? stageSpec.maxDepth : Number.MAX_SAFE_INTEGER;
+        const depthField = stageSpec.depthField;
+        const restrictSearchWithMatch = stageSpec.restrictSearchWithMatch;
+        const graphed = [];
+        for (let j = 0; j < results.length; j++) {
+          const doc = copy(results[j]);
+          const startValue = evaluateExpression(stageSpec.startWith, results[j]);
+          const visited = /* @__PURE__ */ new Set();
+          const matches2 = [];
+          const queue = [{ value: startValue, depth: 0 }];
+          while (queue.length > 0) {
+            const { value, depth } = queue.shift();
+            if (depth > maxDepth) continue;
+            const valueKey = JSON.stringify(value);
+            if (visited.has(valueKey)) continue;
+            visited.add(valueKey);
+            let query = { [stageSpec.connectToField]: value };
+            if (restrictSearchWithMatch) {
+              query = { $and: [query, restrictSearchWithMatch] };
+            }
+            const cursor2 = fromCollection.find(query);
+            while (cursor2.hasNext()) {
+              const match = cursor2.next();
+              const matchCopy = copy(match);
+              if (depthField) {
+                matchCopy[depthField] = depth;
+              }
+              matches2.push(matchCopy);
+              const nextValue = getProp(match, stageSpec.connectFromField);
+              if (nextValue !== void 0 && nextValue !== null) {
+                queue.push({ value: nextValue, depth: depth + 1 });
+              }
+            }
+          }
+          doc[stageSpec.as] = matches2;
+          graphed.push(doc);
+        }
+        results = graphed;
+      } else if (stageType === "$facet") {
+        if (typeof stageSpec !== "object" || Array.isArray(stageSpec)) {
+          throw new QueryError("$facet requires an object with pipeline definitions", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const facetResult = {};
+        for (const facetName in stageSpec) {
+          const facetPipeline = stageSpec[facetName];
+          if (!Array.isArray(facetPipeline)) {
+            throw new QueryError("$facet pipeline must be an array", {
+              collection: this.name,
+              code: ErrorCodes.FAILED_TO_PARSE
+            });
+          }
+          let facetResults = results.map((r) => copy(r));
+          for (let k = 0; k < facetPipeline.length; k++) {
+            const facetStage = facetPipeline[k];
+            const facetStageKeys = Object.keys(facetStage);
+            if (facetStageKeys.length !== 1) {
+              throw new QueryError("Each pipeline stage must have exactly one key", {
+                collection: this.name,
+                code: ErrorCodes.FAILED_TO_PARSE
+              });
+            }
+            const facetStageType = facetStageKeys[0];
+            const facetStageSpec = facetStage[facetStageType];
+            if (facetStageType === "$match") {
+              const matched = [];
+              for (let m = 0; m < facetResults.length; m++) {
+                if (matches(facetResults[m], facetStageSpec)) {
+                  matched.push(facetResults[m]);
+                }
+              }
+              facetResults = matched;
+            } else if (facetStageType === "$project") {
+              const projected = [];
+              for (let m = 0; m < facetResults.length; m++) {
+                projected.push(applyProjectionWithExpressions(facetStageSpec, facetResults[m]));
+              }
+              facetResults = projected;
+            } else if (facetStageType === "$limit") {
+              facetResults = facetResults.slice(0, facetStageSpec);
+            } else if (facetStageType === "$skip") {
+              facetResults = facetResults.slice(facetStageSpec);
+            } else if (facetStageType === "$sort") {
+              const sortKeys = Object.keys(facetStageSpec);
+              facetResults.sort(function(a, b) {
+                for (let n = 0; n < sortKeys.length; n++) {
+                  const key = sortKeys[n];
+                  if (a[key] === void 0 && b[key] !== void 0) return -1 * facetStageSpec[key];
+                  if (a[key] !== void 0 && b[key] === void 0) return 1 * facetStageSpec[key];
+                  if (a[key] < b[key]) return -1 * facetStageSpec[key];
+                  if (a[key] > b[key]) return 1 * facetStageSpec[key];
+                }
+                return 0;
+              });
+            } else if (facetStageType === "$count") {
+              facetResults = [{ [facetStageSpec]: facetResults.length }];
+            } else if (facetStageType === "$group") {
+              const groups = {};
+              const groupId = facetStageSpec._id;
+              for (let m = 0; m < facetResults.length; m++) {
+                const doc = facetResults[m];
+                let key;
+                if (groupId === null || groupId === void 0) {
+                  key = null;
+                } else {
+                  key = evaluateExpression(groupId, doc);
+                }
+                const keyStr = JSON.stringify(key);
+                if (!groups[keyStr]) {
+                  groups[keyStr] = {
+                    _id: key,
+                    docs: [],
+                    accumulators: {}
+                  };
+                }
+                groups[keyStr].docs.push(doc);
+              }
+              const grouped = [];
+              for (const groupKey in groups) {
+                const group = groups[groupKey];
+                const result = { _id: group._id };
+                for (const field in facetStageSpec) {
+                  if (field === "_id") continue;
+                  const accumulator = facetStageSpec[field];
+                  const accKeys = Object.keys(accumulator);
+                  if (accKeys.length !== 1) continue;
+                  const accType = accKeys[0];
+                  const accExpr = accumulator[accType];
+                  if (accType === "$sum") {
+                    let sum = 0;
+                    for (let n = 0; n < group.docs.length; n++) {
+                      const val = evaluateExpression(accExpr, group.docs[n]);
+                      if (typeof val === "number") {
+                        sum += val;
+                      } else if (val !== null && val !== void 0) {
+                        sum += Number(val) || 0;
+                      }
+                    }
+                    result[field] = sum;
+                  } else if (accType === "$avg") {
+                    let sum = 0;
+                    let count = 0;
+                    for (let n = 0; n < group.docs.length; n++) {
+                      const val = evaluateExpression(accExpr, group.docs[n]);
+                      if (val !== void 0 && val !== null) {
+                        sum += Number(val) || 0;
+                        count++;
+                      }
+                    }
+                    result[field] = count > 0 ? sum / count : 0;
+                  } else if (accType === "$max") {
+                    let max = void 0;
+                    for (let n = 0; n < group.docs.length; n++) {
+                      const val = evaluateExpression(accExpr, group.docs[n]);
+                      if (val !== void 0 && (max === void 0 || val > max)) {
+                        max = val;
+                      }
+                    }
+                    result[field] = max;
+                  }
+                }
+                grouped.push(result);
+              }
+              facetResults = grouped;
+            } else if (facetStageType === "$sortByCount") {
+              const groups = {};
+              for (let m = 0; m < facetResults.length; m++) {
+                const doc = facetResults[m];
+                const value = evaluateExpression(facetStageSpec, doc);
+                const key = JSON.stringify(value);
+                if (!groups[key]) {
+                  groups[key] = {
+                    _id: value,
+                    count: 0
+                  };
+                }
+                groups[key].count++;
+              }
+              facetResults = Object.values(groups).sort((a, b) => b.count - a.count);
+            } else if (facetStageType === "$sample") {
+              const size = facetStageSpec.size || 1;
+              const shuffled = [...facetResults];
+              for (let m = shuffled.length - 1; m > 0; m--) {
+                const k2 = Math.floor(Math.random() * (m + 1));
+                [shuffled[m], shuffled[k2]] = [shuffled[k2], shuffled[m]];
+              }
+              facetResults = shuffled.slice(0, Math.min(size, shuffled.length));
+            } else if (facetStageType === "$bucket") {
+              const boundaries = facetStageSpec.boundaries;
+              const defaultBucket = facetStageSpec.default;
+              const output = facetStageSpec.output || { count: { $sum: 1 } };
+              const buckets = {};
+              for (let m = 0; m < boundaries.length - 1; m++) {
+                const key = JSON.stringify(boundaries[m]);
+                buckets[key] = {
+                  _id: boundaries[m],
+                  docs: []
+                };
+              }
+              if (defaultBucket !== void 0) {
+                buckets["default"] = {
+                  _id: defaultBucket,
+                  docs: []
+                };
+              }
+              for (let m = 0; m < facetResults.length; m++) {
+                const doc = facetResults[m];
+                const value = evaluateExpression(facetStageSpec.groupBy, doc);
+                let placed = false;
+                for (let n = 0; n < boundaries.length - 1; n++) {
+                  if (value >= boundaries[n] && value < boundaries[n + 1]) {
+                    const key = JSON.stringify(boundaries[n]);
+                    buckets[key].docs.push(doc);
+                    placed = true;
+                    break;
+                  }
+                }
+                if (!placed && defaultBucket !== void 0) {
+                  buckets["default"].docs.push(doc);
+                }
+              }
+              const bucketed = [];
+              for (const bucketKey in buckets) {
+                const bucket = buckets[bucketKey];
+                if (bucket.docs.length === 0) continue;
+                const result = { _id: bucket._id };
+                for (const field in output) {
+                  const accumulator = output[field];
+                  const accKeys = Object.keys(accumulator);
+                  if (accKeys.length !== 1) continue;
+                  const accType = accKeys[0];
+                  const accExpr = accumulator[accType];
+                  if (accType === "$sum") {
+                    let sum = 0;
+                    for (let n = 0; n < bucket.docs.length; n++) {
+                      const val = evaluateExpression(accExpr, bucket.docs[n]);
+                      if (typeof val === "number") {
+                        sum += val;
+                      } else if (val !== null && val !== void 0) {
+                        sum += Number(val) || 0;
+                      }
+                    }
+                    result[field] = sum;
+                  }
+                }
+                bucketed.push(result);
+              }
+              facetResults = bucketed.sort((a, b) => {
+                if (a._id < b._id) return -1;
+                if (a._id > b._id) return 1;
+                return 0;
+              });
+            }
+          }
+          facetResult[facetName] = facetResults;
+        }
+        results = [facetResult];
+      } else if (stageType === "$redact") {
+        const redacted = [];
+        for (let j = 0; j < results.length; j++) {
+          const doc = results[j];
+          const decision = evaluateExpression(stageSpec, doc);
+          if (decision === "$$DESCEND") {
+            redacted.push(doc);
+          } else if (decision === "$$PRUNE") {
+            continue;
+          } else if (decision === "$$KEEP") {
+            redacted.push(doc);
+          } else {
+            if (decision) {
+              redacted.push(doc);
+            }
+          }
+        }
+        results = redacted;
+      } else if (stageType === "$geoNear") {
+        if (!stageSpec.near || !stageSpec.distanceField) {
+          throw new QueryError("$geoNear requires near and distanceField", {
+            collection: this.name,
+            code: ErrorCodes.FAILED_TO_PARSE
+          });
+        }
+        const near = stageSpec.near;
+        const distanceField = stageSpec.distanceField;
+        const maxDistance = stageSpec.maxDistance;
+        const minDistance = stageSpec.minDistance || 0;
+        const spherical = stageSpec.spherical !== false;
+        const key = stageSpec.key || "location";
+        const withDistances = [];
+        for (let j = 0; j < results.length; j++) {
+          const doc = copy(results[j]);
+          const location = getProp(doc, key);
+          if (!location || !Array.isArray(location) || location.length < 2) {
+            continue;
+          }
+          let distance;
+          if (spherical) {
+            const R = 6371e3;
+            const lat1 = near[1] * Math.PI / 180;
+            const lat2 = location[1] * Math.PI / 180;
+            const deltaLat = (location[1] - near[1]) * Math.PI / 180;
+            const deltaLon = (location[0] - near[0]) * Math.PI / 180;
+            const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            distance = R * c;
+          } else {
+            const dx = location[0] - near[0];
+            const dy = location[1] - near[1];
+            distance = Math.sqrt(dx * dx + dy * dy);
+          }
+          if (distance >= minDistance && (!maxDistance || distance <= maxDistance)) {
+            doc[distanceField] = distance;
+            withDistances.push(doc);
+          }
+        }
+        withDistances.sort((a, b) => a[distanceField] - b[distanceField]);
+        if (stageSpec.limit) {
+          results = withDistances.slice(0, stageSpec.limit);
+        } else {
+          results = withDistances;
+        }
       } else {
-        throw { $err: "Unsupported aggregation stage: " + stageType, code: 17287 };
+        throw new QueryError("Unsupported aggregation stage: " + stageType, {
+          collection: this.name,
+          code: ErrorCodes.FAILED_TO_PARSE
+        });
       }
     }
     return results;
   }
   bulkWrite() {
-    throw "Not Implemented";
+    throw new NotImplementedError("bulkWrite", { collection: this.name });
   }
   async count() {
     return this.storage.size();
@@ -5408,7 +7333,9 @@ class Collection extends eventsExports.EventEmitter {
   }
   async createIndex(keys, options) {
     if (!keys || typeof keys !== "object" || Array.isArray(keys)) {
-      throw { $err: "createIndex requires a key specification object", code: 2 };
+      throw new BadValueError("keys", keys, "createIndex requires a key specification object", {
+        collection: this.name
+      });
     }
     const indexName = options && options.name ? options.name : this.generateIndexName(keys);
     if (this.indexes.has(indexName)) {
@@ -5416,7 +7343,14 @@ class Collection extends eventsExports.EventEmitter {
       const existingKeys = JSON.stringify(existingIndex.keys);
       const newKeys = JSON.stringify(keys);
       if (existingKeys !== newKeys) {
-        throw { $err: "Index with name '" + indexName + "' already exists with a different key specification", code: 85 };
+        throw new IndexError(
+          "Index with name '" + indexName + "' already exists with a different key specification",
+          {
+            code: ErrorCodes.INDEX_OPTIONS_CONFLICT,
+            index: indexName,
+            collection: this.name
+          }
+        );
       }
       return indexName;
     }
@@ -5424,7 +7358,7 @@ class Collection extends eventsExports.EventEmitter {
     return indexName;
   }
   dataSize() {
-    throw "Not Implemented";
+    throw new NotImplementedError("dataSize", { collection: this.name });
   }
   async deleteOne(query) {
     const doc = await this.findOne(query);
@@ -5473,7 +7407,7 @@ class Collection extends eventsExports.EventEmitter {
   }
   dropIndex(indexName) {
     if (!this.indexes.has(indexName)) {
-      throw { $err: "Index not found with name: " + indexName, code: 27 };
+      throw new IndexNotFoundError(indexName, { collection: this.name });
     }
     this.indexes.get(indexName).clear();
     this.indexes.delete(indexName);
@@ -5488,10 +7422,10 @@ class Collection extends eventsExports.EventEmitter {
     return { nIndexesWas: count, msg: "non-_id indexes dropped", ok: 1 };
   }
   ensureIndex() {
-    throw "Not Implemented";
+    throw new NotImplementedError("ensureIndex", { collection: this.name });
   }
   explain() {
-    throw "Not Implemented";
+    throw new NotImplementedError("explain", { collection: this.name });
   }
   find(query, projection) {
     const normalizedQuery = query == void 0 ? {} : query;
@@ -5525,7 +7459,7 @@ class Collection extends eventsExports.EventEmitter {
     );
   }
   findAndModify() {
-    throw "Not Implemented";
+    throw new NotImplementedError("findAndModify", { collection: this.name });
   }
   async findOne(query, projection) {
     const cursor = this.find(query, projection);
@@ -5565,7 +7499,10 @@ class Collection extends eventsExports.EventEmitter {
     if (!c.hasNext()) return null;
     const doc = c.next();
     const clone = Object.assign({}, doc);
-    applyUpdates(update, clone);
+    const matchInfo = matchWithArrayIndices(doc, filter);
+    const positionalMatchInfo = matchInfo.arrayFilters;
+    const userArrayFilters = options && options.arrayFilters;
+    applyUpdates(update, clone, false, positionalMatchInfo, userArrayFilters);
     this.storage.set(doc._id.toString(), clone);
     if (options && options.returnNewDocument) {
       if (options && options.projection) return applyProjection(options.projection, clone);
@@ -5583,17 +7520,17 @@ class Collection extends eventsExports.EventEmitter {
     return result;
   }
   getShardDistribution() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getShardDistribution", { collection: this.name });
   }
   getShardVersion() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getShardVersion", { collection: this.name });
   }
   // non-mongo
   getStore() {
     return this.storage.getStore();
   }
   group() {
-    throw "Not Implemented";
+    throw new NotImplementedError("group", { collection: this.name });
   }
   async insert(doc) {
     if (Array == doc.constructor) {
@@ -5618,13 +7555,13 @@ class Collection extends eventsExports.EventEmitter {
     return { insertedIds };
   }
   isCapped() {
-    throw "Not Implemented";
+    throw new NotImplementedError("isCapped", { collection: this.name });
   }
   mapReduce() {
-    throw "Not Implemented";
+    throw new NotImplementedError("mapReduce", { collection: this.name });
   }
   reIndex() {
-    throw "Not Implemented";
+    throw new NotImplementedError("reIndex", { collection: this.name });
   }
   async replaceOne(query, replacement, options) {
     const result = {};
@@ -5667,22 +7604,22 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   renameCollection() {
-    throw "Not Implemented";
+    throw new NotImplementedError("renameCollection", { collection: this.name });
   }
   save() {
-    throw "Not Implemented";
+    throw new NotImplementedError("save", { collection: this.name });
   }
   stats() {
-    throw "Not Implemented";
+    throw new NotImplementedError("stats", { collection: this.name });
   }
   storageSize() {
-    throw "Not Implemented";
+    throw new NotImplementedError("storageSize", { collection: this.name });
   }
   totalSize() {
-    throw "Not Implemented";
+    throw new NotImplementedError("totalSize", { collection: this.name });
   }
   totalIndexSize() {
-    throw "Not Implemented";
+    throw new NotImplementedError("totalIndexSize", { collection: this.name });
   }
   update(query, updates, options) {
     const c = this.find(query);
@@ -5690,15 +7627,21 @@ class Collection extends eventsExports.EventEmitter {
       if (options && options.multi) {
         while (c.hasNext()) {
           const doc = c.next();
+          const matchInfo = matchWithArrayIndices(doc, query);
+          const positionalMatchInfo = matchInfo.arrayFilters;
+          const userArrayFilters = options && options.arrayFilters;
           this.updateIndexesOnDelete(doc);
-          applyUpdates(updates, doc);
+          applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
           this.storage.set(doc._id.toString(), doc);
           this.updateIndexesOnInsert(doc);
         }
       } else {
         const doc = c.next();
+        const matchInfo = matchWithArrayIndices(doc, query);
+        const positionalMatchInfo = matchInfo.arrayFilters;
+        const userArrayFilters = options && options.arrayFilters;
         this.updateIndexesOnDelete(doc);
-        applyUpdates(updates, doc);
+        applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
         this.storage.set(doc._id.toString(), doc);
         this.updateIndexesOnInsert(doc);
       }
@@ -5715,8 +7658,11 @@ class Collection extends eventsExports.EventEmitter {
     if (c.hasNext()) {
       const doc = c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
+      const matchInfo = matchWithArrayIndices(doc, query);
+      const positionalMatchInfo = matchInfo.arrayFilters;
+      const userArrayFilters = options && options.arrayFilters;
       this.updateIndexesOnDelete(doc);
-      applyUpdates(updates, doc);
+      applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
       this.storage.set(doc._id.toString(), doc);
       this.updateIndexesOnInsert(doc);
       const updateDescription = this._getUpdateDescription(originalDoc, doc);
@@ -5736,8 +7682,11 @@ class Collection extends eventsExports.EventEmitter {
       while (c.hasNext()) {
         const doc = c.next();
         const originalDoc = JSON.parse(JSON.stringify(doc));
+        const matchInfo = matchWithArrayIndices(doc, query);
+        const positionalMatchInfo = matchInfo.arrayFilters;
+        const userArrayFilters = options && options.arrayFilters;
         this.updateIndexesOnDelete(doc);
-        applyUpdates(updates, doc);
+        applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
         this.storage.set(doc._id.toString(), doc);
         this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
@@ -5753,7 +7702,7 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   validate() {
-    throw "Not Implemented";
+    throw new NotImplementedError("validate", { collection: this.name });
   }
   /**
    * Generate updateDescription for change events
@@ -6051,16 +8000,16 @@ class DB {
   }
   // DB Methods
   cloneCollection() {
-    throw "Not Implemented";
+    throw new NotImplementedError("cloneCollection", { database: this.dbName });
   }
   cloneDatabase() {
-    throw "Not Implemented";
+    throw new NotImplementedError("cloneDatabase", { database: this.dbName });
   }
   commandHelp() {
-    throw "Not Implemented";
+    throw new NotImplementedError("commandHelp", { database: this.dbName });
   }
   copyDatabase() {
-    throw "Not Implemented";
+    throw new NotImplementedError("copyDatabase", { database: this.dbName });
   }
   createCollection(name) {
     if (!name) return;
@@ -6085,7 +8034,13 @@ class DB {
     return this[name];
   }
   currentOp() {
-    throw "Not Implemented";
+    throw new NotImplementedError("currentOp", { database: this.dbName });
+  }
+  dropCollection(collectionName) {
+    if (this[collectionName]) {
+      this.storageEngine.removeCollectionStore(collectionName);
+      delete this[collectionName];
+    }
   }
   dropDatabase() {
     const collectionNames = this.getCollectionNames();
@@ -6095,19 +8050,19 @@ class DB {
     }
   }
   eval() {
-    throw "Not Implemented";
+    throw new NotImplementedError("eval", { database: this.dbName });
   }
   fsyncLock() {
-    throw "Not Implemented";
+    throw new NotImplementedError("fsyncLock", { database: this.dbName });
   }
   fsyncUnlock() {
-    throw "Not Implemented";
+    throw new NotImplementedError("fsyncUnlock", { database: this.dbName });
   }
   getCollection() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getCollection", { database: this.dbName });
   }
   getCollectionInfos() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getCollectionInfos", { database: this.dbName });
   }
   getCollectionNames() {
     const names = [];
@@ -6119,34 +8074,34 @@ class DB {
     return names;
   }
   getLastError() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getLastError", { database: this.dbName });
   }
   getLastErrorObj() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getLastErrorObj", { database: this.dbName });
   }
   getLogComponents() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getLogComponents", { database: this.dbName });
   }
   getMongo() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getMongo", { database: this.dbName });
   }
   getName() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getName", { database: this.dbName });
   }
   getPrevError() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getPrevError", { database: this.dbName });
   }
   getProfilingLevel() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getProfilingLevel", { database: this.dbName });
   }
   getProfilingStatus() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getProfilingStatus", { database: this.dbName });
   }
   getReplicationInfo() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getReplicationInfo", { database: this.dbName });
   }
   getSiblingDB() {
-    throw "Not Implemented";
+    throw new NotImplementedError("getSiblingDB", { database: this.dbName });
   }
   help() {
     this._log("        help mr                      mapreduce");
@@ -6155,73 +8110,73 @@ class DB {
     this._log("        it                           result of the last line evaluated; use to further iterate");
   }
   hostInfo() {
-    throw "Not Implemented";
+    throw new NotImplementedError("hostInfo", { database: this.dbName });
   }
   isMaster() {
-    throw "Not Implemented";
+    throw new NotImplementedError("isMaster", { database: this.dbName });
   }
   killOp() {
-    throw "Not Implemented";
+    throw new NotImplementedError("killOp", { database: this.dbName });
   }
   listCommands() {
-    throw "Not Implemented";
+    throw new NotImplementedError("listCommands", { database: this.dbName });
   }
   loadServerScripts() {
-    throw "Not Implemented";
+    throw new NotImplementedError("loadServerScripts", { database: this.dbName });
   }
   logout() {
-    throw "Not Implemented";
+    throw new NotImplementedError("logout", { database: this.dbName });
   }
   printCollectionStats() {
-    throw "Not Implemented";
+    throw new NotImplementedError("printCollectionStats", { database: this.dbName });
   }
   printReplicationInfo() {
-    throw "Not Implemented";
+    throw new NotImplementedError("printReplicationInfo", { database: this.dbName });
   }
   printShardingStatus() {
-    throw "Not Implemented";
+    throw new NotImplementedError("printShardingStatus", { database: this.dbName });
   }
   printSlaveReplicationInfo() {
-    throw "Not Implemented";
+    throw new NotImplementedError("printSlaveReplicationInfo", { database: this.dbName });
   }
   repairDatabase() {
-    throw "Not Implemented";
+    throw new NotImplementedError("repairDatabase", { database: this.dbName });
   }
   resetError() {
-    throw "Not Implemented";
+    throw new NotImplementedError("resetError", { database: this.dbName });
   }
   runCommand() {
-    throw "Not Implemented";
+    throw new NotImplementedError("runCommand", { database: this.dbName });
   }
   serverBuildInfo() {
-    throw "Not Implemented";
+    throw new NotImplementedError("serverBuildInfo", { database: this.dbName });
   }
   serverCmdLineOpts() {
-    throw "Not Implemented";
+    throw new NotImplementedError("serverCmdLineOpts", { database: this.dbName });
   }
   serverStatus() {
-    throw "Not Implemented";
+    throw new NotImplementedError("serverStatus", { database: this.dbName });
   }
   setLogLevel() {
-    throw "Not Implemented";
+    throw new NotImplementedError("setLogLevel", { database: this.dbName });
   }
   setProfilingLevel() {
-    throw "Not Implemented";
+    throw new NotImplementedError("setProfilingLevel", { database: this.dbName });
   }
   shutdownServer() {
-    throw "Not Implemented";
+    throw new NotImplementedError("shutdownServer", { database: this.dbName });
   }
   stats() {
-    throw "Not Implemented";
+    throw new NotImplementedError("stats", { database: this.dbName });
   }
   version() {
-    throw "Not Implemented";
+    throw new NotImplementedError("version", { database: this.dbName });
   }
   upgradeCheck() {
-    throw "Not Implemented";
+    throw new NotImplementedError("upgradeCheck", { database: this.dbName });
   }
   upgradeCheckAllDBs() {
-    throw "Not Implemented";
+    throw new NotImplementedError("upgradeCheckAllDBs", { database: this.dbName });
   }
   /**
    * Watch for changes across all collections in this database
@@ -6491,10 +8446,34 @@ class IndexedDbStorageEngine extends StorageEngine {
   }
 }
 export {
+  BadValueError,
+  BulkWriteError,
+  CannotCreateIndexError,
   ChangeStream,
+  CursorError,
+  CursorNotFoundError,
+  DuplicateKeyError,
+  ErrorCodes,
+  IndexError,
+  IndexExistsError,
+  IndexNotFoundError,
   IndexedDbStorageEngine,
+  InvalidNamespaceError,
   MongoClient,
+  MongoDriverError,
+  MongoError,
+  MongoNetworkError,
+  MongoServerError,
+  NamespaceError,
+  NamespaceNotFoundError,
+  NotImplementedError,
   ObjectId,
-  StorageEngine
+  OperationNotSupportedError,
+  QueryError,
+  StorageEngine,
+  Timestamp,
+  TypeMismatchError,
+  ValidationError,
+  WriteError
 };
 //# sourceMappingURL=micro-mongo-2.0.0.js.map

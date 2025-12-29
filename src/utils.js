@@ -2,7 +2,7 @@
  * Utility functions for MicroMongoDB
  */
 
-import { ObjectId } from './ObjectId.js';
+import { ObjectId } from 'bjson';
 
 /**
  * Compare two values for equality, handling ObjectId instances

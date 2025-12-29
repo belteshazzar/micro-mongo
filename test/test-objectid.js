@@ -108,11 +108,9 @@ describe("ObjectId", function() {
 			expect(id1.equals(id3)).to.be.false;
 		});
 
-		it('should compare ObjectId with hex string', function() {
+		it('should compare ObjectId with hex string throws', function() {
 			const id = new mongo.ObjectId('507f1f77bcf86cd799439011');
-			expect(id.equals('507f1f77bcf86cd799439011')).to.be.true;
-			expect(id.equals('507F1F77BCF86CD799439011')).to.be.true; // case insensitive
-			expect(id.equals('507f1f77bcf86cd799439012')).to.be.false;
+			expect(() => id.equals('507f1f77bcf86cd799439011')).to.throw();
 		});
 
 		it('should return hex string from toJSON()', function() {
