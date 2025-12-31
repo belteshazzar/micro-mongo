@@ -371,6 +371,19 @@
     return events.exports;
   }
   var eventsExports = requireEvents();
+  const TYPE = {
+    NULL: 0,
+    FALSE: 1,
+    TRUE: 2,
+    INT: 3,
+    FLOAT: 4,
+    STRING: 5,
+    OID: 6,
+    DATE: 7,
+    POINTER: 8,
+    ARRAY: 16,
+    OBJECT: 17
+  };
   class ObjectId {
     constructor(id) {
       if (id === void 0 || id === null) {
@@ -477,6 +490,491 @@
       }
       const tsHex = ("00000000" + ts.toString(16)).slice(-8);
       return (tsHex + tail).slice(0, 24);
+    }
+  }
+  class Pointer {
+    constructor(offset) {
+      if (offset === void 0 || offset === null) {
+        throw new Error("Pointer offset must be a number");
+      }
+      if (typeof offset !== "number") {
+        throw new Error("Pointer offset must be a number");
+      }
+      if (!Number.isInteger(offset)) {
+        throw new Error("Pointer offset must be an integer");
+      }
+      if (offset < 0) {
+        throw new Error("Pointer offset must be non-negative");
+      }
+      if (offset > Number.MAX_SAFE_INTEGER) {
+        throw new Error("Pointer offset exceeds maximum safe integer");
+      }
+      this.offset = offset;
+    }
+    /**
+     * Returns the pointer offset as a number
+     */
+    valueOf() {
+      return this.offset;
+    }
+    /**
+     * Returns the pointer offset as a string
+     */
+    toString() {
+      return this.offset.toString();
+    }
+    /**
+     * Returns the pointer in JSON format (as number)
+     */
+    toJSON() {
+      return this.offset;
+    }
+    /**
+     * Custom inspect for Node.js console.log
+     */
+    inspect() {
+      return `Pointer(${this.offset})`;
+    }
+    /**
+     * Compares this Pointer with another for equality
+     */
+    equals(other) {
+      if (!(other instanceof Pointer)) {
+        return false;
+      }
+      return this.offset === other.offset;
+    }
+  }
+  function encode(value) {
+    const buffers = [];
+    function encodeValue(val) {
+      if (val === null) {
+        buffers.push(new Uint8Array([TYPE.NULL]));
+      } else if (val === false) {
+        buffers.push(new Uint8Array([TYPE.FALSE]));
+      } else if (val === true) {
+        buffers.push(new Uint8Array([TYPE.TRUE]));
+      } else if (val instanceof ObjectId) {
+        buffers.push(new Uint8Array([TYPE.OID]));
+        buffers.push(val.toBytes());
+      } else if (val instanceof Date) {
+        buffers.push(new Uint8Array([TYPE.DATE]));
+        const buffer = new ArrayBuffer(8);
+        const view = new DataView(buffer);
+        view.setBigInt64(0, BigInt(val.getTime()), true);
+        buffers.push(new Uint8Array(buffer));
+      } else if (val instanceof Pointer) {
+        buffers.push(new Uint8Array([TYPE.POINTER]));
+        const buffer = new ArrayBuffer(8);
+        const view = new DataView(buffer);
+        view.setBigUint64(0, BigInt(val.offset), true);
+        buffers.push(new Uint8Array(buffer));
+      } else if (typeof val === "number") {
+        if (Number.isInteger(val) && Number.isSafeInteger(val)) {
+          buffers.push(new Uint8Array([TYPE.INT]));
+          const buffer = new ArrayBuffer(8);
+          const view = new DataView(buffer);
+          view.setBigInt64(0, BigInt(val), true);
+          buffers.push(new Uint8Array(buffer));
+        } else {
+          buffers.push(new Uint8Array([TYPE.FLOAT]));
+          const buffer = new ArrayBuffer(8);
+          const view = new DataView(buffer);
+          view.setFloat64(0, val, true);
+          buffers.push(new Uint8Array(buffer));
+        }
+      } else if (typeof val === "string") {
+        buffers.push(new Uint8Array([TYPE.STRING]));
+        const encoded = new TextEncoder().encode(val);
+        const lengthBuffer = new ArrayBuffer(4);
+        const lengthView = new DataView(lengthBuffer);
+        lengthView.setUint32(0, encoded.length, true);
+        buffers.push(new Uint8Array(lengthBuffer));
+        buffers.push(encoded);
+      } else if (Array.isArray(val)) {
+        const tempBuffers = [];
+        const lengthBuffer = new ArrayBuffer(4);
+        const lengthView = new DataView(lengthBuffer);
+        lengthView.setUint32(0, val.length, true);
+        tempBuffers.push(new Uint8Array(lengthBuffer));
+        const startLength = buffers.length;
+        for (const item of val) {
+          encodeValue(item);
+        }
+        const elementBuffers = buffers.splice(startLength);
+        tempBuffers.push(...elementBuffers);
+        const contentSize = tempBuffers.reduce((sum, buf) => sum + buf.length, 0);
+        buffers.push(new Uint8Array([TYPE.ARRAY]));
+        const sizeBuffer = new ArrayBuffer(4);
+        const sizeView = new DataView(sizeBuffer);
+        sizeView.setUint32(0, contentSize, true);
+        buffers.push(new Uint8Array(sizeBuffer));
+        buffers.push(...tempBuffers);
+      } else if (typeof val === "object") {
+        const tempBuffers = [];
+        const keys = Object.keys(val);
+        const lengthBuffer = new ArrayBuffer(4);
+        const lengthView = new DataView(lengthBuffer);
+        lengthView.setUint32(0, keys.length, true);
+        tempBuffers.push(new Uint8Array(lengthBuffer));
+        const startLength = buffers.length;
+        for (const key of keys) {
+          const encoded = new TextEncoder().encode(key);
+          const keyLengthBuffer = new ArrayBuffer(4);
+          const keyLengthView = new DataView(keyLengthBuffer);
+          keyLengthView.setUint32(0, encoded.length, true);
+          buffers.push(new Uint8Array(keyLengthBuffer));
+          buffers.push(encoded);
+          encodeValue(val[key]);
+        }
+        const kvBuffers = buffers.splice(startLength);
+        tempBuffers.push(...kvBuffers);
+        const contentSize = tempBuffers.reduce((sum, buf) => sum + buf.length, 0);
+        buffers.push(new Uint8Array([TYPE.OBJECT]));
+        const sizeBuffer = new ArrayBuffer(4);
+        const sizeView = new DataView(sizeBuffer);
+        sizeView.setUint32(0, contentSize, true);
+        buffers.push(new Uint8Array(sizeBuffer));
+        buffers.push(...tempBuffers);
+      } else {
+        throw new Error(`Unsupported type: ${typeof val}`);
+      }
+    }
+    encodeValue(value);
+    const totalLength = buffers.reduce((sum, buf) => sum + buf.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buf of buffers) {
+      result.set(buf, offset);
+      offset += buf.length;
+    }
+    return result;
+  }
+  function decode(data) {
+    let offset = 0;
+    function decodeValue() {
+      if (offset >= data.length) {
+        throw new Error("Unexpected end of data");
+      }
+      const type = data[offset++];
+      switch (type) {
+        case TYPE.NULL:
+          return null;
+        case TYPE.FALSE:
+          return false;
+        case TYPE.TRUE:
+          return true;
+        case TYPE.INT: {
+          if (offset + 4 > data.length) {
+            throw new Error("Unexpected end of data for INT");
+          }
+          const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+          const value = view.getBigInt64(0, true);
+          offset += 8;
+          if (value < BigInt(Number.MIN_SAFE_INTEGER) || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error("Decoded integer exceeds safe range");
+          }
+          return Number(value);
+        }
+        case TYPE.FLOAT: {
+          if (offset + 8 > data.length) {
+            throw new Error("Unexpected end of data for FLOAT");
+          }
+          const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+          const value = view.getFloat64(0, true);
+          offset += 8;
+          return value;
+        }
+        case TYPE.STRING: {
+          if (offset + 4 > data.length) {
+            throw new Error("Unexpected end of data for STRING length");
+          }
+          const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
+          const length = lengthView.getUint32(0, true);
+          offset += 4;
+          if (offset + length > data.length) {
+            throw new Error("Unexpected end of data for STRING content");
+          }
+          const stringData = data.slice(offset, offset + length);
+          offset += length;
+          return new TextDecoder().decode(stringData);
+        }
+        case TYPE.OID: {
+          if (offset + 12 > data.length) {
+            throw new Error("Unexpected end of data for OID");
+          }
+          const oidBytes = data.slice(offset, offset + 12);
+          offset += 12;
+          return new ObjectId(oidBytes);
+        }
+        case TYPE.DATE: {
+          if (offset + 8 > data.length) {
+            throw new Error("Unexpected end of data for DATE");
+          }
+          const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+          const timestamp = view.getBigInt64(0, true);
+          offset += 8;
+          return new Date(Number(timestamp));
+        }
+        case TYPE.POINTER: {
+          if (offset + 8 > data.length) {
+            throw new Error("Unexpected end of data for POINTER");
+          }
+          const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+          const pointerOffset = view.getBigUint64(0, true);
+          offset += 8;
+          if (pointerOffset > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error("Pointer offset out of valid range");
+          }
+          return new Pointer(Number(pointerOffset));
+        }
+        case TYPE.ARRAY: {
+          if (offset + 4 > data.length) {
+            throw new Error("Unexpected end of data for ARRAY size");
+          }
+          const sizeView = new DataView(data.buffer, data.byteOffset + offset, 4);
+          const size = sizeView.getUint32(0, true);
+          offset += 4;
+          if (offset + size > data.length) {
+            throw new Error("Unexpected end of data for ARRAY content");
+          }
+          const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
+          const length = lengthView.getUint32(0, true);
+          offset += 4;
+          const arr = [];
+          for (let i = 0; i < length; i++) {
+            arr.push(decodeValue());
+          }
+          return arr;
+        }
+        case TYPE.OBJECT: {
+          if (offset + 4 > data.length) {
+            throw new Error("Unexpected end of data for OBJECT size");
+          }
+          const sizeView = new DataView(data.buffer, data.byteOffset + offset, 4);
+          const size = sizeView.getUint32(0, true);
+          offset += 4;
+          if (offset + size > data.length) {
+            throw new Error("Unexpected end of data for OBJECT content");
+          }
+          const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
+          const length = lengthView.getUint32(0, true);
+          offset += 4;
+          const obj = {};
+          for (let i = 0; i < length; i++) {
+            if (offset + 4 > data.length) {
+              throw new Error("Unexpected end of data for OBJECT key length");
+            }
+            const keyLengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
+            const keyLength = keyLengthView.getUint32(0, true);
+            offset += 4;
+            if (offset + keyLength > data.length) {
+              throw new Error("Unexpected end of data for OBJECT key");
+            }
+            const keyData = data.slice(offset, offset + keyLength);
+            offset += keyLength;
+            const key = new TextDecoder().decode(keyData);
+            obj[key] = decodeValue();
+          }
+          return obj;
+        }
+        default:
+          throw new Error(`Unknown type byte: 0x${type.toString(16)}`);
+      }
+    }
+    return decodeValue();
+  }
+  class BJsonFile {
+    constructor(filename) {
+      this.filename = filename;
+      this.root = null;
+      this.fileHandle = null;
+      this.file = null;
+      this.mode = null;
+      this.isOpen = false;
+    }
+    /**
+     * Open the file with specified mode
+     * @param {string} mode - 'r' for read-only, 'rw' for read-write
+     */
+    async open(mode = "r") {
+      if (this.isOpen) {
+        throw new Error(`File is already open in ${this.mode} mode`);
+      }
+      if (mode !== "r" && mode !== "rw") {
+        throw new Error(`Invalid mode: ${mode}. Use 'r' for read-only or 'rw' for read-write`);
+      }
+      if (!navigator.storage || !navigator.storage.getDirectory) {
+        throw new Error("Origin Private File System (OPFS) is not supported in this browser");
+      }
+      this.root = await navigator.storage.getDirectory();
+      this.mode = mode;
+      try {
+        if (mode === "r") {
+          this.fileHandle = await this.root.getFileHandle(this.filename);
+        } else {
+          this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
+        }
+        this.file = await this.fileHandle.getFile();
+        this.isOpen = true;
+      } catch (error) {
+        if (error.name === "NotFoundError") {
+          throw new Error(`File not found: ${this.filename}`);
+        }
+        throw error;
+      }
+    }
+    /**
+     * Close the file
+     */
+    async close() {
+      this.isOpen = false;
+      this.mode = null;
+      this.fileHandle = null;
+      this.file = null;
+    }
+    /**
+     * Ensure file is open, throw if not
+     */
+    ensureOpen() {
+      if (!this.isOpen) {
+        throw new Error(`File is not open. Call open('r') or open('rw') first`);
+      }
+    }
+    /**
+     * Ensure file is writable, throw if read-only
+     */
+    ensureWritable() {
+      this.ensureOpen();
+      if (this.mode === "r") {
+        throw new Error(`File is opened in read-only mode. Cannot write or append`);
+      }
+    }
+    /**
+     * Refresh the file reference (needed after writes to get updated size)
+     */
+    async refreshFile() {
+      this.ensureOpen();
+      this.file = await this.fileHandle.getFile();
+    }
+    async #readRange(start, length) {
+      this.ensureOpen();
+      const slice = this.file.slice(start, start + length);
+      const arrayBuffer = await slice.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    }
+    async getFileSize() {
+      this.ensureOpen();
+      return this.file.size;
+    }
+    async write(data) {
+      this.ensureWritable();
+      const binaryData = encode(data);
+      const writable = await this.fileHandle.createWritable();
+      await writable.write(binaryData);
+      await writable.close();
+      await this.refreshFile();
+    }
+    async read(pointer = new Pointer(0)) {
+      this.ensureOpen();
+      const fileSize = await this.getFileSize();
+      if (fileSize === 0) {
+        throw new Error(`File is empty: ${this.filename}`);
+      }
+      const pointerValue = pointer.valueOf();
+      if (pointerValue < 0 || pointerValue >= fileSize) {
+        throw new Error(`Pointer offset ${pointer} out of file bounds [0, ${fileSize})`);
+      }
+      const binaryData = await this.#readRange(pointerValue, fileSize - pointerValue);
+      return decode(binaryData);
+    }
+    async append(data) {
+      this.ensureWritable();
+      const binaryData = encode(data);
+      const existingSize = this.file.size;
+      const writable = await this.fileHandle.createWritable({ keepExistingData: true });
+      await writable.seek(existingSize);
+      await writable.write(binaryData);
+      await writable.close();
+      await this.refreshFile();
+    }
+    async *scan() {
+      this.ensureOpen();
+      const fileSize = await this.getFileSize();
+      if (fileSize === 0) {
+        return;
+      }
+      let offset = 0;
+      while (offset < fileSize) {
+        const getValueSize = async (readPosition) => {
+          let tempData = await this.#readRange(readPosition, 1);
+          const type = tempData[0];
+          switch (type) {
+            case TYPE.NULL:
+            case TYPE.FALSE:
+            case TYPE.TRUE:
+              return 1;
+            case TYPE.INT:
+            case TYPE.FLOAT:
+            case TYPE.DATE:
+            case TYPE.POINTER:
+              return 1 + 8;
+            case TYPE.OID:
+              return 1 + 12;
+            case TYPE.STRING: {
+              tempData = await this.#readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const length = view.getUint32(0, true);
+              return 1 + 4 + length;
+            }
+            case TYPE.ARRAY: {
+              tempData = await this.#readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const size = view.getUint32(0, true);
+              return 1 + 4 + size;
+            }
+            case TYPE.OBJECT: {
+              tempData = await this.#readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const size = view.getUint32(0, true);
+              return 1 + 4 + size;
+            }
+            default:
+              throw new Error(`Unknown type byte: 0x${type.toString(16)}`);
+          }
+        };
+        const valueSize = await getValueSize(offset);
+        const valueData = await this.#readRange(offset, valueSize);
+        offset += valueSize;
+        yield decode(valueData);
+      }
+    }
+    async delete() {
+      this.ensureWritable();
+      try {
+        await this.root.removeEntry(this.filename);
+        await this.close();
+      } catch (error) {
+        if (error.name === "NotFoundError") {
+          return;
+        }
+        throw error;
+      }
+    }
+    async exists() {
+      if (!navigator.storage || !navigator.storage.getDirectory) {
+        throw new Error("Origin Private File System (OPFS) is not supported in this browser");
+      }
+      const root = await navigator.storage.getDirectory();
+      try {
+        await root.getFileHandle(this.filename);
+        return true;
+      } catch (error) {
+        if (error.name === "NotFoundError") {
+          return false;
+        }
+        throw error;
+      }
     }
   }
   function valuesEqual$1(a, b) {
@@ -1536,55 +2034,447 @@
     }
     return result;
   }
-  class IndexStore {
-    constructor(meta) {
-      this._meta = /* @__PURE__ */ new Map();
-      this._data = /* @__PURE__ */ new Map();
-      if (meta) {
-        for (const [key, value] of Object.entries(meta)) {
-          this._meta.set(key, value);
+  class NodeData {
+    /**
+     * Creates a node data object for serialization
+     * @param {number} id - Unique node ID
+     * @param {boolean} isLeaf - Leaf flag
+     * @param {Array} keys - Key array
+     * @param {Array} values - Value array (leaf nodes)
+     * @param {Array} children - Child pointers (internal nodes)
+     * @param {Pointer} next - Pointer to next leaf
+     */
+    constructor(id, isLeaf, keys, values, children, next) {
+      this.id = id;
+      this.isLeaf = isLeaf;
+      this.keys = keys;
+      this.values = values;
+      this.children = children;
+      for (let v of children) {
+        if (!(v instanceof Pointer)) {
+          throw new Error("Children must be Pointer objects");
+        }
+      }
+      this.next = next;
+    }
+  }
+  class BPlusTree {
+    /**
+     * Creates a new persistent B+ tree
+     * @param {string} filename - Path to storage file
+     * @param {number} order - Tree order (default: 3)
+     */
+    constructor(filename, order = 3) {
+      if (order < 3) {
+        throw new Error("B+ tree order must be at least 3");
+      }
+      this.filename = filename;
+      this.order = order;
+      this.minKeys = Math.ceil(order / 2) - 1;
+      this.file = new BJsonFile(filename);
+      this.isOpen = false;
+      this.rootPointer = null;
+      this.nextNodeId = 0;
+      this._size = 0;
+    }
+    /**
+     * Open the tree file (create if doesn't exist)
+     */
+    async open() {
+      if (this.isOpen) {
+        throw new Error("Tree file is already open");
+      }
+      const exists = await this.file.exists();
+      if (exists) {
+        await this.file.open("rw");
+        await this._loadMetadata();
+      } else {
+        await this.file.open("rw");
+        await this._initializeNewTree();
+      }
+      this.isOpen = true;
+    }
+    /**
+     * Close the tree file and save metadata
+     */
+    async close() {
+      if (this.isOpen) {
+        await this._saveMetadata();
+        await this.file.close();
+        this.isOpen = false;
+      }
+    }
+    /**
+     * Initialize a new empty tree
+     */
+    async _initializeNewTree() {
+      const rootNode = new NodeData(0, true, [], [], [], null);
+      this.nextNodeId = 1;
+      this._size = 0;
+      const rootPointer = await this._saveNode(rootNode);
+      this.rootPointer = rootPointer;
+      await this._saveMetadata();
+    }
+    /**
+     * Save metadata to file
+     */
+    async _saveMetadata() {
+      const metadata = {
+        version: 1,
+        maxEntries: this.order,
+        // Renamed to match RTree size
+        minEntries: this.minKeys,
+        // Renamed to match RTree size
+        size: this._size,
+        rootPointer: this.rootPointer,
+        nextId: this.nextNodeId
+        // Renamed to match RTree size
+      };
+      await this.file.append(metadata);
+    }
+    /**
+     * Load metadata from file
+     */
+    async _loadMetadata() {
+      const fileSize = await this.file.getFileSize();
+      const METADATA_SIZE = 135;
+      if (fileSize < METADATA_SIZE) {
+        throw new Error("Invalid tree file");
+      }
+      const metadataOffset = fileSize - METADATA_SIZE;
+      const metadata = await this.file.read(metadataOffset);
+      if (!metadata || typeof metadata.maxEntries === "undefined") {
+        throw new Error(`Failed to read metadata: missing required fields`);
+      }
+      this.order = metadata.maxEntries;
+      this.minKeys = metadata.minEntries;
+      this._size = metadata.size;
+      this.nextNodeId = metadata.nextId;
+      this.rootPointer = metadata.rootPointer;
+    }
+    /**
+     * Save a node to disk
+     */
+    async _saveNode(node) {
+      const offset = await this.file.getFileSize();
+      await this.file.append(node);
+      return new Pointer(offset);
+    }
+    /**
+     * Load a node from disk
+     */
+    async _loadNode(pointer) {
+      if (!(pointer instanceof Pointer)) {
+        throw new Error("Expected Pointer object");
+      }
+      const data = await this.file.read(pointer);
+      return new NodeData(
+        data.id,
+        data.isLeaf,
+        data.keys,
+        data.values,
+        data.children,
+        data.next
+      );
+    }
+    /**
+     * Load root node
+     */
+    async _loadRoot() {
+      return await this._loadNode(this.rootPointer);
+    }
+    /**
+     * Search for a key
+     */
+    async search(key) {
+      const root = await this._loadRoot();
+      return this._searchNode(root, key);
+    }
+    /**
+     * Internal search
+     */
+    async _searchNode(node, key) {
+      if (node.isLeaf) {
+        for (let i = 0; i < node.keys.length; i++) {
+          if (key === node.keys[i]) {
+            return node.values[i];
+          }
+        }
+        return void 0;
+      } else {
+        let i = 0;
+        while (i < node.keys.length && key >= node.keys[i]) {
+          i++;
+        }
+        const child = await this._loadNode(node.children[i]);
+        return this._searchNode(child, key);
+      }
+    }
+    /**
+     * Insert a key-value pair
+     */
+    async add(key, value) {
+      const root = await this._loadRoot();
+      const result = await this._addToNode(root, key, value);
+      let newRoot;
+      if (result.newNode) {
+        newRoot = result.newNode;
+      } else {
+        const leftPointer = await this._saveNode(result.left);
+        const rightPointer = await this._saveNode(result.right);
+        newRoot = new NodeData(
+          this.nextNodeId++,
+          false,
+          [result.splitKey],
+          [],
+          [leftPointer, rightPointer],
+          null
+        );
+      }
+      const rootPointer = await this._saveNode(newRoot);
+      this.rootPointer = rootPointer;
+      this._size++;
+    }
+    /**
+     * Internal add
+     */
+    async _addToNode(node, key, value) {
+      if (node.isLeaf) {
+        const keys = [...node.keys];
+        const values = [...node.values];
+        const existingIdx = keys.indexOf(key);
+        if (existingIdx !== -1) {
+          values[existingIdx] = value;
+          return {
+            newNode: new NodeData(node.id, true, keys, values, [], null)
+          };
+        }
+        let insertIdx = 0;
+        while (insertIdx < keys.length && key > keys[insertIdx]) {
+          insertIdx++;
+        }
+        keys.splice(insertIdx, 0, key);
+        values.splice(insertIdx, 0, value);
+        if (keys.length < this.order) {
+          return {
+            newNode: new NodeData(node.id, true, keys, values, [], null)
+          };
+        } else {
+          const mid = Math.ceil(keys.length / 2);
+          const leftKeys = keys.slice(0, mid);
+          const leftValues = values.slice(0, mid);
+          const rightKeys = keys.slice(mid);
+          const rightValues = values.slice(mid);
+          const rightNode = new NodeData(this.nextNodeId++, true, rightKeys, rightValues, [], null);
+          const leftNode = new NodeData(node.id, true, leftKeys, leftValues, [], null);
+          return {
+            left: leftNode,
+            right: rightNode,
+            splitKey: rightKeys[0]
+          };
+        }
+      } else {
+        const keys = [...node.keys];
+        const children = [...node.children];
+        let childIdx = 0;
+        while (childIdx < keys.length && key >= keys[childIdx]) {
+          childIdx++;
+        }
+        const childNode = await this._loadNode(children[childIdx]);
+        const result = await this._addToNode(childNode, key, value);
+        if (result.newNode) {
+          const newChildPointer = await this._saveNode(result.newNode);
+          children[childIdx] = newChildPointer;
+          return {
+            newNode: new NodeData(node.id, false, keys, [], children, null)
+          };
+        } else {
+          const leftPointer = await this._saveNode(result.left);
+          const rightPointer = await this._saveNode(result.right);
+          keys.splice(childIdx, 0, result.splitKey);
+          children.splice(childIdx, 1, leftPointer, rightPointer);
+          if (keys.length < this.order) {
+            return {
+              newNode: new NodeData(node.id, false, keys, [], children, null)
+            };
+          } else {
+            const mid = Math.ceil(keys.length / 2) - 1;
+            const splitKey = keys[mid];
+            const leftKeys = keys.slice(0, mid);
+            const rightKeys = keys.slice(mid + 1);
+            const leftChildren = children.slice(0, mid + 1);
+            const rightChildren = children.slice(mid + 1);
+            const leftNode = new NodeData(node.id, false, leftKeys, [], leftChildren, null);
+            const rightNode = new NodeData(this.nextNodeId++, false, rightKeys, [], rightChildren, null);
+            return {
+              left: leftNode,
+              right: rightNode,
+              splitKey
+            };
+          }
         }
       }
     }
-    setMeta(key, value) {
-      this._meta.set(key, value);
-    }
-    hasMeta(key) {
-      return this._meta.has(key);
-    }
-    getMeta(key) {
-      return this._meta.get(key);
-    }
-    hasDataMap(name) {
-      return this._data.has(name);
-    }
-    getDataMap(name) {
-      if (!this._data.has(name)) {
-        this._data.set(name, /* @__PURE__ */ new Map());
+    /**
+     * Delete a key
+     */
+    async delete(key) {
+      const root = await this._loadRoot();
+      const newRoot = await this._deleteFromNode(root, key);
+      if (!newRoot) {
+        return;
       }
-      return this._data.get(name);
+      let finalRoot = newRoot;
+      if (finalRoot.keys.length === 0 && !finalRoot.isLeaf && finalRoot.children.length > 0) {
+        finalRoot = await this._loadNode(finalRoot.children[0]);
+      }
+      const rootPointer = await this._saveNode(finalRoot);
+      this.rootPointer = rootPointer;
+      this._size--;
     }
-    // clear() {
-    // 	this._data.clear();
-    // }
-    // keys() {
-    //   return this._data.keys();
-    // }
-    // has(index) {
-    //   return this._data.has(index);
-    // }
-    // get(index) {
-    // 	return this._data.get(index);
-    // }
-    // remove(key) {
-    // 	this._data.delete(key);
-    // }
-    // set(key, value) {
-    // 	this._data.set(key, value);
-    // }
-    // size() {
-    // 	return this._data.size;
-    // }
+    /**
+     * Internal delete
+     */
+    async _deleteFromNode(node, key) {
+      if (node.isLeaf) {
+        const keyIndex = node.keys.indexOf(key);
+        if (keyIndex === -1) {
+          return null;
+        }
+        const newKeys = [...node.keys];
+        const newValues = [...node.values];
+        newKeys.splice(keyIndex, 1);
+        newValues.splice(keyIndex, 1);
+        return new NodeData(node.id, true, newKeys, newValues, [], node.next);
+      } else {
+        let i = 0;
+        while (i < node.keys.length && key >= node.keys[i]) {
+          i++;
+        }
+        const childNode = await this._loadNode(node.children[i]);
+        const newChild = await this._deleteFromNode(childNode, key);
+        if (!newChild) {
+          return null;
+        }
+        const newChildren = [...node.children];
+        const newChildPointer = await this._saveNode(newChild);
+        newChildren[i] = newChildPointer;
+        return new NodeData(node.id, false, [...node.keys], [], newChildren, null);
+      }
+    }
+    /**
+     * Get all entries as array
+     */
+    async toArray() {
+      const result = [];
+      await this._collectAllEntries(await this._loadRoot(), result);
+      return result;
+    }
+    /**
+     * Collect all entries in sorted order by traversing tree
+     * @private
+     */
+    async _collectAllEntries(node, result) {
+      if (node.isLeaf) {
+        for (let i = 0; i < node.keys.length; i++) {
+          result.push({
+            key: node.keys[i],
+            value: node.values[i]
+          });
+        }
+      } else {
+        for (const childPointer of node.children) {
+          const child = await this._loadNode(childPointer);
+          await this._collectAllEntries(child, result);
+        }
+      }
+    }
+    /**
+     * Get tree size
+     */
+    size() {
+      return this._size;
+    }
+    /**
+     * Check if empty
+     */
+    isEmpty() {
+      return this._size === 0;
+    }
+    /**
+     * Range search
+     */
+    async rangeSearch(minKey, maxKey) {
+      const result = [];
+      await this._rangeSearchNode(await this._loadRoot(), minKey, maxKey, result);
+      return result;
+    }
+    /**
+     * Range search helper that traverses tree
+     * @private
+     */
+    async _rangeSearchNode(node, minKey, maxKey, result) {
+      if (node.isLeaf) {
+        for (let i = 0; i < node.keys.length; i++) {
+          if (node.keys[i] >= minKey && node.keys[i] <= maxKey) {
+            result.push({
+              key: node.keys[i],
+              value: node.values[i]
+            });
+          }
+        }
+      } else {
+        for (const childPointer of node.children) {
+          const child = await this._loadNode(childPointer);
+          await this._rangeSearchNode(child, minKey, maxKey, result);
+        }
+      }
+    }
+    /**
+     * Get tree height
+     */
+    async getHeight() {
+      let height = 0;
+      let current = await this._loadRoot();
+      while (!current.isLeaf) {
+        height++;
+        current = await this._loadNode(current.children[0]);
+      }
+      return height;
+    }
+    /**
+     * Compact the tree into a new file by copying only the current live nodes.
+     * Returns size metrics so callers can see how much space was reclaimed.
+     * @param {string} destinationFilename - New file to write the compacted tree into
+     * @returns {Promise<{oldSize:number,newSize:number,bytesSaved:number,newFilename:string}>}
+     */
+    async compact(destinationFilename) {
+      if (!this.isOpen) {
+        throw new Error("Tree file is not open");
+      }
+      if (!destinationFilename) {
+        throw new Error("Destination filename is required for compaction");
+      }
+      await this._saveMetadata();
+      const oldSize = await this.file.getFileSize();
+      const entries = await this.toArray();
+      const newTree = new BPlusTree(destinationFilename, this.order);
+      await newTree.open();
+      for (const entry of entries) {
+        await newTree.add(entry.key, entry.value);
+      }
+      await newTree.close();
+      const tempFile = new BJsonFile(destinationFilename);
+      await tempFile.open("r");
+      const newSize = await tempFile.getFileSize();
+      await tempFile.close();
+      return {
+        oldSize,
+        newSize,
+        bytesSaved: Math.max(0, oldSize - newSize),
+        newFilename: destinationFilename
+      };
+    }
   }
   const STOPWORDS = /* @__PURE__ */ new Set([
     "a",
@@ -1698,69 +2588,105 @@
     "you",
     "your"
   ]);
-  class TextIndex {
-    constructor(storage = new IndexStore()) {
-      this.storage = storage;
-      this.index = this.storage.getDataMap("index");
-      this.documentTerms = this.storage.getDataMap("documentTerms");
-      this.documentLengths = this.storage.getDataMap("documentLengths");
+  function tokenize(text2) {
+    if (typeof text2 !== "string") {
+      return [];
     }
-    /**
-     * Tokenize text into individual words
-     * @param {string} text - The text to tokenize
-     * @returns {string[]} Array of words
-     */
-    _tokenize(text2) {
-      if (typeof text2 !== "string") {
-        return [];
+    const words = text2.toLowerCase().split(/\W+/).filter((word) => word.length > 0);
+    return words.filter((word) => !STOPWORDS.has(word));
+  }
+  class TextIndex {
+    constructor(options = {}) {
+      const {
+        baseFilename = `text-index-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        order = 16,
+        trees
+      } = options;
+      this.baseFilename = baseFilename;
+      this.index = trees?.index || new BPlusTree(`${baseFilename}-terms.bjson`, order);
+      this.documentTerms = trees?.documentTerms || new BPlusTree(`${baseFilename}-documents.bjson`, order);
+      this.documentLengths = trees?.documentLengths || new BPlusTree(`${baseFilename}-lengths.bjson`, order);
+      this.isOpen = false;
+    }
+    async open() {
+      if (this.isOpen) {
+        throw new Error("TextIndex is already open");
       }
-      const words = text2.toLowerCase().split(/\W+/).filter((word) => word.length > 0);
-      return words.filter((word) => !STOPWORDS.has(word));
+      await Promise.all([
+        this.index.open(),
+        this.documentTerms.open(),
+        this.documentLengths.open()
+      ]);
+      this.isOpen = true;
+    }
+    async close() {
+      if (!this.isOpen) {
+        return;
+      }
+      await Promise.all([
+        this.index.close(),
+        this.documentTerms.close(),
+        this.documentLengths.close()
+      ]);
+      this.isOpen = false;
+    }
+    _ensureOpen() {
+      if (!this.isOpen) {
+        throw new Error("TextIndex is not open");
+      }
     }
     /**
      * Add terms from text to the index for a given document ID
      * @param {string} docId - The document identifier
      * @param {string} text - The text content to index
      */
-    add(docId, text2) {
+    async add(docId, text2) {
+      this._ensureOpen();
       if (!docId) {
         throw new Error("Document ID is required");
       }
-      const words = this._tokenize(text2);
+      const words = tokenize(text2);
       const termFrequency = /* @__PURE__ */ new Map();
       words.forEach((word) => {
         const stem = stemmer(word);
         termFrequency.set(stem, (termFrequency.get(stem) || 0) + 1);
       });
+      for (const [stem, frequency] of termFrequency.entries()) {
+        const postings = await this.index.search(stem) || {};
+        postings[docId] = frequency;
+        await this.index.add(stem, postings);
+      }
+      const existingTerms = await this.documentTerms.search(docId) || {};
+      const mergedTerms = { ...existingTerms };
       termFrequency.forEach((frequency, stem) => {
-        if (!this.index.has(stem)) {
-          this.index.set(stem, /* @__PURE__ */ new Map());
-        }
-        this.index.get(stem).set(docId, frequency);
+        mergedTerms[stem] = frequency;
       });
-      this.documentTerms.set(docId, termFrequency);
-      this.documentLengths.set(docId, words.length);
+      const docLength = Object.values(mergedTerms).reduce((sum, count) => sum + count, 0);
+      await this.documentTerms.add(docId, mergedTerms);
+      await this.documentLengths.add(docId, docLength);
     }
     /**
      * Remove all indexed terms for a given document ID
      * @param {string} docId - The document identifier to remove
      * @returns {boolean} True if document was found and removed, false otherwise
      */
-    remove(docId) {
-      if (!this.documentTerms.has(docId)) {
+    async remove(docId) {
+      this._ensureOpen();
+      const terms = await this.documentTerms.search(docId);
+      if (!terms) {
         return false;
       }
-      const terms = this.documentTerms.get(docId);
-      terms.forEach((frequency, term) => {
-        if (this.index.has(term)) {
-          this.index.get(term).delete(docId);
-          if (this.index.get(term).size === 0) {
-            this.index.delete(term);
-          }
+      for (const [term] of Object.entries(terms)) {
+        const postings = await this.index.search(term) || {};
+        delete postings[docId];
+        if (Object.keys(postings).length === 0) {
+          await this.index.delete(term);
+        } else {
+          await this.index.add(term, postings);
         }
-      });
-      this.documentTerms.delete(docId);
-      this.documentLengths.delete(docId);
+      }
+      await this.documentTerms.delete(docId);
+      await this.documentLengths.delete(docId);
       return true;
     }
     /**
@@ -1771,24 +2697,26 @@
      * @param {boolean} options.requireAll - If true, require ALL terms; if false, rank by relevance (default: false)
      * @returns {Array} Array of document IDs (if scored=false) or objects with {id, score} (if scored=true)
      */
-    query(queryText, options = { scored: true, requireAll: false }) {
-      const words = this._tokenize(queryText);
+    async query(queryText, options = { scored: true, requireAll: false }) {
+      this._ensureOpen();
+      const words = tokenize(queryText);
       if (words.length === 0) {
         return [];
       }
       const stemmedTerms = words.map((word) => stemmer(word));
       const uniqueTerms = [...new Set(stemmedTerms)];
       if (options.requireAll) {
-        const docSets = uniqueTerms.map((term) => {
-          const termDocs = this.index.get(term);
-          return termDocs ? new Set(termDocs.keys()) : /* @__PURE__ */ new Set();
-        });
+        const docSets = [];
+        for (const term of uniqueTerms) {
+          const termDocs = await this.index.search(term);
+          docSets.push(new Set(Object.keys(termDocs || {})));
+        }
         if (docSets.length === 0) {
           return [];
         }
         const intersection = new Set(docSets[0]);
         for (let i = 1; i < docSets.length; i++) {
-          for (const docId of intersection) {
+          for (const docId of [...intersection]) {
             if (!docSets[i].has(docId)) {
               intersection.delete(docId);
             }
@@ -1796,37 +2724,37 @@
         }
         return Array.from(intersection);
       }
-      const totalDocs = this.documentLengths.size;
+      const docLengthEntries = await this.documentLengths.toArray();
+      const docLengthMap = new Map(docLengthEntries.map(({ key, value }) => [String(key), value || 1]));
+      const totalDocs = docLengthEntries.length;
       const idf = /* @__PURE__ */ new Map();
-      uniqueTerms.forEach((term) => {
-        const docsWithTerm = this.index.get(term)?.size || 0;
+      for (const term of uniqueTerms) {
+        const termDocs = await this.index.search(term);
+        const docsWithTerm = termDocs ? Object.keys(termDocs).length : 0;
         if (docsWithTerm > 0) {
           idf.set(term, Math.log(totalDocs / docsWithTerm));
         }
-      });
+      }
       const docScores = /* @__PURE__ */ new Map();
-      uniqueTerms.forEach((term) => {
-        const termDocs = this.index.get(term);
-        if (!termDocs) return;
-        termDocs.forEach((termFreq, docId) => {
-          if (!docScores.has(docId)) {
-            docScores.set(docId, 0);
-          }
-          const docLength = this.documentLengths.get(docId) || 1;
+      for (const term of uniqueTerms) {
+        const termDocs = await this.index.search(term);
+        if (!termDocs) {
+          continue;
+        }
+        for (const [docId, termFreq] of Object.entries(termDocs)) {
+          const docLength = docLengthMap.get(docId) || 1;
           const tf = termFreq / docLength;
           const termIdf = idf.get(term) || 0;
-          const tfIdf = tf * termIdf;
-          docScores.set(docId, docScores.get(docId) + tfIdf);
-        });
-      });
-      docScores.forEach((score, docId) => {
-        const docTerms = this.documentTerms.get(docId);
-        if (docTerms) {
-          const matchingTerms = uniqueTerms.filter((term) => docTerms.has(term)).length;
-          const coverage = matchingTerms / uniqueTerms.length;
-          docScores.set(docId, score * (1 + coverage));
+          const prev = docScores.get(docId) || 0;
+          docScores.set(docId, prev + tf * termIdf);
         }
-      });
+      }
+      for (const [docId, score] of docScores.entries()) {
+        const docTerms = await this.documentTerms.search(docId) || {};
+        const matchingTerms = uniqueTerms.filter((term) => !!docTerms[term]).length;
+        const coverage = matchingTerms / uniqueTerms.length;
+        docScores.set(docId, score * (1 + coverage));
+      }
       const results = Array.from(docScores.entries()).map(([id, score]) => ({ id, score })).sort((a, b) => b.score - a.score);
       if (options.scored === false) {
         return results.map((r) => r.id);
@@ -1837,23 +2765,72 @@
      * Get the number of unique terms in the index
      * @returns {number} Number of unique terms
      */
-    getTermCount() {
-      return this.index.size;
+    async getTermCount() {
+      this._ensureOpen();
+      const terms = await this.index.toArray();
+      return terms.length;
     }
     /**
      * Get the number of documents in the index
      * @returns {number} Number of indexed documents
      */
-    getDocumentCount() {
-      return this.documentTerms.size;
+    async getDocumentCount() {
+      this._ensureOpen();
+      const docs = await this.documentTerms.toArray();
+      return docs.length;
     }
     /**
      * Clear all data from the index
      */
-    clear() {
-      this.index.clear();
-      this.documentTerms.clear();
-      this.documentLengths.clear();
+    async clear() {
+      this._ensureOpen();
+      const [terms, docs, lengths] = await Promise.all([
+        this.index.toArray(),
+        this.documentTerms.toArray(),
+        this.documentLengths.toArray()
+      ]);
+      for (const entry of terms) {
+        await this.index.delete(entry.key);
+      }
+      for (const entry of docs) {
+        await this.documentTerms.delete(entry.key);
+      }
+      for (const entry of lengths) {
+        await this.documentLengths.delete(entry.key);
+      }
+    }
+    /**
+     * Compact all internal B+ trees into new files and switch the index to use them.
+     * @param {string} destinationBase - Base filename (without suffixes) for the compacted files
+     * @returns {Promise<{terms: object, documents: object, lengths: object}>}
+     */
+    async compact(destinationBase = `${this.baseFilename}-compact-${Date.now()}`) {
+      this._ensureOpen();
+      if (!destinationBase) {
+        throw new Error("Destination base filename is required for compaction");
+      }
+      const termsDest = `${destinationBase}-terms.bjson`;
+      const documentsDest = `${destinationBase}-documents.bjson`;
+      const lengthsDest = `${destinationBase}-lengths.bjson`;
+      const results = await Promise.all([
+        this.index.compact(termsDest),
+        this.documentTerms.compact(documentsDest),
+        this.documentLengths.compact(lengthsDest)
+      ]);
+      const indexOrder = this.index.order;
+      const documentsOrder = this.documentTerms.order;
+      const lengthsOrder = this.documentLengths.order;
+      await this.close();
+      this.baseFilename = destinationBase;
+      this.index = new BPlusTree(termsDest, indexOrder);
+      this.documentTerms = new BPlusTree(documentsDest, documentsOrder);
+      this.documentLengths = new BPlusTree(lengthsDest, lengthsOrder);
+      await this.open();
+      return {
+        terms: results[0],
+        documents: results[1],
+        lengths: results[2]
+      };
     }
   }
   function evaluateExpression(expr, doc) {
@@ -2866,11 +3843,16 @@
     }
     return checkFn(fieldValue);
   }
-  function text(prop, query) {
-    const textIndex = new TextIndex();
-    textIndex.add("id", prop);
-    const results = textIndex.query(query, { scored: false });
-    return results.length === 1;
+  function tokenizeText(text2) {
+    if (typeof text2 !== "string") return [];
+    const words = tokenize(text2);
+    return words.map((w) => stemmer(w));
+  }
+  function text(prop, queryText) {
+    if (typeof prop !== "string") return false;
+    const propTokens = new Set(tokenizeText(prop));
+    const queryTokens = tokenizeText(queryText);
+    return queryTokens.some((term) => propTokens.has(term));
   }
   function geoWithin(prop, query) {
     try {
@@ -2920,6 +3902,83 @@
       return true;
     }
     return false;
+  }
+  function extractCoordinatesFromGeoJSON(geoJson) {
+    if (!geoJson) return null;
+    if (geoJson.type === "FeatureCollection" && geoJson.features && geoJson.features.length > 0) {
+      const feature = geoJson.features[0];
+      if (feature.geometry) {
+        return extractCoordinatesFromGeoJSON(feature.geometry);
+      }
+    }
+    if (geoJson.type === "Feature" && geoJson.geometry) {
+      return extractCoordinatesFromGeoJSON(geoJson.geometry);
+    }
+    if (geoJson.type === "Point" && geoJson.coordinates) {
+      const [lng, lat] = geoJson.coordinates;
+      if (typeof lng === "number" && typeof lat === "number") {
+        return { lat, lng };
+      }
+    }
+    if (geoJson.type === "Polygon" && geoJson.coordinates && geoJson.coordinates.length > 0) {
+      const ring = geoJson.coordinates[0];
+      if (ring.length > 0) {
+        let sumLat = 0, sumLng = 0;
+        for (const coord of ring) {
+          sumLng += coord[0];
+          sumLat += coord[1];
+        }
+        return {
+          lat: sumLat / ring.length,
+          lng: sumLng / ring.length
+        };
+      }
+    }
+    return null;
+  }
+  function haversineDistance$1(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+  function isNear(geoJson, refLng, refLat, maxDistanceMeters) {
+    const coords = extractCoordinatesFromGeoJSON(geoJson);
+    if (!coords) return false;
+    const distanceKm = haversineDistance$1(coords.lat, coords.lng, refLat, refLng);
+    const distanceM = distanceKm * 1e3;
+    return distanceM <= maxDistanceMeters;
+  }
+  function geoIntersects(geoJson, queryGeo) {
+    if (!geoJson || !queryGeo) return false;
+    const queryCoords = extractCoordinatesFromGeoJSON(queryGeo);
+    if (!queryCoords) return false;
+    const docCoords = extractCoordinatesFromGeoJSON(geoJson);
+    if (!docCoords) return false;
+    if (queryGeo.type === "Polygon" && geoJson.type === "Point") {
+      return pointInPolygon(docCoords.lng, docCoords.lat, queryGeo.coordinates[0]);
+    }
+    if (geoJson.type === "Polygon" && queryGeo.type === "Point") {
+      const queryPt = queryGeo.coordinates;
+      return pointInPolygon(queryPt[0], queryPt[1], geoJson.coordinates[0]);
+    }
+    if (geoJson.type === "Point" && queryGeo.type === "Point") {
+      const dist = haversineDistance$1(docCoords.lat, docCoords.lng, queryCoords.lat, queryCoords.lng);
+      return dist < 1e-3;
+    }
+    return false;
+  }
+  function pointInPolygon(lng, lat, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      const intersect = yi > lat !== yj > lat && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
   function where(doc, value) {
     if (typeof value === "function") {
@@ -3058,8 +4117,30 @@
               if (!fieldValueMatches(fieldValue, function(v) {
                 return v != void 0 && geoWithin(v, operand);
               })) return false;
-            } else if (operator == "$near" || operator == "$nearSphere" || operator == "$geoIntersects") ;
-            else if (operator == "$not") {
+            } else if (operator == "$near" || operator == "$nearSphere") {
+              let coordinates;
+              if (operand.$geometry) {
+                coordinates = operand.$geometry.coordinates;
+              } else if (operand.coordinates) {
+                coordinates = operand.coordinates;
+              } else if (Array.isArray(operand)) {
+                coordinates = operand;
+              }
+              if (coordinates && coordinates.length >= 2) {
+                const [lng, lat] = coordinates;
+                const maxDistanceMeters = operand.$maxDistance || 1e6;
+                if (!fieldValueMatches(fieldValue, function(v) {
+                  return v != void 0 && isNear(v, lng, lat, maxDistanceMeters);
+                })) return false;
+              } else {
+                return false;
+              }
+            } else if (operator == "$geoIntersects") {
+              const geometry = operand.$geometry || operand;
+              if (!fieldValueMatches(fieldValue, function(v) {
+                return v != void 0 && geoIntersects(v, geometry);
+              })) return false;
+            } else if (operator == "$not") {
               if (opMatches(doc, key, operand)) return false;
             } else if (operator == "$all") {
               var arrayFieldValue = getProp(doc, key);
@@ -3986,611 +5067,54 @@
       throw new Error("deserialize() must be implemented by subclass");
     }
   }
-  function isNumericString(str) {
-    if (typeof str !== "string" || str.trim() === "") {
-      return false;
+  class RegularCollectionIndex extends Index {
+    constructor(name, keys, storageFilePath, options = {}) {
+      super(name, keys, storageFilePath, options);
+      this.data = new BPlusTree(storageFilePath, 50);
+      this.isOpen = false;
     }
-    return Number.isFinite(+str);
-  }
-  class BPlusTreeNode {
     /**
-     * Creates a new B+ tree node
-     * @param {boolean} isLeaf - Whether this node is a leaf node
+     * Open the index file
+     * Must be called before using the index
      */
-    constructor(isLeaf, indexStore, nodeCache) {
-      if (!(indexStore instanceof IndexStore)) {
-        throw new Error("IndexStore is required to create BPlusTreeNode");
-      }
-      if (typeof isLeaf === "object") {
-        this._data = isLeaf;
-        this.id = this._data.id;
-        this.keys = this._data.keys;
-        this.values = this._data.values;
-        this.children = [];
-        for (const childId of this._data.children) {
-          if (nodeCache.has(childId)) {
-            this.children.push(nodeCache.get(childId));
-            continue;
-          }
-          const childData = indexStore.getDataMap("nodes").get(childId);
-          if (!childData) {
-            throw new Error(`BPlusTreeNode: Child node with id ${childId} not found in IndexStore`);
-          }
-          const childNode = new BPlusTreeNode(childData, indexStore, nodeCache);
-          this.children.push(childNode);
-          nodeCache.set(childId, childNode);
-        }
-        this.isLeaf = this._data.isLeaf;
-        if (this._data.next) {
-          if (nodeCache.has(this._data.next)) {
-            this.next = nodeCache.get(this._data.next);
-          } else {
-            const nextData = indexStore.getDataMap("nodes").get(this._data.next);
-            if (!nextData) {
-              throw new Error(`BPlusTreeNode: Next leaf node with id ${this._data.next} not found in IndexStore`);
-            }
-            this.next = new BPlusTreeNode(nextData, indexStore, nodeCache);
-            nodeCache.set(this.next.id, this.next);
-          }
-        } else {
-          this.next = null;
-        }
-      } else {
-        this._data = {
-          id: indexStore.getMeta("nextId"),
-          keys: [],
-          // Array of keys
-          values: [],
-          // Array of values (only used in leaf nodes)
-          children: [],
-          // Array of child nodes (only used in internal nodes)
-          isLeaf,
-          next: null
-          // Pointer to next leaf node (only used in leaf nodes)
-        };
-        indexStore.setMeta("nextId", this._data.id + 1);
-        indexStore.getDataMap("nodes").set(this._data.id, this._data);
-        this.id = this._data.id;
-        this.keys = this._data.keys;
-        this.values = this._data.values;
-        this.children = [];
-        this.isLeaf = this._data.isLeaf;
-        this.next = null;
-      }
-      const self2 = this;
-      return new Proxy(this, {
-        get(target, prop) {
-          if (prop === "children") {
-            return new Proxy(target.children, {
-              get(target2, property, receiver) {
-                if (!isNumericString(property)) {
-                  if (property === "length") {
-                    return Reflect.get(target2, property, receiver);
-                  } else if (property === "splice") {
-                    return function(...args) {
-                      if (args.length == 3) {
-                        if (args[2] instanceof BPlusTreeNode) {
-                          self2._data.children.splice(args[0], args[1], args[2].id);
-                          indexStore.getDataMap("nodes").set(self2._data.id, self2._data);
-                        } else {
-                          throw new Error("BPlusTreeNode: children array can only store BPlusTreeNode instances", args[2]);
-                        }
-                      }
-                      return Reflect.apply(target2[property], target2, args);
-                    };
-                  } else if (property === "push") {
-                    return function(...args) {
-                      if (args.length !== 1) {
-                        throw new Error("BPlusTreeNode: children.push only supports single argument");
-                      }
-                      if (args[0] instanceof BPlusTreeNode) {
-                        self2._data.children.push(args[0].id);
-                        indexStore.getDataMap("nodes").set(self2._data.id, self2._data);
-                        return self2.children.push(args[0]);
-                      } else {
-                        throw new Error("BPlusTreeNode: children array can only store BPlusTreeNode instances", args[2]);
-                      }
-                    };
-                  }
-                }
-                return Reflect.get(target2, property, receiver);
-              },
-              set(target2, property, value, receiver) {
-                if (isNumericString(property) && value instanceof BPlusTreeNode) {
-                  Reflect.set(self2._data.children, property, value.id, receiver);
-                } else {
-                  Reflect.set(self2._data.children, property, value, receiver);
-                }
-                indexStore.getDataMap("nodes").set(self2._data.id, self2._data);
-                return Reflect.set(target2, property, value, receiver);
-              }
-            });
-          }
-          return Reflect.get(target, prop);
-        },
-        set(target, prop, value) {
-          if (prop === "next") {
-            if (value instanceof BPlusTreeNode) {
-              target.next = value;
-              target._data.next = value.id;
-              indexStore.getDataMap("nodes").set(target._data.id, target._data);
-            } else if (value === null) {
-              target.next = null;
-              target._data.next = null;
-              indexStore.getDataMap("nodes").set(target._data.id, target._data);
-            } else {
-              throw new Error("BPlusTreeNode: next pointer must be a BPlusTreeNode or null");
-            }
-          } else if (prop === "isLeaf") {
-            target.isLeaf = value;
-            target._data.isLeaf = value;
-            indexStore.getDataMap("nodes").set(target._data.id, target._data);
-          } else if (prop === "children") {
-            target.children = value;
-            target._data.children = value.map((child) => child.id);
-            indexStore.getDataMap("nodes").set(target._data.id, target._data);
-          } else {
-            target[prop] = value;
-            target._data[prop] = value;
-            indexStore.getDataMap("nodes").set(target._data.id, target._data);
-          }
-          return true;
-        }
-      });
-    }
-  }
-  class BPlusTree {
-    /**
-     * Creates a new B+ tree
-      * @param {number} order - The maximum number of children per node (default: 3)
-      */
-    constructor(order = 3, indexStore = new IndexStore()) {
-      if (order < 3) {
-        throw new Error("B+ tree order must be at least 3");
-      }
-      this.order = order;
-      this.minKeys = Math.ceil(order / 2) - 1;
-      this.indexStore = indexStore;
-      if (indexStore.hasMeta("order")) {
-        if (indexStore.getMeta("order") !== this.order) {
-          throw new Error(`B+ tree order does not match stored index metadata ${indexStore.getMeta("order")} != ${this.order}`);
-        }
-        if (indexStore.getMeta("minKeys") != this.minKeys) {
-          throw new Error(`B+ tree minKeys does not match stored index metadata ${indexStore.getMeta("minKeys")} != ${this.minKeys}`);
-        }
-        this._buildTreeFromStorage();
-      } else {
-        this.indexStore.setMeta("order", this.order);
-        this.indexStore.setMeta("minKeys", this.minKeys);
-        this.indexStore.setMeta("nextId", 1);
-        this.root = new BPlusTreeNode(true, this.indexStore);
-        this.indexStore.setMeta("rootId", this.root.id);
-      }
-    }
-    /**
-     * Builds the B+ tree from existing data in the IndexStore
-     * @private
-     */
-    _buildTreeFromStorage() {
-      const nodeCache = /* @__PURE__ */ new Map();
-      const rootData = this.indexStore.getDataMap("nodes").get(this.indexStore.getMeta("rootId"));
-      if (!rootData) {
-        throw new Error("BPlusTree: Root node not found in IndexStore");
-      }
-      this.root = new BPlusTreeNode(rootData, this.indexStore, nodeCache);
-    }
-    /**
-     * Searches for a value by key in the B+ tree
-     * @param {*} key - The key to search for
-     * @returns {Array} Array of values associated with the key, or undefined if not found
-     */
-    search(key) {
-      return this._searchNode(this.root, key);
-    }
-    /**
-     * Internal method to search for a key in a node
-     * @private
-     * @param {BPlusTreeNode} node - The node to search in
-     * @param {*} key - The key to search for
-     * @returns {Array} Array of values if found, undefined otherwise
-     */
-    _searchNode(node, key) {
-      if (node.isLeaf) {
-        const values = [];
-        for (let i = 0; i < node.keys.length; i++) {
-          if (key === node.keys[i]) {
-            values.push(...node.values[i]);
-          }
-        }
-        return values;
-      } else {
-        let i = 0;
-        while (i < node.keys.length && key >= node.keys[i]) {
-          i++;
-        }
-        return this._searchNode(node.children[i], key);
-      }
-    }
-    /**
-     * Inserts a key-value pair into the B+ tree.
-     * If the key already exists, its value will be updated.
-     * @param {*} key - The key to insert
-     * @param {*} value - The value to associate with the key
-     */
-    add(key, value) {
-      const root = this.root;
-      if (root.keys.length === this.indexStore.getMeta("order") - 1) {
-        const newRoot = new BPlusTreeNode(false, this.indexStore);
-        newRoot.children.push(this.root);
-        this._splitChild(newRoot, 0);
-        this.root = newRoot;
-        this.indexStore.setMeta("rootId", this.root.id);
-      }
-      this._insertNonFull(this.root, key, value);
-    }
-    /**
-     * Inserts a key-value pair into a node that is not full
-     * @private
-     * @param {BPlusTreeNode} node - The node to insert into
-     * @param {*} key - The key to insert
-     * @param {*} value - The value to insert
-     */
-    _insertNonFull(node, key, value) {
-      let i = node.keys.length - 1;
-      if (node.isLeaf) {
-        for (let j = 0; j < node.keys.length; j++) {
-          if (node.keys[j] === key) {
-            node.values[j].push(value);
-            return;
-          }
-        }
-        node.keys.push(null);
-        node.values.push(null);
-        while (i >= 0 && key < node.keys[i]) {
-          node.keys[i + 1] = node.keys[i];
-          node.values[i + 1] = node.values[i];
-          i--;
-        }
-        node.keys[i + 1] = key;
-        node.values[i + 1] = [value];
-      } else {
-        i = 0;
-        while (i < node.keys.length && key >= node.keys[i]) {
-          i++;
-        }
-        if (node.children[i].keys.length === this.indexStore.getMeta("order") - 1) {
-          this._splitChild(node, i);
-          if (key >= node.keys[i]) {
-            i++;
-          }
-        }
-        this._insertNonFull(node.children[i], key, value);
-      }
-    }
-    /**
-     * Splits a full child node
-     * @private
-     * @param {BPlusTreeNode} parent - The parent node
-     * @param {number} index - The index of the child to split
-     */
-    _splitChild(parent, index) {
-      const fullChild = parent.children[index];
-      const newChild = new BPlusTreeNode(fullChild.isLeaf, this.indexStore);
-      const midIndex = Math.floor((this.indexStore.getMeta("order") - 1) / 2);
-      if (fullChild.isLeaf) {
-        newChild.keys = fullChild.keys.splice(midIndex);
-        newChild.values = fullChild.values.splice(midIndex);
-        newChild.next = fullChild.next;
-        fullChild.next = newChild;
-        parent.keys.splice(index, 0, newChild.keys[0]);
-      } else {
-        newChild.keys = fullChild.keys.splice(midIndex + 1);
-        const promotedKey = fullChild.keys.pop();
-        newChild.children = fullChild.children.splice(midIndex + 1);
-        parent.keys.splice(index, 0, promotedKey);
-      }
-      parent.children.splice(index + 1, 0, newChild);
-    }
-    /**
-     * Deletes a specific value from a key in the B+ tree
-     * @param {*} key - The key to delete from
-     * @param {*} value - The specific value to remove
-     * @returns {boolean} True if the value was found and deleted, false otherwise
-     */
-    deleteValue(key, value) {
-      const deleted = this._deleteValue(this.root, key, value);
-      if (this.root.keys.length === 0) {
-        if (!this.root.isLeaf && this.root.children.length > 0) {
-          this.root = this.root.children[0];
-          this.indexStore.setMeta("rootId", this.root.id);
-        }
-      }
-      return deleted;
-    }
-    /**
-     * Deletes all values for a key from the B+ tree
-     * @param {*} key - The key to delete
-     * @returns {boolean} True if the key was found and deleted, false otherwise
-     */
-    delete(key) {
-      const deleted = this._delete(this.root, key);
-      if (this.root.keys.length === 0) {
-        if (!this.root.isLeaf && this.root.children.length > 0) {
-          this.root = this.root.children[0];
-          this.indexStore.setMeta("rootId", this.root.id);
-        }
-      }
-      return deleted;
-    }
-    /**
-     * Internal method to delete a specific value from a key
-     * @private
-     * @param {BPlusTreeNode} node - The node to delete from
-     * @param {*} key - The key to delete from
-     * @param {*} value - The value to delete
-     * @returns {boolean} True if deleted, false otherwise
-     */
-    _deleteValue(node, key, value) {
-      if (node.isLeaf) {
-        for (let i = 0; i < node.keys.length; i++) {
-          if (key === node.keys[i]) {
-            const values = node.values[i];
-            const valueIndex = values.indexOf(value);
-            if (valueIndex === -1) {
-              return false;
-            }
-            values.splice(valueIndex, 1);
-            if (values.length === 0) {
-              node.keys.splice(i, 1);
-              node.values.splice(i, 1);
-            }
-            return true;
-          }
-        }
-        return false;
-      } else {
-        let i = 0;
-        while (i < node.keys.length && key >= node.keys[i]) {
-          i++;
-        }
-        const deleted = this._deleteValue(node.children[i], key, value);
-        if (deleted) {
-          this._rebalanceAfterDelete(node, i);
-        }
-        return deleted;
-      }
-    }
-    /**
-     * Internal method to delete a key from a node
-     * @private
-     * @param {BPlusTreeNode} node - The node to delete from
-     * @param {*} key - The key to delete
-     * @returns {boolean} True if deleted, false otherwise
-     */
-    _delete(node, key) {
-      if (node.isLeaf) {
-        for (let i = 0; i < node.keys.length; i++) {
-          if (key === node.keys[i]) {
-            node.keys.splice(i, 1);
-            node.values.splice(i, 1);
-            return true;
-          }
-        }
-        return false;
-      } else {
-        let i = 0;
-        while (i < node.keys.length && key >= node.keys[i]) {
-          i++;
-        }
-        const deleted = this._delete(node.children[i], key);
-        if (deleted) {
-          this._rebalanceAfterDelete(node, i);
-        }
-        return deleted;
-      }
-    }
-    /**
-     * Rebalances the tree after a deletion
-     * @private
-     * @param {BPlusTreeNode} parent - The parent node
-     * @param {number} index - The index of the child that was modified
-     */
-    _rebalanceAfterDelete(parent, index) {
-      const child = parent.children[index];
-      if (child.keys.length >= this.indexStore.getMeta("minKeys")) {
+    async open() {
+      if (this.isOpen) {
         return;
       }
-      if (index > 0) {
-        const leftSibling = parent.children[index - 1];
-        if (leftSibling.keys.length > this.indexStore.getMeta("minKeys")) {
-          this._borrowFromLeft(parent, index);
-          return;
-        }
-      }
-      if (index < parent.children.length - 1) {
-        const rightSibling = parent.children[index + 1];
-        if (rightSibling.keys.length > this.indexStore.getMeta("minKeys")) {
-          this._borrowFromRight(parent, index);
-          return;
-        }
-      }
-      if (index > 0) {
-        this._merge(parent, index - 1);
-      } else {
-        this._merge(parent, index);
-      }
-    }
-    /**
-     * Borrows a key from the left sibling
-     * @private
-     * @param {BPlusTreeNode} parent - The parent node
-     * @param {number} index - The index of the child
-     */
-    _borrowFromLeft(parent, index) {
-      const child = parent.children[index];
-      const leftSibling = parent.children[index - 1];
-      if (child.isLeaf) {
-        child.keys.unshift(leftSibling.keys.pop());
-        child.values.unshift(leftSibling.values.pop());
-        parent.keys[index - 1] = child.keys[0];
-      } else {
-        child.keys.unshift(parent.keys[index - 1]);
-        parent.keys[index - 1] = leftSibling.keys.pop();
-        child.children.unshift(leftSibling.children.pop());
-      }
-    }
-    /**
-     * Borrows a key from the right sibling
-     * @private
-     * @param {BPlusTreeNode} parent - The parent node
-     * @param {number} index - The index of the child
-     */
-    _borrowFromRight(parent, index) {
-      const child = parent.children[index];
-      const rightSibling = parent.children[index + 1];
-      if (child.isLeaf) {
-        child.keys.push(rightSibling.keys.shift());
-        child.values.push(rightSibling.values.shift());
-        parent.keys[index] = rightSibling.keys[0];
-      } else {
-        child.keys.push(parent.keys[index]);
-        parent.keys[index] = rightSibling.keys.shift();
-        child.children.push(rightSibling.children.shift());
-      }
-    }
-    /**
-     * Merges a child with its right sibling
-     * @private
-     * @param {BPlusTreeNode} parent - The parent node
-     * @param {number} index - The index of the left child to merge
-     */
-    _merge(parent, index) {
-      const leftChild = parent.children[index];
-      const rightChild = parent.children[index + 1];
-      if (leftChild.isLeaf) {
-        leftChild.keys = leftChild.keys.concat(rightChild.keys);
-        leftChild.values = leftChild.values.concat(rightChild.values);
-        leftChild.next = rightChild.next;
-        parent.keys.splice(index, 1);
-      } else {
-        leftChild.keys.push(parent.keys[index]);
-        leftChild.keys = leftChild.keys.concat(rightChild.keys);
-        leftChild.children = leftChild.children.concat(rightChild.children);
-        parent.keys.splice(index, 1);
-      }
-      parent.children.splice(index + 1, 1);
-    }
-    /**
-     * Returns all key-value pairs in sorted order
-     * @returns {Array} Array of {key, value} objects
-     */
-    toArray() {
-      const result = [];
-      let current = this._getFirstLeaf(this.root);
-      while (current) {
-        for (let i = 0; i < current.keys.length; i++) {
-          const values = current.values[i];
-          for (let j = 0; j < values.length; j++) {
-            result.push({
-              key: current.keys[i],
-              value: values[j]
-            });
-          }
-        }
-        current = current.next;
-      }
-      return result;
-    }
-    /**
-     * Gets the first (leftmost) leaf node
-     * @private
-     * @param {BPlusTreeNode} node - The node to start from
-     * @returns {BPlusTreeNode} The leftmost leaf node
-     */
-    _getFirstLeaf(node) {
-      if (node.isLeaf) {
-        return node;
-      }
-      return this._getFirstLeaf(node.children[0]);
-    }
-    /**
-     * Returns the number of key-value pairs in the tree
-     * @returns {number} The size of the tree
-     */
-    size() {
-      let count = 0;
-      let current = this._getFirstLeaf(this.root);
-      while (current) {
-        for (let i = 0; i < current.values.length; i++) {
-          count += current.values[i].length;
-        }
-        current = current.next;
-      }
-      return count;
-    }
-    /**
-     * Checks if the tree is empty
-     * @returns {boolean} True if the tree is empty
-     */
-    isEmpty() {
-      return this.root.keys.length === 0;
-    }
-    /**
-     * Clears all entries from the tree
-     */
-    clear() {
-      this.indexStore.getDataMap("nodes").clear();
-      this.root = new BPlusTreeNode(true, this.indexStore);
-      this.indexStore.setMeta("rootId", this.root.id);
-    }
-    /**
-     * Performs a range search for all keys between min and max (inclusive)
-     * @param {*} minKey - The minimum key (inclusive)
-     * @param {*} maxKey - The maximum key (inclusive)
-     * @returns {Array} Array of {key, value} objects in range
-     */
-    rangeSearch(minKey, maxKey) {
-      const result = [];
-      let current = this._getFirstLeaf(this.root);
-      while (current && current.keys[current.keys.length - 1] < minKey) {
-        current = current.next;
-      }
-      while (current) {
-        for (let i = 0; i < current.keys.length; i++) {
-          if (current.keys[i] >= minKey && current.keys[i] <= maxKey) {
-            const values = current.values[i];
-            for (let j = 0; j < values.length; j++) {
-              result.push({
-                key: current.keys[i],
-                value: values[j]
-              });
+      try {
+        await this.data.open();
+        this.isOpen = true;
+      } catch (error) {
+        if (error.message && (error.message.includes("Unknown type byte") || error.message.includes("Failed to read metadata") || error.message.includes("Invalid tree file"))) {
+          if (typeof navigator !== "undefined" && navigator.storage) {
+            const opfsRoot = await navigator.storage.getDirectory();
+            try {
+              await opfsRoot.removeEntry(this.storage);
+            } catch (e) {
             }
-          } else if (current.keys[i] > maxKey) {
-            return result;
           }
+          this.data = new BPlusTree(this.storage, 50);
+          await this.data.open();
+          this.isOpen = true;
+        } else {
+          throw error;
         }
-        current = current.next;
       }
-      return result;
     }
     /**
-     * Gets the height of the tree
-     * @returns {number} The height of the tree
+     * Close the index file
      */
-    getHeight() {
-      let height = 0;
-      let current = this.root;
-      while (!current.isLeaf) {
-        height++;
-        current = current.children[0];
+    async close() {
+      if (this.isOpen) {
+        try {
+          await this.data.close();
+        } catch (error) {
+          if (!error.message || !error.message.includes("File is not open")) {
+            throw error;
+          }
+        }
+        this.isOpen = false;
       }
-      return height;
-    }
-  }
-  class RegularCollectionIndex extends Index {
-    constructor(name, keys, storage, options = {}) {
-      super(name, keys, storage, options);
-      this.data = new BPlusTree(50, storage);
     }
     /**
      * Extract index key value from a document
@@ -4620,10 +5144,27 @@
       * 
      * @param {Object} doc - The document to index
      */
-    add(doc) {
+    async add(doc) {
+      if (!this.isOpen) {
+        await this.open();
+      }
       const indexKey = this.extractIndexKey(doc);
       if (indexKey !== null) {
-        this.data.add(indexKey, doc._id.toString());
+        const docId = doc._id.toString();
+        const existing = await this.data.search(indexKey);
+        let docIds;
+        if (Array.isArray(existing)) {
+          if (!existing.includes(docId)) {
+            docIds = [...existing, docId];
+          } else {
+            return;
+          }
+        } else if (existing) {
+          docIds = existing === docId ? [existing] : [existing, docId];
+        } else {
+          docIds = [docId];
+        }
+        await this.data.add(indexKey, docIds);
       }
     }
     /**
@@ -4631,19 +5172,33 @@
       * 
      * @param {Object} doc - The document to remove
      */
-    remove(doc) {
+    async remove(doc) {
+      if (!this.isOpen) {
+        await this.open();
+      }
       const indexKey = this.extractIndexKey(doc);
       if (indexKey !== null) {
-        this.data.delete(indexKey, doc._id.toString());
+        const docId = doc._id.toString();
+        const existing = await this.data.search(indexKey);
+        if (Array.isArray(existing)) {
+          const filtered = existing.filter((id) => id !== docId);
+          if (filtered.length > 0) {
+            await this.data.add(indexKey, filtered);
+          } else {
+            await this.data.delete(indexKey);
+          }
+        } else if (existing === docId) {
+          await this.data.delete(indexKey);
+        }
       }
     }
     /**
      * Query the index
       * 
      * @param {*} query - The query object
-     * @returns {Array|null} Array of document IDs or null if index cannot satisfy query
+     * @returns {Promise<Array|null>} Array of document IDs or null if index cannot satisfy query
      */
-    query(query) {
+    async query(query) {
       const queryKeys = Object.keys(query);
       const indexFields = Object.keys(this.keys);
       if (indexFields.length !== 1) {
@@ -4656,10 +5211,11 @@
       const queryValue = query[field];
       if (typeof queryValue !== "object" || queryValue === null) {
         const indexKey = queryValue;
-        return this.data.search(indexKey);
+        const result = await this.data.search(indexKey);
+        return result || [];
       }
       if (typeof queryValue === "object" && !Array.isArray(queryValue)) {
-        return this._queryWithOperators(field, queryValue);
+        return await this._queryWithOperators(field, queryValue);
       }
       return null;
     }
@@ -4668,7 +5224,7 @@
       * 
      * @private
      */
-    _queryWithOperators(field, operators) {
+    async _queryWithOperators(field, operators) {
       const ops = Object.keys(operators);
       const results = /* @__PURE__ */ new Set();
       const hasRangeOp = ops.some((op) => ["$gt", "$gte", "$lt", "$lte"].includes(op));
@@ -4678,43 +5234,45 @@
         if (hasGt && hasLt) {
           const minValue = ops.includes("$gte") ? operators["$gte"] : ops.includes("$gt") ? operators["$gt"] : -Infinity;
           const maxValue = ops.includes("$lte") ? operators["$lte"] : ops.includes("$lt") ? operators["$lt"] : Infinity;
-          const minKey = minValue;
-          const maxKey = maxValue;
-          const rangeResults = this.data.rangeSearch(minKey, maxKey);
-          for (const { key, value } of rangeResults) {
-            try {
-              const keyValue = key;
-              let matches2 = true;
-              if (ops.includes("$gt") && !(keyValue > operators["$gt"])) matches2 = false;
-              if (ops.includes("$gte") && !(keyValue >= operators["$gte"])) matches2 = false;
-              if (ops.includes("$lt") && !(keyValue < operators["$lt"])) matches2 = false;
-              if (ops.includes("$lte") && !(keyValue <= operators["$lte"])) matches2 = false;
-              if (matches2 && value) {
+          const rangeResults = await this.data.rangeSearch(minValue, maxValue);
+          for (const entry of rangeResults) {
+            const keyValue = entry.key;
+            const value = entry.value;
+            let matches2 = true;
+            if (ops.includes("$gt") && !(keyValue > operators["$gt"])) matches2 = false;
+            if (ops.includes("$gte") && !(keyValue >= operators["$gte"])) matches2 = false;
+            if (ops.includes("$lt") && !(keyValue < operators["$lt"])) matches2 = false;
+            if (ops.includes("$lte") && !(keyValue <= operators["$lte"])) matches2 = false;
+            if (matches2 && value) {
+              if (Array.isArray(value)) {
+                value.forEach((id) => results.add(id));
+              } else {
                 results.add(value);
               }
-            } catch (e) {
             }
           }
           return Array.from(results);
         } else {
-          const allEntries = this.data.toArray();
-          for (const { key, value } of allEntries) {
-            try {
-              const keyValue = key;
-              let matches2 = true;
-              for (const op of ops) {
-                const operand = operators[op];
-                if (op === "$gt" && !(keyValue > operand)) matches2 = false;
-                else if (op === "$gte" && !(keyValue >= operand)) matches2 = false;
-                else if (op === "$lt" && !(keyValue < operand)) matches2 = false;
-                else if (op === "$lte" && !(keyValue <= operand)) matches2 = false;
-                else if (op === "$eq" && !(keyValue === operand)) matches2 = false;
-                else if (op === "$ne" && !(keyValue !== operand)) matches2 = false;
-              }
-              if (matches2 && value) {
+          const allEntries = await this.data.toArray();
+          for (const entry of allEntries) {
+            const keyValue = entry.key;
+            const value = entry.value;
+            let matches2 = true;
+            for (const op of ops) {
+              const operand = operators[op];
+              if (op === "$gt" && !(keyValue > operand)) matches2 = false;
+              else if (op === "$gte" && !(keyValue >= operand)) matches2 = false;
+              else if (op === "$lt" && !(keyValue < operand)) matches2 = false;
+              else if (op === "$lte" && !(keyValue <= operand)) matches2 = false;
+              else if (op === "$eq" && !(keyValue === operand)) matches2 = false;
+              else if (op === "$ne" && !(keyValue !== operand)) matches2 = false;
+            }
+            if (matches2 && value) {
+              if (Array.isArray(value)) {
+                value.forEach((id) => results.add(id));
+              } else {
                 results.add(value);
               }
-            } catch (e) {
             }
           }
           return Array.from(results);
@@ -4724,10 +5282,13 @@
         const values = operators["$in"];
         if (Array.isArray(values)) {
           for (const value of values) {
-            const indexKey = value;
-            const idArray = this.data.search(indexKey);
-            if (idArray) {
-              idArray.forEach((id) => results.add(id));
+            const result = await this.data.search(value);
+            if (result) {
+              if (Array.isArray(result)) {
+                result.forEach((id) => results.add(id));
+              } else {
+                results.add(result);
+              }
             }
           }
           return Array.from(results);
@@ -4735,17 +5296,22 @@
       }
       if (ops.includes("$eq")) {
         const value = operators["$eq"];
-        const indexKey = value;
-        const result = this.data.search(indexKey);
-        return result || [];
+        const result = await this.data.search(value);
+        if (result) {
+          return Array.isArray(result) ? result : [result];
+        }
+        return [];
       }
       if (ops.includes("$ne")) {
         const excludeValue = operators["$ne"];
-        const excludeKey = excludeValue;
-        const allEntries = this.data.toArray();
-        for (const { key, value } of allEntries) {
-          if (key !== excludeKey && value) {
-            results.add(value);
+        const allEntries = await this.data.toArray();
+        for (const entry of allEntries) {
+          if (entry.key !== excludeValue && entry.value) {
+            if (Array.isArray(entry.value)) {
+              entry.value.forEach((id) => results.add(id));
+            } else {
+              results.add(entry.value);
+            }
           }
         }
         return Array.from(results);
@@ -4755,14 +5321,19 @@
     /**
      * Clear all entries from the index
      */
-    clear() {
-      this.data.clear();
+    async clear() {
+      if (this.isOpen) {
+        await this.close();
+      }
+      this.data = new BPlusTree(this.data.filename, 50);
+      await this.open();
     }
   }
   class TextCollectionIndex extends Index {
     constructor(name, keys, storage, options = {}) {
-      super(name, keys, storage, options);
-      this.textIndex = new TextIndex(storage);
+      super(name, keys, storage);
+      this.textIndex = new TextIndex({ baseFilename: storage });
+      this.isOpen = false;
       this.indexedFields = [];
       for (const field in keys) {
         if (keys[field] === "text") {
@@ -4771,6 +5342,32 @@
       }
       if (this.indexedFields.length === 0) {
         throw new Error('Text index must have at least one field with type "text"');
+      }
+    }
+    /**
+     * Open the index files
+     * Must be called before using the index
+     */
+    async open() {
+      if (this.isOpen) {
+        return;
+      }
+      await this.textIndex.open();
+      this.isOpen = true;
+    }
+    /**
+     * Close the index files
+     */
+    async close() {
+      if (this.isOpen) {
+        try {
+          await this.textIndex.close();
+        } catch (error) {
+          if (!error.message || !error.message.includes("File is not open")) {
+            throw error;
+          }
+        }
+        this.isOpen = false;
       }
     }
     /**
@@ -4792,24 +5389,24 @@
      * Add a document to the text index
      * @param {Object} doc - The document to index
      */
-    add(doc) {
+    async add(doc) {
       if (!doc._id) {
         throw new Error("Document must have an _id field");
       }
       const text2 = this._extractText(doc);
       if (text2) {
-        this.textIndex.add(String(doc._id), text2);
+        await this.textIndex.add(String(doc._id), text2);
       }
     }
     /**
      * Remove a document from the text index
      * @param {Object} doc - The document to remove
      */
-    remove(doc) {
+    async remove(doc) {
       if (!doc._id) {
         return;
       }
-      this.textIndex.remove(String(doc._id));
+      await this.textIndex.remove(String(doc._id));
     }
     /**
      * Query the text index
@@ -4823,17 +5420,21 @@
      * Search the text index
      * @param {string} searchText - The text to search for
      * @param {Object} options - Search options
-     * @returns {Array} Array of document IDs
+     * @returns {Promise<Array>} Array of document IDs
      */
-    search(searchText, options = {}) {
-      const results = this.textIndex.query(searchText, { scored: false, ...options });
+    async search(searchText, options = {}) {
+      const results = await this.textIndex.query(searchText, { scored: false, ...options });
       return results;
     }
     /**
      * Clear all data from the index
      */
-    clear() {
-      this.textIndex.clear();
+    async clear() {
+      if (this.isOpen) {
+        await this.close();
+      }
+      this.textIndex = new TextIndex({ baseFilename: this.storage });
+      await this.open();
     }
     /**
      * Get index specification
@@ -4894,81 +5495,17 @@
     return area(unionBox) - area(bbox1);
   }
   class RTreeNode {
-    constructor(isLeaf = false, indexStore) {
-      if (!(indexStore instanceof IndexStore)) {
-        throw new Error("IndexStore is required to create RTreeNode");
-      }
-      this.indexStore = indexStore;
-      if (typeof isLeaf === "object") {
-        this._data = isLeaf;
-        this.id = this._data.id;
-        this.isLeaf = this._data.isLeaf;
-        this.children = [];
-        this.bbox = Object.assign({}, this._data.bbox);
-        if (!this.isLeaf) {
-          for (const childId of this._data.children) {
-            const childData = indexStore.getDataMap("nodes").get(childId);
-            if (!childData) {
-              throw new Error(`RTreeNode: Child node with id ${childId} not found in IndexStore`);
-            }
-            const childNode = new RTreeNode(childData, indexStore);
-            this.children.push(childNode);
-          }
-        } else {
-          this.children = [...this._data.children];
-        }
-      } else {
-        this._data = {
-          id: indexStore.getMeta("nextId"),
-          isLeaf,
-          children: [],
-          bbox: null
-        };
-        indexStore.setMeta("nextId", this._data.id + 1);
-        indexStore.getDataMap("nodes").set(this._data.id, this._data);
-        this.id = this._data.id;
-        this.isLeaf = isLeaf;
-        this.children = [];
-        this.bbox = null;
-      }
-      return new Proxy(this, {
-        set(target, prop, value) {
-          if (prop === "children") {
-            target.children = value;
-            if (!target.isLeaf) {
-              target._data.children = target.children.map((child) => child.id);
-            } else {
-              target._data.children = [...target.children];
-            }
-            indexStore.getDataMap("nodes").set(target.id, target._data);
-            return true;
-          }
-          target[prop] = value;
-          return true;
-        },
-        get(target, prop) {
-          if (prop === "children") {
-            return new Proxy(target.children, {
-              set(childTarget, childProp, childValue) {
-                childTarget[childProp] = childValue;
-                if (!target.isLeaf) {
-                  target._data.children = target.children.map((child) => child.id);
-                } else {
-                  target._data.children = [...target.children];
-                }
-                indexStore.getDataMap("nodes").set(target.id, target._data);
-                return true;
-              }
-            });
-          }
-          return target[prop];
-        }
-      });
+    constructor(rtree, nodeData) {
+      this.rtree = rtree;
+      this.id = nodeData.id;
+      this.isLeaf = nodeData.isLeaf;
+      this.children = nodeData.children || [];
+      this.bbox = nodeData.bbox;
     }
     /**
      * Update the bounding box to contain all children
      */
-    updateBBox() {
+    async updateBBox() {
       if (this.children.length === 0) {
         this.bbox = null;
         return;
@@ -4976,179 +5513,386 @@
       let minLat = Infinity, maxLat = -Infinity;
       let minLng = Infinity, maxLng = -Infinity;
       for (const child of this.children) {
-        const bbox = child.bbox;
-        minLat = Math.min(minLat, bbox.minLat);
-        maxLat = Math.max(maxLat, bbox.maxLat);
-        minLng = Math.min(minLng, bbox.minLng);
-        maxLng = Math.max(maxLng, bbox.maxLng);
+        let bbox;
+        if (this.isLeaf) {
+          bbox = child.bbox;
+        } else {
+          const childNode = await this.rtree._loadNode(child);
+          bbox = childNode.bbox;
+        }
+        if (bbox) {
+          minLat = Math.min(minLat, bbox.minLat);
+          maxLat = Math.max(maxLat, bbox.maxLat);
+          minLng = Math.min(minLng, bbox.minLng);
+          maxLng = Math.max(maxLng, bbox.maxLng);
+        }
       }
       this.bbox = { minLat, maxLat, minLng, maxLng };
-      this._data.bbox = Object.assign({}, this.bbox);
-      this.indexStore.getDataMap("nodes").set(this.id, this._data);
+      await this.rtree._saveNode(this);
+    }
+    /**
+     * Convert node to plain object for serialization
+     */
+    toJSON() {
+      return {
+        id: this.id,
+        isLeaf: this.isLeaf,
+        children: this.children,
+        bbox: this.bbox
+      };
     }
   }
   class RTree {
-    constructor(maxEntries = 9, indexStore = new IndexStore()) {
+    constructor(filename, maxEntries = 9) {
+      this.filename = filename;
       this.maxEntries = maxEntries;
       this.minEntries = Math.max(2, Math.ceil(maxEntries / 2));
-      this.indexStore = indexStore;
-      if (indexStore.hasMeta("maxEntries")) {
-        if (indexStore.getMeta("maxEntries") !== maxEntries) {
-          throw new Error(`R-tree maxEntries does not match stored index metadata ${indexStore.getMeta("maxEntries")} != ${maxEntries}`);
-        }
-        if (indexStore.getMeta("minEntries") !== this.minEntries) {
-          throw new Error(`R-tree minEntries does not match stored index metadata ${indexStore.getMeta("minEntries")} != ${this.minEntries}`);
-        }
-        this._size = this.indexStore.getMeta("size");
-        this.root = new RTreeNode(this.indexStore.getDataMap("nodes").get(this.indexStore.getMeta("rootId")), this.indexStore);
+      this.rootPointer = null;
+      this.nextId = 1;
+      this._size = 0;
+      this.file = new BJsonFile(filename);
+      this.isOpen = false;
+    }
+    /**
+     * Open the R-tree file (create if doesn't exist)
+     */
+    async open() {
+      if (this.isOpen) {
+        throw new Error("R-tree file is already open");
+      }
+      const exists = await this.file.exists();
+      if (exists) {
+        await this.file.open("rw");
+        await this._loadFromFile();
       } else {
-        this.indexStore.setMeta("maxEntries", this.maxEntries);
-        this.indexStore.setMeta("minEntries", this.minEntries);
-        this.indexStore.setMeta("nextId", 1);
-        this.root = new RTreeNode(true, this.indexStore);
-        this.indexStore.setMeta("rootId", this.root.id);
-        this.indexStore.setMeta("size", 0);
-        this._size = 0;
+        await this.file.open("rw");
+        await this._initializeNewTree();
+      }
+      this.isOpen = true;
+    }
+    /**
+     * Close the R-tree file
+     */
+    async close() {
+      if (this.isOpen) {
+        await this._writeMetadata();
+        await this.file.close();
+        this.isOpen = false;
       }
     }
     /**
-     * Insert a point into the R-tree
-     * @param {number} lat - Latitude
-     * @param {number} lng - Longitude
-     * @param {*} data - Associated data
+     * Initialize a new empty tree
      */
-    insert(lat, lng, data) {
+    async _initializeNewTree() {
+      const rootNode = new RTreeNode(this, {
+        id: 0,
+        isLeaf: true,
+        children: [],
+        bbox: null
+      });
+      this.nextId = 1;
+      this._size = 0;
+      this.rootPointer = await this._saveNode(rootNode);
+      await this._writeMetadata();
+    }
+    /**
+     * Write metadata record to file
+     */
+    async _writeMetadata() {
+      const metadata = {
+        version: 1,
+        maxEntries: this.maxEntries,
+        minEntries: this.minEntries,
+        size: this._size,
+        rootPointer: this.rootPointer,
+        nextId: this.nextId
+      };
+      await this.file.append(metadata);
+    }
+    /**
+     * Load tree from existing file
+     */
+    async _loadFromFile() {
+      const METADATA_SIZE = 135;
+      const fileSize = await this.file.getFileSize();
+      if (fileSize < METADATA_SIZE) {
+        throw new Error("Invalid R-tree file format: file too small for metadata");
+      }
+      const metadataOffset = fileSize - METADATA_SIZE;
+      const metadata = await this.file.read(metadataOffset);
+      this.maxEntries = metadata.maxEntries;
+      this.minEntries = metadata.minEntries;
+      this._size = metadata.size;
+      this.rootPointer = metadata.rootPointer;
+      this.nextId = metadata.nextId;
+    }
+    /**
+     * Save a node to disk and return its Pointer
+     */
+    async _saveNode(node) {
+      const nodeData = node.toJSON();
+      const offset = await this.file.getFileSize();
+      await this.file.append(nodeData);
+      return new Pointer(offset);
+    }
+    /**
+     * Load a node from disk by Pointer
+     */
+    async _loadNode(pointer) {
+      if (!(pointer instanceof Pointer)) {
+        throw new Error("Expected Pointer object");
+      }
+      const offset = pointer.valueOf();
+      const nodeData = await this.file.read(offset);
+      return new RTreeNode(this, nodeData);
+    }
+    /**
+     * Load the root node
+     */
+    async _loadRoot() {
+      return await this._loadNode(this.rootPointer);
+    }
+    /**
+     * Insert a point into the R-tree with an ObjectId
+     */
+    async insert(lat, lng, objectId) {
+      if (!this.isOpen) {
+        throw new Error("R-tree file must be opened before use");
+      }
       const bbox = {
         minLat: lat,
         maxLat: lat,
         minLng: lng,
         maxLng: lng
       };
-      const entry = { bbox, lat, lng, data };
-      this._insert(entry, this.root, 1);
+      const entry = { bbox, lat, lng, objectId };
+      const root = await this._loadRoot();
+      const result = await this._insert(entry, root, 1);
+      if (result.split) {
+        const newRoot = new RTreeNode(this, {
+          id: this.nextId++,
+          isLeaf: false,
+          children: result.pointers,
+          bbox: null
+        });
+        await newRoot.updateBBox();
+        this.rootPointer = await this._saveNode(newRoot);
+      } else {
+        this.rootPointer = result.pointer;
+      }
       this._size++;
-      this.indexStore.setMeta("size", this._size);
+      await this._writeMetadata();
     }
     /**
-     * Internal insert method
+     * Internal insert method - returns splitPointers if split occurred, else returns updated node pointer
      */
-    _insert(entry, node, level) {
+    async _insert(entry, node, level) {
       if (node.isLeaf) {
         node.children.push(entry);
-        node.updateBBox();
+        await node.updateBBox();
         if (node.children.length > this.maxEntries) {
-          return this._split(node);
+          const [pointer1, pointer2] = await this._split(node);
+          return { split: true, pointers: [pointer1, pointer2] };
         }
+        const pointer = await this._saveNode(node);
+        return { split: false, pointer };
       } else {
-        const target = this._chooseSubtree(entry.bbox, node);
-        const splitNode = this._insert(entry, target, level + 1);
-        if (splitNode) {
-          node.children.push(splitNode);
-          node.updateBBox();
+        const targetPointer = await this._chooseSubtree(entry.bbox, node);
+        const targetNode = await this._loadNode(targetPointer);
+        const result = await this._insert(entry, targetNode, level + 1);
+        if (result.split) {
+          let childIndex = -1;
+          for (let i = 0; i < node.children.length; i++) {
+            if (node.children[i].valueOf() === targetPointer.valueOf()) {
+              childIndex = i;
+              break;
+            }
+          }
+          if (childIndex !== -1) {
+            node.children[childIndex] = result.pointers[0];
+            node.children.push(result.pointers[1]);
+          } else {
+            node.children.push(result.pointers[0]);
+            node.children.push(result.pointers[1]);
+          }
+          await node.updateBBox();
           if (node.children.length > this.maxEntries) {
-            return this._split(node);
+            const [pointer1, pointer2] = await this._split(node);
+            return { split: true, pointers: [pointer1, pointer2] };
           }
         } else {
-          node.updateBBox();
+          let childIndex = -1;
+          for (let i = 0; i < node.children.length; i++) {
+            if (node.children[i].valueOf() === targetPointer.valueOf()) {
+              childIndex = i;
+              break;
+            }
+          }
+          if (childIndex !== -1) {
+            node.children[childIndex] = result.pointer;
+          }
+          await node.updateBBox();
         }
+        const pointer = await this._saveNode(node);
+        return { split: false, pointer };
       }
-      return null;
     }
     /**
      * Choose the best subtree to insert an entry
      */
-    _chooseSubtree(bbox, node) {
+    async _chooseSubtree(bbox, node) {
       let minEnlargement = Infinity;
       let minArea = Infinity;
-      let targetNode = null;
-      for (const child of node.children) {
-        const enl = enlargement(child.bbox, bbox);
-        const ar = area(child.bbox);
+      let targetPointer = null;
+      for (const childPointer of node.children) {
+        if (!(childPointer instanceof Pointer)) {
+          throw new Error(`Expected Pointer in _chooseSubtree, got: ${typeof childPointer}`);
+        }
+        const childNode = await this._loadNode(childPointer);
+        const enl = enlargement(childNode.bbox, bbox);
+        const ar = area(childNode.bbox);
         if (enl < minEnlargement || enl === minEnlargement && ar < minArea) {
           minEnlargement = enl;
           minArea = ar;
-          targetNode = child;
+          targetPointer = childPointer;
         }
       }
-      return targetNode;
+      return targetPointer;
     }
     /**
      * Split an overflowing node
      */
-    _split(node) {
+    async _split(node) {
       const children = node.children;
       const isLeaf = node.isLeaf;
       let maxDist = -Infinity;
       let seed1Idx = 0, seed2Idx = 1;
       for (let i = 0; i < children.length; i++) {
         for (let j = i + 1; j < children.length; j++) {
-          const bbox1 = children[i].bbox;
-          const bbox2 = children[j].bbox;
-          const combinedBox = union(bbox1, bbox2);
-          const waste = area(combinedBox) - area(bbox1) - area(bbox2);
-          if (waste > maxDist) {
-            maxDist = waste;
+          let bbox1, bbox2;
+          if (isLeaf) {
+            bbox1 = children[i].bbox;
+            bbox2 = children[j].bbox;
+          } else {
+            const node12 = await this._loadNode(children[i]);
+            const node22 = await this._loadNode(children[j]);
+            bbox1 = node12.bbox;
+            bbox2 = node22.bbox;
+          }
+          const dist = area(union(bbox1, bbox2));
+          if (dist > maxDist) {
+            maxDist = dist;
             seed1Idx = i;
             seed2Idx = j;
           }
         }
       }
-      const node1 = new RTreeNode(isLeaf, this.indexStore);
-      const node2 = new RTreeNode(isLeaf, this.indexStore);
-      node1.children.push(children[seed1Idx]);
-      node2.children.push(children[seed2Idx]);
+      const node1 = new RTreeNode(this, {
+        id: this.nextId++,
+        isLeaf,
+        children: [children[seed1Idx]],
+        bbox: null
+      });
+      const node2 = new RTreeNode(this, {
+        id: this.nextId++,
+        isLeaf,
+        children: [children[seed2Idx]],
+        bbox: null
+      });
       for (let i = 0; i < children.length; i++) {
         if (i === seed1Idx || i === seed2Idx) continue;
         const child = children[i];
-        const bbox = child.bbox;
-        const enl1 = node1.children.length === 0 ? Infinity : enlargement(node1.bbox || bbox, bbox);
-        const enl2 = node2.children.length === 0 ? Infinity : enlargement(node2.bbox || bbox, bbox);
-        if (node1.children.length < this.minEntries && children.length - i + node1.children.length <= this.minEntries) {
-          node1.children.push(child);
-        } else if (node2.children.length < this.minEntries && children.length - i + node2.children.length <= this.minEntries) {
-          node2.children.push(child);
-        } else if (enl1 < enl2) {
+        let bbox;
+        if (isLeaf) {
+          bbox = child.bbox;
+        } else {
+          const childNode = await this._loadNode(child);
+          bbox = childNode.bbox;
+        }
+        await node1.updateBBox();
+        await node2.updateBBox();
+        const enl1 = node1.bbox ? enlargement(node1.bbox, bbox) : 0;
+        const enl2 = node2.bbox ? enlargement(node2.bbox, bbox) : 0;
+        if (enl1 < enl2) {
           node1.children.push(child);
         } else if (enl2 < enl1) {
           node2.children.push(child);
         } else {
-          const area1 = node1.bbox ? area(node1.bbox) : 0;
-          const area2 = node2.bbox ? area(node2.bbox) : 0;
-          if (area1 < area2) {
+          if (node1.children.length <= node2.children.length) {
             node1.children.push(child);
           } else {
             node2.children.push(child);
           }
         }
-        node1.updateBBox();
-        node2.updateBBox();
       }
-      node.children = node1.children;
-      node.updateBBox();
-      if (node === this.root) {
-        const newRoot = new RTreeNode(false, this.indexStore);
-        newRoot.children = [node1, node2];
-        newRoot.updateBBox();
-        this.root = newRoot;
-        this.indexStore.setMeta("rootId", this.root.id);
-        return null;
-      }
-      return node2;
+      await node1.updateBBox();
+      await node2.updateBBox();
+      const pointer1 = await this._saveNode(node1);
+      const pointer2 = await this._saveNode(node2);
+      return [pointer1, pointer2];
     }
     /**
-     * Search for points within a bounding box
-     * @param {Object} bbox - Bounding box {minLat, maxLat, minLng, maxLng}
-     * @returns {Array} Array of matching entries
+     * Search for points within a bounding box, returning entries with coords
      */
-    searchBBox(bbox) {
+    async searchBBox(bbox) {
+      if (!this.isOpen) {
+        throw new Error("R-tree file must be opened before use");
+      }
       const results = [];
-      this._searchBBox(bbox, this.root, results);
+      const root = await this._loadRoot();
+      await this._searchBBox(bbox, root, results);
       return results;
     }
     /**
      * Internal bounding box search
      */
-    _searchBBox(bbox, node, results) {
+    async _searchBBox(bbox, node, results) {
+      if (!node.bbox || !intersects(bbox, node.bbox)) {
+        return;
+      }
+      if (node.isLeaf) {
+        for (const entry of node.children) {
+          if (intersects(bbox, entry.bbox)) {
+            results.push({
+              objectId: entry.objectId,
+              lat: entry.lat,
+              lng: entry.lng
+            });
+          }
+        }
+      } else {
+        for (const childPointer of node.children) {
+          const childNode = await this._loadNode(childPointer);
+          await this._searchBBox(bbox, childNode, results);
+        }
+      }
+    }
+    /**
+     * Search for points within a radius of a location, returning ObjectIds with distances
+     */
+    async searchRadius(lat, lng, radiusKm) {
+      const bbox = radiusToBoundingBox(lat, lng, radiusKm);
+      const root = await this._loadRoot();
+      const entries = [];
+      await this._searchBBoxEntries(bbox, root, entries);
+      const results = [];
+      for (const entry of entries) {
+        const dist = haversineDistance(lat, lng, entry.lat, entry.lng);
+        if (dist <= radiusKm) {
+          results.push({
+            objectId: entry.objectId,
+            lat: entry.lat,
+            lng: entry.lng,
+            distance: dist
+          });
+        }
+      }
+      return results;
+    }
+    /**
+     * Internal bounding box search that returns full entries (used by radius search)
+     */
+    async _searchBBoxEntries(bbox, node, results) {
       if (!node.bbox || !intersects(bbox, node.bbox)) {
         return;
       }
@@ -5159,121 +5903,185 @@
           }
         }
       } else {
-        for (const child of node.children) {
-          this._searchBBox(bbox, child, results);
+        for (const childPointer of node.children) {
+          const childNode = await this._loadNode(childPointer);
+          await this._searchBBoxEntries(bbox, childNode, results);
         }
       }
     }
     /**
-     * Search for points within a radius of a location
-     * @param {number} lat - Center latitude
-     * @param {number} lng - Center longitude
-     * @param {number} radiusKm - Radius in kilometers
-     * @returns {Array} Array of matching entries
+     * Remove an entry from the R-tree by ObjectId
      */
-    searchRadius(lat, lng, radiusKm) {
-      const bbox = radiusToBoundingBox(lat, lng, radiusKm);
-      const candidates = this.searchBBox(bbox);
-      const results = [];
-      for (const entry of candidates) {
-        const dist = haversineDistance(lat, lng, entry.lat, entry.lng);
-        if (dist <= radiusKm) {
-          results.push(entry);
+    async remove(objectId) {
+      if (!this.isOpen) {
+        throw new Error("R-tree file must be opened before use");
+      }
+      const root = await this._loadRoot();
+      const result = await this._remove(objectId, root);
+      if (!result.found) {
+        return false;
+      }
+      if (result.underflow && result.children) {
+        if (result.children.length === 0) {
+          const newRoot = new RTreeNode(this, {
+            id: this.nextId++,
+            isLeaf: true,
+            children: [],
+            bbox: null
+          });
+          this.rootPointer = await this._saveNode(newRoot);
+        } else if (result.children.length === 1 && !result.isLeaf) {
+          this.rootPointer = result.children[0];
+        } else {
+          const newRoot = new RTreeNode(this, {
+            id: root.id,
+            isLeaf: result.isLeaf,
+            children: result.children,
+            bbox: null
+          });
+          await newRoot.updateBBox();
+          this.rootPointer = await this._saveNode(newRoot);
         }
+      } else if (result.pointer) {
+        this.rootPointer = result.pointer;
       }
-      return results;
-    }
-    /**
-     * Remove a point from the R-tree
-     * @param {number} lat - Latitude
-     * @param {number} lng - Longitude
-     * @param {*} data - Associated data (optional, for exact match)
-     * @returns {boolean} True if removed, false if not found
-     */
-    remove(lat, lng, data = null) {
-      const bbox = {
-        minLat: lat,
-        maxLat: lat,
-        minLng: lng,
-        maxLng: lng
-      };
-      const removed = this._remove(bbox, data, this.root, null, -1);
-      if (removed) {
-        this._size--;
-        this.indexStore.setMeta("size", this._size);
-      }
-      if (this.root.children.length === 1 && !this.root.isLeaf) {
-        this.root = this.root.children[0];
-        this.indexStore.setMeta("rootId", this.root.id);
-      }
-      return removed;
+      this._size--;
+      await this._writeMetadata();
+      return true;
     }
     /**
      * Internal remove method
+     * Returns: { found: boolean, underflow: boolean, pointer: Pointer, children: Array, isLeaf: boolean }
      */
-    _remove(bbox, data, node, parent, indexInParent) {
-      if (!node.bbox || !intersects(bbox, node.bbox)) {
-        return false;
-      }
+    async _remove(objectId, node) {
       if (node.isLeaf) {
-        for (let i = 0; i < node.children.length; i++) {
-          const entry = node.children[i];
-          if (entry.lat === bbox.minLat && entry.lng === bbox.minLng) {
-            const dataMatches = data === null || JSON.stringify(entry.data) === JSON.stringify(data);
-            if (dataMatches) {
-              node.children.splice(i, 1);
-              node.updateBBox();
-              if (node.children.length < this.minEntries && node !== this.root) {
-                const entries = node.children.slice();
-                node.children = [];
-                node.updateBBox();
-                if (parent) {
-                  parent.children.splice(indexInParent, 1);
-                  parent.updateBBox();
-                }
-                for (const e of entries) {
-                  this._insert(e, this.root, 1);
-                }
+        const initialLength = node.children.length;
+        node.children = node.children.filter(
+          (entry) => !entry.objectId.equals(objectId)
+        );
+        if (node.children.length === initialLength) {
+          return { found: false };
+        }
+        await node.updateBBox();
+        const pointer = await this._saveNode(node);
+        const underflow = node.children.length < this.minEntries && node.children.length > 0;
+        return {
+          found: true,
+          underflow,
+          pointer,
+          children: node.children,
+          isLeaf: true
+        };
+      } else {
+        let updatedChildren = [...node.children];
+        for (let i = 0; i < updatedChildren.length; i++) {
+          const childPointer = updatedChildren[i];
+          const childNode = await this._loadNode(childPointer);
+          const result = await this._remove(objectId, childNode);
+          if (result.found) {
+            if (result.underflow) {
+              const handled = await this._handleUnderflow(node, i, childNode, result);
+              if (handled.merged) {
+                updatedChildren = handled.children;
+              } else {
+                updatedChildren[i] = result.pointer;
               }
-              return true;
+            } else {
+              updatedChildren[i] = result.pointer;
             }
+            const updatedNode = new RTreeNode(this, {
+              id: node.id,
+              isLeaf: false,
+              children: updatedChildren,
+              bbox: null
+            });
+            await updatedNode.updateBBox();
+            const pointer = await this._saveNode(updatedNode);
+            const underflow = updatedChildren.length < this.minEntries && updatedChildren.length > 0;
+            return {
+              found: true,
+              underflow,
+              pointer,
+              children: updatedChildren,
+              isLeaf: false
+            };
           }
         }
-      } else {
-        for (let i = 0; i < node.children.length; i++) {
-          const child = node.children[i];
-          if (this._remove(bbox, data, child, node, i)) {
-            node.updateBBox();
-            return true;
-          }
-        }
+        return { found: false };
       }
-      return false;
     }
     /**
-     * Get all entries in the tree
-     * @returns {Array} All entries
+     * Handle underflow in a child node by merging or redistributing
      */
-    getAll() {
-      const results = [];
-      this._getAll(this.root, results);
-      return results;
-    }
-    /**
-     * Internal method to get all entries
-     */
-    _getAll(node, results) {
-      if (node.isLeaf) {
-        results.push(...node.children);
-      } else {
-        for (const child of node.children) {
-          this._getAll(child, results);
+    async _handleUnderflow(parentNode, childIndex, childNode, childResult) {
+      const siblings = [];
+      if (childIndex > 0) {
+        const prevPointer = parentNode.children[childIndex - 1];
+        const prevNode = await this._loadNode(prevPointer);
+        siblings.push({ index: childIndex - 1, node: prevNode, pointer: prevPointer });
+      }
+      if (childIndex < parentNode.children.length - 1) {
+        const nextPointer = parentNode.children[childIndex + 1];
+        const nextNode = await this._loadNode(nextPointer);
+        siblings.push({ index: childIndex + 1, node: nextNode, pointer: nextPointer });
+      }
+      for (const sibling of siblings) {
+        if (sibling.node.children.length > this.minEntries) {
+          const allChildren = [
+            ...childResult.children,
+            ...sibling.node.children
+          ];
+          const mid = Math.ceil(allChildren.length / 2);
+          const newChild1Children = allChildren.slice(0, mid);
+          const newChild2Children = allChildren.slice(mid);
+          const newChild1 = new RTreeNode(this, {
+            id: childNode.id,
+            isLeaf: childResult.isLeaf,
+            children: newChild1Children,
+            bbox: null
+          });
+          await newChild1.updateBBox();
+          const newChild2 = new RTreeNode(this, {
+            id: sibling.node.id,
+            isLeaf: sibling.node.isLeaf,
+            children: newChild2Children,
+            bbox: null
+          });
+          await newChild2.updateBBox();
+          const pointer1 = await this._saveNode(newChild1);
+          const pointer2 = await this._saveNode(newChild2);
+          const newChildren = [...parentNode.children];
+          const minIndex = Math.min(childIndex, sibling.index);
+          const maxIndex = Math.max(childIndex, sibling.index);
+          newChildren[minIndex] = pointer1;
+          newChildren[maxIndex] = pointer2;
+          return { merged: true, children: newChildren };
         }
       }
+      if (siblings.length > 0) {
+        const sibling = siblings[0];
+        const mergedChildren = [
+          ...childResult.children,
+          ...sibling.node.children
+        ];
+        const mergedNode = new RTreeNode(this, {
+          id: this.nextId++,
+          isLeaf: childResult.isLeaf,
+          children: mergedChildren,
+          bbox: null
+        });
+        await mergedNode.updateBBox();
+        const mergedPointer = await this._saveNode(mergedNode);
+        const newChildren = parentNode.children.filter(
+          (_, i) => i !== childIndex && i !== sibling.index
+        );
+        newChildren.push(mergedPointer);
+        return { merged: true, children: newChildren };
+      }
+      return { merged: false };
     }
     /**
      * Get the number of entries in the tree
-     * @returns {number} Number of entries
      */
     size() {
       return this._size;
@@ -5281,17 +6089,86 @@
     /**
      * Clear all entries from the tree
      */
-    clear() {
-      this.root = new RTreeNode(true, this.indexStore);
-      this.indexStore.setMeta("rootId", this.root.id);
-      this._size = 0;
-      this.indexStore.setMeta("size", 0);
+    async clear() {
+      await this.close();
+      const tempFile = new BJsonFile(this.filename);
+      await tempFile.open("rw");
+      await tempFile.delete();
+      this.file = new BJsonFile(this.filename);
+      await this.open();
+    }
+    /**
+     * Compact the R-tree by copying the current root and all reachable nodes into a new file.
+     * Returns size metrics to show reclaimed space.
+     * @param {string} destinationFilename
+     */
+    async compact(destinationFilename) {
+      if (!this.isOpen) {
+        throw new Error("R-tree file must be opened before use");
+      }
+      if (!destinationFilename) {
+        throw new Error("Destination filename is required for compaction");
+      }
+      await this._writeMetadata();
+      const oldSize = await this.file.getFileSize();
+      const dest = new RTree(destinationFilename, this.maxEntries);
+      dest.minEntries = this.minEntries;
+      dest.nextId = this.nextId;
+      dest._size = this._size;
+      await dest.file.open("rw");
+      dest.isOpen = true;
+      const pointerMap = /* @__PURE__ */ new Map();
+      const cloneNode = async (pointer) => {
+        const offset = pointer.valueOf();
+        if (pointerMap.has(offset)) {
+          return pointerMap.get(offset);
+        }
+        const sourceNode = await this._loadNode(pointer);
+        const clonedChildren = [];
+        if (sourceNode.isLeaf) {
+          for (const child of sourceNode.children) {
+            clonedChildren.push(child);
+          }
+        } else {
+          for (const childPointer of sourceNode.children) {
+            const newChildPtr = await cloneNode(childPointer);
+            clonedChildren.push(newChildPtr);
+          }
+        }
+        const clonedNode = new RTreeNode(dest, {
+          id: sourceNode.id,
+          isLeaf: sourceNode.isLeaf,
+          children: clonedChildren,
+          bbox: sourceNode.bbox
+        });
+        const newPointer = await dest._saveNode(clonedNode);
+        pointerMap.set(offset, newPointer);
+        return newPointer;
+      };
+      const newRootPointer = await cloneNode(this.rootPointer);
+      dest.rootPointer = newRootPointer;
+      await dest._writeMetadata();
+      await dest.file.close();
+      dest.isOpen = false;
+      const tempFile = new BJsonFile(destinationFilename);
+      await tempFile.open("r");
+      const newSize = await tempFile.getFileSize();
+      await tempFile.close();
+      return {
+        oldSize,
+        newSize,
+        bytesSaved: Math.max(0, oldSize - newSize),
+        newFilename: destinationFilename
+      };
     }
   }
   class GeospatialCollectionIndex extends Index {
     constructor(name, keys, storage, options = {}) {
       super(name, keys, storage, options);
-      this.rtree = new RTree(9, storage);
+      this.rtree = new RTree(storage, 9);
+      this.isOpen = false;
+      this._idMap = /* @__PURE__ */ new Map();
+      this._objectIdMap = /* @__PURE__ */ new Map();
       this.geoField = null;
       for (const field in keys) {
         if (keys[field] === "2dsphere" || keys[field] === "2d") {
@@ -5301,6 +6178,80 @@
       }
       if (!this.geoField) {
         throw new Error('Geospatial index must have at least one field with type "2dsphere" or "2d"');
+      }
+    }
+    /**
+     * Normalize a value so it can be stored in the RTree and compared via equals()
+     * @param {*} id - Document identifier
+     * @returns {*} ObjectId-compatible value with equals()/toString()
+     */
+    _normalizeObjectId(id) {
+      if (id instanceof ObjectId) {
+        this._objectIdMap.set(id.toString(), id.toString());
+        return id;
+      }
+      const key = String(id);
+      if (this._idMap.has(key)) {
+        return this._idMap.get(key);
+      }
+      let objectId;
+      try {
+        if (typeof id === "string" && ObjectId.isValid(id)) {
+          objectId = new ObjectId(id);
+        }
+      } catch (e) {
+      }
+      if (!objectId) {
+        objectId = this._createDeterministicObjectId(key);
+      }
+      this._idMap.set(key, objectId);
+      this._objectIdMap.set(objectId.toString(), key);
+      return objectId;
+    }
+    _toDocId(id) {
+      if (id instanceof ObjectId) {
+        const mapped = this._objectIdMap.get(id.toString());
+        return mapped !== void 0 ? mapped : id.toString();
+      }
+      if (id && typeof id === "object" && "objectId" in id) {
+        return this._toDocId(id.objectId);
+      }
+      return String(id);
+    }
+    _createDeterministicObjectId(key) {
+      let hash = 2166136261;
+      for (let i = 0; i < key.length; i++) {
+        hash ^= key.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      const hex = (hash >>> 0).toString(16).padStart(8, "0");
+      const idHex = (hex + hex + hex).slice(0, 24);
+      return new ObjectId(idHex);
+    }
+    /**
+     * Open the index file
+     * Must be called before using the index
+     */
+    async open() {
+      if (this.isOpen) {
+        return;
+      }
+      await this.rtree.open();
+      this.isOpen = true;
+    }
+    /**
+     * Close the index file
+     */
+    async close() {
+      if (this.isOpen) {
+        try {
+          await this.rtree.close();
+        } catch (error) {
+          if (!error.message || !error.message.includes("File is not open")) {
+            throw error;
+          }
+        }
+        this.isOpen = false;
       }
     }
     /**
@@ -5345,42 +6296,34 @@
      * Add a document to the geospatial index
      * @param {Object} doc - The document to index
      */
-    add(doc) {
+    async add(doc) {
       if (!doc._id) {
         throw new Error("Document must have an _id field");
       }
       const geoValue = getProp(doc, this.geoField);
       const coords = this._extractCoordinates(geoValue);
       if (coords) {
-        this.rtree.insert(coords.lat, coords.lng, {
-          _id: doc._id,
-          geoJson: geoValue
-        });
+        const objectId = this._normalizeObjectId(doc._id);
+        await this.rtree.insert(coords.lat, coords.lng, objectId);
       }
     }
     /**
      * Remove a document from the geospatial index
      * @param {Object} doc - The document to remove
      */
-    remove(doc) {
+    async remove(doc) {
       if (!doc._id) {
         return;
       }
-      const geoValue = getProp(doc, this.geoField);
-      const coords = this._extractCoordinates(geoValue);
-      if (coords) {
-        this.rtree.remove(coords.lat, coords.lng, {
-          _id: doc._id,
-          geoJson: geoValue
-        });
-      }
+      const objectId = this._normalizeObjectId(doc._id);
+      await this.rtree.remove(objectId);
     }
     /**
      * Query the geospatial index
      * @param {*} query - The query object
-     * @returns {Array|null} Array of document IDs or null if query is not a geospatial query
+     * @returns {Promise<Array|null>} Array of document IDs or null if query is not a geospatial query
      */
-    query(query) {
+    async query(query) {
       if (!query[this.geoField]) {
         return null;
       }
@@ -5392,13 +6335,13 @@
           const maxLat = bbox[0][1];
           const maxLon = bbox[1][0];
           const minLat = bbox[1][1];
-          const results = this.rtree.searchBBox({
+          const results = await this.rtree.searchBBox({
             minLat,
             maxLat,
             minLng: minLon,
             maxLng: maxLon
           });
-          return results.map((entry) => entry.data._id);
+          return results.map((entry) => this._toDocId(entry.objectId));
         }
       }
       if (geoQuery.$near) {
@@ -5419,16 +6362,9 @@
         const [lng, lat] = coordinates;
         const maxDistanceMeters = nearQuery.$maxDistance || 1e6;
         const maxDistanceKm = maxDistanceMeters / 1e3;
-        const results = this.rtree.searchRadius(lat, lng, maxDistanceKm);
-        const withDistances = results.map((entry) => {
-          const dist = this._haversineDistance(lat, lng, entry.lat, entry.lng);
-          return {
-            _id: entry.data._id,
-            distance: dist
-          };
-        });
-        withDistances.sort((a, b) => a.distance - b.distance);
-        return withDistances.map((entry) => entry._id);
+        const results = await this.rtree.searchRadius(lat, lng, maxDistanceKm);
+        results.sort((a, b) => a.distance - b.distance);
+        return results.map((entry) => this._toDocId(entry.objectId));
       }
       if (geoQuery.$nearSphere) {
         const nearQuery = geoQuery.$nearSphere;
@@ -5448,16 +6384,9 @@
         const [lng, lat] = coordinates;
         const maxDistanceMeters = nearQuery.$maxDistance || 1e6;
         const maxDistanceKm = maxDistanceMeters / 1e3;
-        const results = this.rtree.searchRadius(lat, lng, maxDistanceKm);
-        const withDistances = results.map((entry) => {
-          const dist = this._haversineDistance(lat, lng, entry.lat, entry.lng);
-          return {
-            _id: entry.data._id,
-            distance: dist
-          };
-        });
-        withDistances.sort((a, b) => a.distance - b.distance);
-        return withDistances.map((entry) => entry._id);
+        const results = await this.rtree.searchRadius(lat, lng, maxDistanceKm);
+        results.sort((a, b) => a.distance - b.distance);
+        return results.map((entry) => this._toDocId(entry.objectId));
       }
       if (geoQuery.$geoIntersects) {
         const intersectsQuery = geoQuery.$geoIntersects;
@@ -5473,13 +6402,13 @@
         if (geometry.type === "Point") {
           const [lng, lat] = geometry.coordinates;
           const epsilon = 1e-4;
-          const results = this.rtree.searchBBox({
+          const results = await this.rtree.searchBBox({
             minLat: lat - epsilon,
             maxLat: lat + epsilon,
             minLng: lng - epsilon,
             maxLng: lng + epsilon
           });
-          return results.map((entry) => entry.data._id);
+          return results.map((entry) => this._toDocId(entry.objectId));
         } else if (geometry.type === "Polygon") {
           const coordinates = geometry.coordinates;
           if (!coordinates || coordinates.length === 0) {
@@ -5498,16 +6427,14 @@
             minLng = Math.min(minLng, lng);
             maxLng = Math.max(maxLng, lng);
           }
-          const candidates = this.rtree.searchBBox({
+          const candidates = await this.rtree.searchBBox({
             minLat,
             maxLat,
             minLng,
             maxLng
           });
-          const results = candidates.filter((entry) => {
-            return this._pointInPolygon(entry.lat, entry.lng, ring);
-          });
-          return results.map((entry) => entry.data._id);
+          const results = candidates.filter((entry) => this._pointInPolygon(entry.lat, entry.lng, ring));
+          return results.map((entry) => this._toDocId(entry.objectId));
         }
         return null;
       }
@@ -5551,8 +6478,21 @@
     /**
      * Clear all data from the index
      */
-    clear() {
-      this.rtree.clear();
+    async clear() {
+      if (!this.isOpen) {
+        await this.rtree.open();
+        this.isOpen = true;
+      }
+      try {
+        await this.rtree.file.delete();
+      } catch (err) {
+        if (!err || err.name !== "NotFoundError") {
+          throw err;
+        }
+      }
+      this.isOpen = false;
+      this.rtree = new RTree(this.rtree.filename, 9);
+      await this.open();
     }
     /**
      * Get index specification
@@ -5821,13 +6761,13 @@
      * Execute a single index scan that was deferred from planning
      * @private
      */
-    _executeIndexScan(scan) {
+    async _executeIndexScan(scan) {
       const { index, query, textQuery } = scan;
       if (textQuery !== void 0) {
-        return index.search(textQuery);
+        return await index.search(textQuery);
       }
       if (query !== void 0) {
-        const docIds = index.query(query);
+        const docIds = await index.query(query);
         return docIds !== null ? docIds : [];
       }
       if (scan.docIds !== void 0) {
@@ -5854,22 +6794,25 @@
     /**
      * Execute a query plan and return document IDs
      * @param {QueryPlan} plan - The execution plan
-     * @returns {Array|null} Array of document IDs or null for full scan
+     * @returns {Promise<Array|null>} Array of document IDs or null for full scan
      */
-    execute(plan) {
+    async execute(plan) {
       if (plan.type === "full_scan") {
         return null;
       }
       if (plan.type === "index_scan") {
         const scan = plan.indexScans[0];
-        return this._executeIndexScan(scan);
+        return await this._executeIndexScan(scan);
       }
       if (plan.type === "index_intersection") {
         if (plan.indexScans.length === 0) return null;
-        const results = plan.indexScans.map((scan) => ({
-          docIds: this._executeIndexScan(scan),
-          indexName: scan.indexName
-        }));
+        const results = [];
+        for (const scan of plan.indexScans) {
+          results.push({
+            docIds: await this._executeIndexScan(scan),
+            indexName: scan.indexName
+          });
+        }
         const sorted = results.slice().sort((a, b) => a.docIds.length - b.docIds.length);
         let result = new Set(sorted[0].docIds);
         for (let i = 1; i < sorted.length; i++) {
@@ -5882,7 +6825,7 @@
       if (plan.type === "index_union") {
         const result = /* @__PURE__ */ new Set();
         for (const scan of plan.indexScans) {
-          const docIds = this._executeIndexScan(scan);
+          const docIds = await this._executeIndexScan(scan);
           docIds.forEach((id) => result.add(id));
         }
         return Array.from(result);
@@ -6255,17 +7198,41 @@
       this.indexes = /* @__PURE__ */ new Map();
       this.queryPlanner = new QueryPlanner(this.indexes);
       this.isCollection = true;
+      this._restoreIndexesFromStorage();
+    }
+    _restoreIndexesFromStorage() {
+      if (!this.storage || !this.storage.indexes || typeof this.storage.indexes[Symbol.iterator] !== "function") {
+        return;
+      }
       for (const [indexName, indexStore] of this.storage.indexes) {
+        const meta = indexStore && typeof indexStore.getAllMeta === "function" ? indexStore.getAllMeta() : null;
+        if (!meta || !meta.type || !meta.baseFilename || !meta.keys) continue;
+        const name = meta.name || indexName;
         let index;
-        if (indexStore.getMeta("type") === "text") {
-          index = new TextCollectionIndex(indexName, indexStore.getMeta("keys"), indexStore);
-        } else if (indexStore.getMeta("type") === "geospatial") {
-          index = new GeospatialCollectionIndex(indexName, indexStore.getMeta("keys"), indexStore);
-        } else if (indexStore.getMeta("type") === "regular") {
-          index = new RegularCollectionIndex(indexName, indexStore.getMeta("keys"), indexStore);
+        if (meta.type === "text") {
+          index = new TextCollectionIndex(name, meta.keys, meta.baseFilename, meta.options || {});
+        } else if (meta.type === "geospatial") {
+          const storageFile = meta.storage || `${meta.baseFilename}-geo.bjson`;
+          index = new GeospatialCollectionIndex(name, meta.keys, storageFile, meta.options || {});
+        } else {
+          const storageFile = meta.storage || `${meta.baseFilename}.bjson`;
+          index = new RegularCollectionIndex(name, meta.keys, storageFile, meta.options || {});
         }
-        if (index) {
-          this.indexes.set(index.name, index);
+        this.indexes.set(name, index);
+      }
+    }
+    async _ensureIndexOpen(index) {
+      if (index && typeof index.open === "function" && !index.isOpen) {
+        await index.open();
+      }
+    }
+    /**
+     * Close all indexes
+     */
+    async close() {
+      for (const [indexName, index] of this.indexes) {
+        if (index && typeof index.close === "function") {
+          await index.close();
         }
       }
     }
@@ -6304,24 +7271,52 @@
       return false;
     }
     /**
+     * Build a safe base filename for OPFS-backed index files
+     */
+    _getIndexBaseFilename(indexName) {
+      const sanitize = (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, "_");
+      const dbName = this.db.dbName || this.db.name || "db";
+      return `${sanitize(dbName)}-${sanitize(this.name)}-${sanitize(indexName)}`;
+    }
+    /**
      * Build/rebuild an index
      */
-    buildIndex(indexName, keys, options = {}) {
+    async buildIndex(indexName, keys, options = {}) {
       let index;
+      const baseFilename = this._getIndexBaseFilename(indexName);
+      let storageFile;
+      let type;
       if (this.isTextIndex(keys)) {
-        const meta = { type: "text", keys };
-        index = new TextCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
+        type = "text";
+        storageFile = baseFilename;
+        index = new TextCollectionIndex(indexName, keys, storageFile, options);
       } else if (this.isGeospatialIndex(keys)) {
-        const meta = { type: "geospatial", keys };
-        index = new GeospatialCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
+        type = "geospatial";
+        storageFile = `${baseFilename}-geo.bjson`;
+        index = new GeospatialCollectionIndex(indexName, keys, storageFile, options);
       } else {
-        const meta = { type: "regular", keys };
-        index = new RegularCollectionIndex(indexName, keys, this.storage.createIndexStore(indexName, meta), options);
+        type = "regular";
+        storageFile = `${baseFilename}.bjson`;
+        index = new RegularCollectionIndex(indexName, keys, storageFile, options);
+      }
+      if (this.storage && typeof this.storage.createIndexStore === "function") {
+        this.storage.createIndexStore(indexName, {
+          name: indexName,
+          keys,
+          type,
+          baseFilename,
+          storage: storageFile,
+          options
+        });
+      }
+      await index.open();
+      if (typeof index.clear === "function") {
+        await index.clear();
       }
       const allDocs = this.storage.getAllDocuments();
       for (const doc of allDocs) {
         if (doc) {
-          index.add(doc);
+          await index.add(doc);
         }
       }
       this.indexes.set(indexName, index);
@@ -6330,17 +7325,31 @@
     /**
      * Update indexes when a document is inserted
      */
-    updateIndexesOnInsert(doc) {
+    async updateIndexesOnInsert(doc) {
+      const promises = [];
       for (const [indexName, index] of this.indexes) {
-        index.add(doc);
+        promises.push((async () => {
+          await this._ensureIndexOpen(index);
+          await index.add(doc);
+        })());
+      }
+      if (promises.length > 0) {
+        await Promise.all(promises);
       }
     }
     /**
      * Update indexes when a document is deleted
      */
-    updateIndexesOnDelete(doc) {
+    async updateIndexesOnDelete(doc) {
+      const promises = [];
       for (const [indexName, index] of this.indexes) {
-        index.remove(doc);
+        promises.push((async () => {
+          await this._ensureIndexOpen(index);
+          await index.remove(doc);
+        })());
+      }
+      if (promises.length > 0) {
+        await Promise.all(promises);
       }
     }
     /**
@@ -6348,7 +7357,22 @@
      */
     planQuery(query) {
       const plan = this.queryPlanner.plan(query);
-      const docIds = this.queryPlanner.execute(plan);
+      return {
+        useIndex: plan.type !== "full_scan",
+        planType: plan.type,
+        indexNames: plan.indexes,
+        docIds: null,
+        // Force full scan for now - use planQueryAsync for index results
+        estimatedCost: plan.estimatedCost,
+        indexOnly: plan.indexOnly || false
+      };
+    }
+    /**
+     * Async version of query planner - for use with async indexes
+     */
+    async planQueryAsync(query) {
+      const plan = this.queryPlanner.plan(query);
+      const docIds = await this.queryPlanner.execute(plan);
       return {
         useIndex: plan.type !== "full_scan",
         planType: plan.type,
@@ -7358,7 +8382,7 @@
         }
         return indexName;
       }
-      this.buildIndex(indexName, keys, options);
+      await this.buildIndex(indexName, keys, options);
       return indexName;
     }
     dataSize() {
@@ -7367,7 +8391,7 @@
     async deleteOne(query) {
       const doc = await this.findOne(query);
       if (doc) {
-        this.updateIndexesOnDelete(doc);
+        await this.updateIndexesOnDelete(doc);
         this.storage.remove(doc._id.toString());
         this.emit("delete", { _id: doc._id });
         return { deletedCount: 1 };
@@ -7386,7 +8410,7 @@
       }
       const deletedCount = ids.length;
       for (let i = 0; i < ids.length; i++) {
-        this.updateIndexesOnDelete(docs[i]);
+        await this.updateIndexesOnDelete(docs[i]);
         this.storage.remove(ids[i].toString());
         this.emit("delete", { _id: ids[i] });
       }
@@ -7403,9 +8427,11 @@
       }
       return Object.keys(vals);
     }
-    drop() {
+    async drop() {
       for (const [indexName, index] of this.indexes) {
-        index.clear();
+        if (index && typeof index.clear === "function") {
+          await index.clear();
+        }
       }
       this.storage.clear();
     }
@@ -7433,26 +8459,19 @@
     }
     find(query, projection) {
       const normalizedQuery = query == void 0 ? {} : query;
-      const queryPlan = this.planQuery(normalizedQuery);
+      const nearSpec = this._extractNearSpec(normalizedQuery);
+      this.planQuery(normalizedQuery);
       const documents = [];
       const seen = {};
-      if (queryPlan.useIndex && queryPlan.docIds) {
-        for (const docId of queryPlan.docIds) {
-          const doc = this.storage.get(docId.toString());
-          if (doc && matches(doc, normalizedQuery)) {
-            seen[doc._id] = true;
-            documents.push(doc);
-          }
+      const allDocs = this.storage.getAllDocuments();
+      for (const doc of allDocs) {
+        if (!seen[doc._id] && matches(doc, normalizedQuery)) {
+          seen[doc._id] = true;
+          documents.push(doc);
         }
       }
-      if (!queryPlan.indexOnly) {
-        const allDocs = this.storage.getAllDocuments();
-        for (const doc of allDocs) {
-          if (!seen[doc._id] && matches(doc, normalizedQuery)) {
-            seen[doc._id] = true;
-            documents.push(doc);
-          }
-        }
+      if (nearSpec) {
+        this._sortByNearDistance(documents, nearSpec);
       }
       return new Cursor(
         this,
@@ -7461,6 +8480,76 @@
         documents,
         SortedCursor
       );
+    }
+    _extractNearSpec(query) {
+      for (const field of Object.keys(query || {})) {
+        if (field.startsWith("$")) continue;
+        const value = query[field];
+        if (!value || typeof value !== "object") continue;
+        if (value.$near) {
+          const coords = this._parseNearCoordinates(value.$near);
+          if (coords) return { field, ...coords };
+        }
+        if (value.$nearSphere) {
+          const coords = this._parseNearCoordinates(value.$nearSphere);
+          if (coords) return { field, ...coords };
+        }
+      }
+      return null;
+    }
+    _parseNearCoordinates(spec) {
+      let coordinates;
+      if (spec && typeof spec === "object") {
+        if (spec.$geometry && spec.$geometry.coordinates) {
+          coordinates = spec.$geometry.coordinates;
+        } else if (spec.coordinates) {
+          coordinates = spec.coordinates;
+        } else if (Array.isArray(spec)) {
+          coordinates = spec;
+        }
+      }
+      if (!coordinates || coordinates.length < 2) {
+        return null;
+      }
+      const [lng, lat] = coordinates;
+      if (typeof lat !== "number" || typeof lng !== "number") {
+        return null;
+      }
+      return { lat, lng };
+    }
+    _extractPointCoordinates(value) {
+      if (!value) return null;
+      if (value.type === "FeatureCollection" && Array.isArray(value.features) && value.features.length > 0) {
+        return this._extractPointCoordinates(value.features[0].geometry);
+      }
+      if (value.type === "Feature" && value.geometry) {
+        return this._extractPointCoordinates(value.geometry);
+      }
+      if (value.type === "Point" && Array.isArray(value.coordinates) && value.coordinates.length >= 2) {
+        const [lng, lat] = value.coordinates;
+        if (typeof lat === "number" && typeof lng === "number") {
+          return { lat, lng };
+        }
+      }
+      return null;
+    }
+    _sortByNearDistance(documents, nearSpec) {
+      const { field, lat: targetLat, lng: targetLng } = nearSpec;
+      documents.sort((a, b) => {
+        const aPoint = this._extractPointCoordinates(getProp(a, field));
+        const bPoint = this._extractPointCoordinates(getProp(b, field));
+        const aDist = aPoint ? this._haversineDistance(aPoint.lat, aPoint.lng, targetLat, targetLng) : Infinity;
+        const bDist = bPoint ? this._haversineDistance(bPoint.lat, bPoint.lng, targetLat, targetLng) : Infinity;
+        return aDist - bDist;
+      });
+    }
+    _haversineDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
     }
     findAndModify() {
       throw new NotImplementedError("findAndModify", { collection: this.name });
@@ -7546,7 +8635,7 @@
     async insertOne(doc) {
       if (doc._id == void 0) doc._id = this.idGenerator();
       this.storage.set(doc._id.toString(), doc);
-      this.updateIndexesOnInsert(doc);
+      await this.updateIndexesOnInsert(doc);
       this.emit("insert", doc);
       return { insertedId: doc._id };
     }
@@ -7577,32 +8666,32 @@
           const newDoc = replacement;
           newDoc._id = this.idGenerator();
           this.storage.set(newDoc._id.toString(), newDoc);
-          this.updateIndexesOnInsert(newDoc);
+          await this.updateIndexesOnInsert(newDoc);
           this.emit("insert", newDoc);
           result.upsertedId = newDoc._id;
         }
       } else {
         result.modifiedCount = 1;
         const doc = c.next();
-        this.updateIndexesOnDelete(doc);
+        await this.updateIndexesOnDelete(doc);
         replacement._id = doc._id;
         this.storage.set(doc._id.toString(), replacement);
-        this.updateIndexesOnInsert(replacement);
+        await this.updateIndexesOnInsert(replacement);
         this.emit("replace", replacement);
       }
       return result;
     }
-    remove(query, options) {
+    async remove(query, options) {
       const c = this.find(query);
       if (!c.hasNext()) return;
       if (options === true || options && options.justOne) {
         const doc = c.next();
-        this.updateIndexesOnDelete(doc);
+        await this.updateIndexesOnDelete(doc);
         this.storage.remove(doc._id.toString());
       } else {
         while (c.hasNext()) {
           const doc = c.next();
-          this.updateIndexesOnDelete(doc);
+          await this.updateIndexesOnDelete(doc);
           this.storage.remove(doc._id.toString());
         }
       }
@@ -7625,7 +8714,7 @@
     totalIndexSize() {
       throw new NotImplementedError("totalIndexSize", { collection: this.name });
     }
-    update(query, updates, options) {
+    async update(query, updates, options) {
       const c = this.find(query);
       if (c.hasNext()) {
         if (options && options.multi) {
@@ -7634,26 +8723,26 @@
             const matchInfo = matchWithArrayIndices(doc, query);
             const positionalMatchInfo = matchInfo.arrayFilters;
             const userArrayFilters = options && options.arrayFilters;
-            this.updateIndexesOnDelete(doc);
+            await this.updateIndexesOnDelete(doc);
             applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
             this.storage.set(doc._id.toString(), doc);
-            this.updateIndexesOnInsert(doc);
+            await this.updateIndexesOnInsert(doc);
           }
         } else {
           const doc = c.next();
           const matchInfo = matchWithArrayIndices(doc, query);
           const positionalMatchInfo = matchInfo.arrayFilters;
           const userArrayFilters = options && options.arrayFilters;
-          this.updateIndexesOnDelete(doc);
+          await this.updateIndexesOnDelete(doc);
           applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
           this.storage.set(doc._id.toString(), doc);
-          this.updateIndexesOnInsert(doc);
+          await this.updateIndexesOnInsert(doc);
         }
       } else {
         if (options && options.upsert) {
           const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
           this.storage.set(newDoc._id.toString(), newDoc);
-          this.updateIndexesOnInsert(newDoc);
+          await this.updateIndexesOnInsert(newDoc);
         }
       }
     }
@@ -7665,17 +8754,17 @@
         const matchInfo = matchWithArrayIndices(doc, query);
         const positionalMatchInfo = matchInfo.arrayFilters;
         const userArrayFilters = options && options.arrayFilters;
-        this.updateIndexesOnDelete(doc);
+        await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
         this.storage.set(doc._id.toString(), doc);
-        this.updateIndexesOnInsert(doc);
+        await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit("update", doc, updateDescription);
       } else {
         if (options && options.upsert) {
           const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
           this.storage.set(newDoc._id.toString(), newDoc);
-          this.updateIndexesOnInsert(newDoc);
+          await this.updateIndexesOnInsert(newDoc);
           this.emit("insert", newDoc);
         }
       }
@@ -7689,10 +8778,10 @@
           const matchInfo = matchWithArrayIndices(doc, query);
           const positionalMatchInfo = matchInfo.arrayFilters;
           const userArrayFilters = options && options.arrayFilters;
-          this.updateIndexesOnDelete(doc);
+          await this.updateIndexesOnDelete(doc);
           applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
           this.storage.set(doc._id.toString(), doc);
-          this.updateIndexesOnInsert(doc);
+          await this.updateIndexesOnInsert(doc);
           const updateDescription = this._getUpdateDescription(originalDoc, doc);
           this.emit("update", doc, updateDescription);
         }
@@ -7700,7 +8789,7 @@
         if (options && options.upsert) {
           const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
           this.storage.set(newDoc._id.toString(), newDoc);
-          this.updateIndexesOnInsert(newDoc);
+          await this.updateIndexesOnInsert(newDoc);
           this.emit("insert", newDoc);
         }
       }
@@ -7811,6 +8900,66 @@
     size() {
       return this.data.size;
     }
+  }
+  class IndexStore {
+    constructor(meta) {
+      this._meta = /* @__PURE__ */ new Map();
+      this._data = /* @__PURE__ */ new Map();
+      if (meta) {
+        for (const [key, value] of Object.entries(meta)) {
+          this._meta.set(key, value);
+        }
+      }
+    }
+    /**
+     * Return all metadata as a plain object
+     */
+    getAllMeta() {
+      const meta = {};
+      for (const [key, value] of this._meta) {
+        meta[key] = value;
+      }
+      return meta;
+    }
+    setMeta(key, value) {
+      this._meta.set(key, value);
+    }
+    hasMeta(key) {
+      return this._meta.has(key);
+    }
+    getMeta(key) {
+      return this._meta.get(key);
+    }
+    hasDataMap(name) {
+      return this._data.has(name);
+    }
+    getDataMap(name) {
+      if (!this._data.has(name)) {
+        this._data.set(name, /* @__PURE__ */ new Map());
+      }
+      return this._data.get(name);
+    }
+    // clear() {
+    // 	this._data.clear();
+    // }
+    // keys() {
+    //   return this._data.keys();
+    // }
+    // has(index) {
+    //   return this._data.has(index);
+    // }
+    // get(index) {
+    // 	return this._data.get(index);
+    // }
+    // remove(key) {
+    // 	this._data.delete(key);
+    // }
+    // set(key, value) {
+    // 	this._data.set(key, value);
+    // }
+    // size() {
+    // 	return this._data.size;
+    // }
   }
   class CollectionStore {
     constructor() {
@@ -8002,6 +9151,17 @@
         );
       }
     }
+    /**
+     * Close all collections
+     */
+    async close() {
+      for (const key of Object.keys(this)) {
+        const collection = this[key];
+        if (collection && collection.isCollection && typeof collection.close === "function") {
+          await collection.close();
+        }
+      }
+    }
     // DB Methods
     cloneCollection() {
       throw new NotImplementedError("cloneCollection", { database: this.dbName });
@@ -8040,15 +9200,21 @@
     currentOp() {
       throw new NotImplementedError("currentOp", { database: this.dbName });
     }
-    dropCollection(collectionName) {
+    async dropCollection(collectionName) {
       if (this[collectionName]) {
+        if (typeof this[collectionName].drop === "function") {
+          await this[collectionName].drop();
+        }
         this.storageEngine.removeCollectionStore(collectionName);
         delete this[collectionName];
       }
     }
-    dropDatabase() {
+    async dropDatabase() {
       const collectionNames = this.getCollectionNames();
       for (const name of collectionNames) {
+        if (this[name] && typeof this[name].close === "function") {
+          await this[name].close();
+        }
         this.storageEngine.removeCollectionStore(name);
         delete this[name];
       }
@@ -8199,6 +9365,7 @@
       this.options = Object.freeze({ ...options });
       this._isConnected = false;
       this._defaultDb = this._parseDefaultDbName(uri);
+      this._databases = /* @__PURE__ */ new Map();
     }
     static async connect(uri, options = {}) {
       const client = new MongoClient(uri, options);
@@ -8216,11 +9383,22 @@
       if (!dbName) {
         throw new Error("No database name provided and no default in connection string");
       }
+      if (this._databases.has(dbName)) {
+        return this._databases.get(dbName);
+      }
       const dbOptions = { ...this.options, ...opts, dbName };
-      return new DB(dbOptions);
+      const database = new DB(dbOptions);
+      this._databases.set(dbName, database);
+      return database;
     }
     async close(force = false) {
       if (!this._isConnected) return;
+      for (const [dbName, database] of this._databases) {
+        if (database && typeof database.close === "function") {
+          await database.close();
+        }
+      }
+      this._databases.clear();
       this._isConnected = false;
       this.emit("close");
     }
