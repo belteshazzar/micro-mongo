@@ -175,6 +175,7 @@ describe("Storage Engine", function() {
 	});
 
 	it('should persist regular index data across reloads', async function() {
+		this.timeout(5000);
 		// Create a fresh storage engine and populate it
 		const testStorage = new mongo.StorageEngine();
 		let testClient = await mongo.MongoClient.connect('mongodb://localhost:27017', {

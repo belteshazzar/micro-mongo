@@ -99,6 +99,9 @@ export class RegularCollectionIndex extends Index {
 	 * @param {Object} doc - The document to index
 	 */
 	async add(doc) {
+		if (!this.isOpen) {
+			await this.open();
+		}
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
 			const docId = doc._id.toString();
@@ -129,6 +132,9 @@ export class RegularCollectionIndex extends Index {
 	 * @param {Object} doc - The document to remove
 	 */
 	async remove(doc) {
+		if (!this.isOpen) {
+			await this.open();
+		}
 		const indexKey = this.extractIndexKey(doc);
 		if (indexKey !== null) {
 			const docId = doc._id.toString();

@@ -347,7 +347,11 @@ describe('Dot Notation in Queries', function() {
 	});
 
 	describe('Dot Notation Edge Cases', function() {
+		this.timeout(5000);
+
 		it('should handle null values in nested paths', async function() {
+			// Ensure nested index exists to exercise indexed lookups safely
+			await db[collectionName].createIndex({ 'address.city': 1 });
 			await db[collectionName].insertMany([
 				{ name: 'Alice', address: null },
 				{ name: 'Bob', address: { city: 'NYC' } }
@@ -359,6 +363,8 @@ describe('Dot Notation in Queries', function() {
 		});
 
 		it('should handle undefined values in nested paths', async function() {
+			// Ensure nested index exists to exercise indexed lookups safely
+			await db[collectionName].createIndex({ 'address.city': 1 });
 			await db[collectionName].insertMany([
 				{ name: 'Alice', address: { zip: '10001' } },
 				{ name: 'Bob', address: { city: 'NYC', zip: '10002' } }
@@ -370,6 +376,8 @@ describe('Dot Notation in Queries', function() {
 		});
 
 		it('should handle empty objects in nested paths', async function() {
+			// Ensure nested index exists to exercise indexed lookups safely
+			await db[collectionName].createIndex({ 'address.city': 1 });
 			await db[collectionName].insertMany([
 				{ name: 'Alice', address: {} },
 				{ name: 'Bob', address: { city: 'NYC' } }

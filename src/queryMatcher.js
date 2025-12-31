@@ -1,5 +1,5 @@
 import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
-import { TextIndex } from 'bjson/textindex';
+import { TextIndex, stemmer, tokenize } from 'bjson/textindex';
 import { ObjectId } from 'bjson';
 import { evaluateExpression } from './aggregationExpressions.js';
 
@@ -227,45 +227,13 @@ function fieldValueMatches(fieldValue, checkFn) {
 }
 
 /**
- * Simple stemmer for text search
- * Basic Porter stemmer implementation for English
- */
-function isVowel(ch) {
-	return ['a', 'e', 'i', 'o', 'u'].includes(ch);
-}
-
-function simpleStemmer(word) {
-	word = word.toLowerCase();
-	// Very basic stemming - just remove common endings
-	if (word.endsWith('ing')) word = word.slice(0, -3);
-	else if (word.endsWith('ed')) word = word.slice(0, -2);
-	else if (word.endsWith('ies')) word = word.slice(0, -3) + 'i';
-	else if (word.endsWith('es')) word = word.slice(0, -2);
-	else if (word.endsWith('s') && word.length > 1) word = word.slice(0, -1);
-
-	// Collapse doubled consonants after stripping suffixes (running -> run)
-	if (word.length > 2) {
-		const last = word[word.length - 1];
-		const prev = word[word.length - 2];
-		if (last === prev && !isVowel(last)) {
-			word = word.slice(0, -1);
-		}
-	}
-	return word;
-}
-
-/**
  * Tokenize text for search
  */
 function tokenizeText(text) {
 	if (typeof text !== 'string') return [];
-	const stopwords = new Set([
-		'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he',
-		'in', 'is', 'it', 'its', 'of', 'on', 'or', 'that', 'the', 'to', 'was', 'will'
-	]);
-	
-	const words = text.toLowerCase().split(/\W+/).filter(w => w.length > 0);
-	return words.filter(w => !stopwords.has(w)).map(w => simpleStemmer(w));
+
+  const words = tokenize(text);
+	return words.map(w => stemmer(w));
 }
 
 /**

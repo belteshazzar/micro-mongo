@@ -35,6 +35,35 @@ export class Collection extends EventEmitter {
 
 		// Indexes are loaded async via createIndex/openIndexes
 		// No synchronous index loading in OPFS-only mode
+		this._restoreIndexesFromStorage();
+	}
+
+	_restoreIndexesFromStorage() {
+		if (!this.storage || !this.storage.indexes || typeof this.storage.indexes[Symbol.iterator] !== 'function') {
+			return;
+		}
+		for (const [indexName, indexStore] of this.storage.indexes) {
+			const meta = indexStore && typeof indexStore.getAllMeta === 'function' ? indexStore.getAllMeta() : null;
+			if (!meta || !meta.type || !meta.baseFilename || !meta.keys) continue;
+			const name = meta.name || indexName;
+			let index;
+			if (meta.type === 'text') {
+				index = new TextCollectionIndex(name, meta.keys, meta.baseFilename, meta.options || {});
+			} else if (meta.type === 'geospatial') {
+				const storageFile = meta.storage || `${meta.baseFilename}-geo.bjson`;
+				index = new GeospatialCollectionIndex(name, meta.keys, storageFile, meta.options || {});
+			} else {
+				const storageFile = meta.storage || `${meta.baseFilename}.bjson`;
+				index = new RegularCollectionIndex(name, meta.keys, storageFile, meta.options || {});
+			}
+			this.indexes.set(name, index);
+		}
+	}
+
+	async _ensureIndexOpen(index) {
+		if (index && typeof index.open === 'function' && !index.isOpen) {
+			await index.open();
+		}
 	}
 
 	/**
@@ -100,14 +129,34 @@ export class Collection extends EventEmitter {
 	async buildIndex(indexName, keys, options = {}) {
 		let index;
 		const baseFilename = this._getIndexBaseFilename(indexName);
+		let storageFile;
+		let type;
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
-			index = new TextCollectionIndex(indexName, keys, baseFilename, options);
+			type = 'text';
+			storageFile = baseFilename; // TextIndex uses base filename for its multiple files
+			index = new TextCollectionIndex(indexName, keys, storageFile, options);
 		} else if (this.isGeospatialIndex(keys)) {
-			index = new GeospatialCollectionIndex(indexName, keys, `${baseFilename}-geo.bjson`, options);
+			type = 'geospatial';
+			storageFile = `${baseFilename}-geo.bjson`;
+			index = new GeospatialCollectionIndex(indexName, keys, storageFile, options);
 		} else {
-			index = new RegularCollectionIndex(indexName, keys, `${baseFilename}.bjson`, options);
+			type = 'regular';
+			storageFile = `${baseFilename}.bjson`;
+			index = new RegularCollectionIndex(indexName, keys, storageFile, options);
+		}
+
+		// Persist index metadata in the collection store so we can restore on reloads
+		if (this.storage && typeof this.storage.createIndexStore === 'function') {
+			this.storage.createIndexStore(indexName, {
+				name: indexName,
+				keys,
+				type,
+				baseFilename,
+				storage: storageFile,
+				options
+			});
 		}
 
 		// Open the index for use
@@ -131,7 +180,10 @@ export class Collection extends EventEmitter {
 	async updateIndexesOnInsert(doc) {
 		const promises = [];
 		for (const [indexName, index] of this.indexes) {
-			promises.push(index.add(doc));
+			promises.push((async () => {
+				await this._ensureIndexOpen(index);
+				await index.add(doc);
+			})());
 		}
 		// Wait for all index operations to complete
 		if (promises.length > 0) {
@@ -145,7 +197,10 @@ export class Collection extends EventEmitter {
 	async updateIndexesOnDelete(doc) {
 		const promises = [];
 		for (const [indexName, index] of this.indexes) {
-			promises.push(index.remove(doc));
+			promises.push((async () => {
+				await this._ensureIndexOpen(index);
+				await index.remove(doc);
+			})());
 		}
 		// Wait for all index operations to complete
 		if (promises.length > 0) {
@@ -1460,10 +1515,12 @@ return results;
 		return Object.keys(vals);
 	}
 
-	drop() {
+	async drop() {
 		// Clear all indexes
 		for (const [indexName, index] of this.indexes) {
-			index.clear();
+			if (index && typeof index.clear === 'function') {
+				await index.clear();
+			}
 		}
 		this.storage.clear();
 	}

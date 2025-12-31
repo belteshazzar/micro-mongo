@@ -15,6 +15,17 @@ export class IndexStore {
     }
 	}
 
+  /**
+   * Return all metadata as a plain object
+   */
+  getAllMeta() {
+    const meta = {};
+    for (const [key, value] of this._meta) {
+      meta[key] = value;
+    }
+    return meta;
+  }
+
 	setMeta(key, value) {
 		this._meta.set(key, value);
 	}

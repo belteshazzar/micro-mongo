@@ -130,8 +130,12 @@ export class DB {
 
 	currentOp() { throw new NotImplementedError('currentOp', { database: this.dbName }); }
 
-	dropCollection(collectionName) {
+	async dropCollection(collectionName) {
 		if (this[collectionName]) {
+			// Close/clear collection data
+			if (typeof this[collectionName].drop === 'function') {
+				await this[collectionName].drop();
+			}
 			// Remove from storage engine
 			this.storageEngine.removeCollectionStore(collectionName);
 			// Delete the collection property from DB
