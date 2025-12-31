@@ -230,14 +230,27 @@ function fieldValueMatches(fieldValue, checkFn) {
  * Simple stemmer for text search
  * Basic Porter stemmer implementation for English
  */
+function isVowel(ch) {
+	return ['a', 'e', 'i', 'o', 'u'].includes(ch);
+}
+
 function simpleStemmer(word) {
 	word = word.toLowerCase();
 	// Very basic stemming - just remove common endings
 	if (word.endsWith('ing')) word = word.slice(0, -3);
-	if (word.endsWith('ed')) word = word.slice(0, -2);
-	if (word.endsWith('ies')) word = word.slice(0, -3) + 'i';
-	if (word.endsWith('es')) word = word.slice(0, -2);
-	if (word.endsWith('s')) word = word.slice(0, -1);
+	else if (word.endsWith('ed')) word = word.slice(0, -2);
+	else if (word.endsWith('ies')) word = word.slice(0, -3) + 'i';
+	else if (word.endsWith('es')) word = word.slice(0, -2);
+	else if (word.endsWith('s') && word.length > 1) word = word.slice(0, -1);
+
+	// Collapse doubled consonants after stripping suffixes (running -> run)
+	if (word.length > 2) {
+		const last = word[word.length - 1];
+		const prev = word[word.length - 2];
+		if (last === prev && !isVowel(last)) {
+			word = word.slice(0, -1);
+		}
+	}
 	return word;
 }
 
