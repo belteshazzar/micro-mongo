@@ -13,6 +13,8 @@ export class GeospatialCollectionIndex extends Index {
 		// Use OPFS-backed RTree for geospatial indexing
 		this.rtree = new RTree(storage, 9);
 		this.isOpen = false;
+		this._idMap = new Map(); // docId string -> ObjectId
+		this._objectIdMap = new Map(); // ObjectId string -> original docId
 		// Track which field is the geospatial field
 		this.geoField = null;
 		for (const field in keys) {
@@ -34,35 +36,54 @@ export class GeospatialCollectionIndex extends Index {
 	 */
 	_normalizeObjectId(id) {
 		if (id instanceof ObjectId) {
+			this._objectIdMap.set(id.toString(), id.toString());
 			return id;
 		}
 
-		// Store as bjson ObjectId when valid, otherwise keep original value (string/number)
+		const key = String(id);
+
+		if (this._idMap.has(key)) {
+			return this._idMap.get(key);
+		}
+
+		let objectId;
 		try {
 			if (typeof id === 'string' && ObjectId.isValid(id)) {
-				return new ObjectId(id);
+				objectId = new ObjectId(id);
 			}
 		} catch (e) {
-			// Fall back to raw id if validation/creation fails
+			// Fall through to deterministic generation
 		}
 
-		return id;
+		if (!objectId) {
+			objectId = this._createDeterministicObjectId(key);
+		}
+
+		this._idMap.set(key, objectId);
+		this._objectIdMap.set(objectId.toString(), key);
+		return objectId;
 	}
 
-	/**
-	 * Convert stored index ID back to the string form used by collections
-	 * @param {*} id - Stored index identifier (ObjectId or normalized wrapper)
-	 * @returns {string} String representation
-	 */
 	_toDocId(id) {
 		if (id instanceof ObjectId) {
-			return id.toString();
+			const mapped = this._objectIdMap.get(id.toString());
+			return mapped !== undefined ? mapped : id.toString();
 		}
-		if (id && typeof id === 'object') {
-			if ('value' in id) return String(id.value);
-			if ('objectId' in id) return this._toDocId(id.objectId);
+		if (id && typeof id === 'object' && 'objectId' in id) {
+			return this._toDocId(id.objectId);
 		}
 		return String(id);
+	}
+
+	_createDeterministicObjectId(key) {
+		let hash = 0x811c9dc5;
+		for (let i = 0; i < key.length; i++) {
+			hash ^= key.charCodeAt(i);
+			hash = Math.imul(hash, 0x01000193);
+		}
+		const hex = (hash >>> 0).toString(16).padStart(8, '0');
+		const idHex = (hex + hex + hex).slice(0, 24);
+		return new ObjectId(idHex);
 	}
 
 	/**
@@ -405,9 +426,20 @@ export class GeospatialCollectionIndex extends Index {
 	 * Clear all data from the index
 	 */
 	async clear() {
-		if (this.isOpen) {
-			await this.close();
+		if (!this.isOpen) {
+			await this.rtree.open();
+			this.isOpen = true;
 		}
+		// Delete existing on-disk tree to avoid stale entries
+		try {
+			await this.rtree.file.delete();
+		} catch (err) {
+			// Ignore if file doesn't exist; rethrow other errors
+			if (!err || err.name !== 'NotFoundError') {
+				throw err;
+			}
+		}
+		this.isOpen = false;
 		// Recreate the RTree
 		this.rtree = new RTree(this.rtree.filename, 9);
 		await this.open();

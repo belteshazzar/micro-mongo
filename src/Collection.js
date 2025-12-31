@@ -162,6 +162,11 @@ export class Collection extends EventEmitter {
 		// Open the index for use
 		await index.open();
 
+		// Rebuild from a clean slate to avoid stale persisted entries
+		if (typeof index.clear === 'function') {
+			await index.clear();
+		}
+
 		// Build index by scanning all documents
 		const allDocs = this.storage.getAllDocuments();
 		for (const doc of allDocs) {
