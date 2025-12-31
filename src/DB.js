@@ -81,6 +81,19 @@ export class DB {
 		}
 	}
 
+	/**
+	 * Close all collections
+	 */
+	async close() {
+		// Iterate through all collection properties and close them
+		for (const key of Object.keys(this)) {
+			const collection = this[key];
+			if (collection && collection.isCollection && typeof collection.close === 'function') {
+				await collection.close();
+			}
+		}
+	}
+
 	// DB Methods
 	cloneCollection() { throw new NotImplementedError('cloneCollection', { database: this.dbName }); }
 	cloneDatabase() { throw new NotImplementedError('cloneDatabase', { database: this.dbName }); }
@@ -126,12 +139,16 @@ export class DB {
 		}
 	}
 
-	dropDatabase() {
+	async dropDatabase() {
 		// Get all collection names
 		const collectionNames = this.getCollectionNames();
 		
-		// Drop each collection
+		// Close and drop each collection
 		for (const name of collectionNames) {
+			// Close collection (which closes all indexes)
+			if (this[name] && typeof this[name].close === 'function') {
+				await this[name].close();
+			}
 			// Remove from storage engine
 			this.storageEngine.removeCollectionStore(name);
 			// Delete the collection property from DB

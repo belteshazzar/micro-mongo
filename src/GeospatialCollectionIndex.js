@@ -82,7 +82,14 @@ export class GeospatialCollectionIndex extends Index {
 	 */
 	async close() {
 		if (this.isOpen) {
-			await this.rtree.close();
+			try {
+				await this.rtree.close();
+			} catch (error) {
+				// Ignore errors from already-closed files
+				if (!error.message || !error.message.includes('File is not open')) {
+					throw error;
+				}
+			}
 			this.isOpen = false;
 		}
 	}

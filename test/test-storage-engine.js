@@ -1,4 +1,23 @@
-import {expect} from 'chai';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { StorageManager } from 'node-opfs';
+import { expect } from 'chai';
+
+// Get project root directory for .opfs location
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const opfsDir = path.join(projectRoot, '.opfs');
+
+// Configure node-opfs to use project-local .opfs directory
+const customStorage = new StorageManager(opfsDir);
+if (typeof globalThis.navigator === 'undefined') {
+	globalThis.navigator = {};
+}
+globalThis.navigator.storage = {
+	getDirectory: () => customStorage.getDirectory()
+};
+
 import * as mongo from '../main.js'
 
 // TODO: Uncomment save/load calls once implemented in storage engine
@@ -39,6 +58,9 @@ describe("Storage Engine", function() {
 		db = client.db('testdb');
 		expect(db.getCollectionNames().length).to.equal(0);
   
+		// Close and load with previous storage engine
+		await client.close();
+
 		// Load with previous storage engine
 
     client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
@@ -69,6 +91,9 @@ describe("Storage Engine", function() {
 		expect(indexesBefore.length).to.equal(1);
 		expect(indexesBefore[0].key.age).to.equal(1);
 
+		// Close and load with previous storage engine
+		await client.close();
+
 		// Load with previous storage engine
 
     client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
@@ -93,7 +118,8 @@ describe("Storage Engine", function() {
 		await db.articles.insertOne({ title: 'Advanced Python', content: 'Python is also a programming language' });
 		await db.articles.createIndex({ title: 'text', content: 'text' });
 
-		// Load with previous storage engine
+		// Close and load with previous storage engine
+		await client.close();
 
     client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
 			storageEngine: storageEngine
@@ -123,6 +149,9 @@ describe("Storage Engine", function() {
 			location: { type: 'Point', coordinates: [-73.985130, 40.758896] }
 		});
 		await db.places.createIndex({ location: '2dsphere' });
+
+		// Close and load with previous storage engine
+		await client.close();
 
 		// Load with previous storage engine
 
@@ -286,6 +315,9 @@ describe("Storage Engine", function() {
 		await db.users.insertOne({ name: 'Alice', age: 30 });
 		await db.posts.insertOne({ title: 'Hello World' });
 
+		// Close and load with previous storage engine
+		await client.close();
+
 		// Load with previous storage engine
 
     client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
@@ -321,6 +353,9 @@ describe("Storage Engine", function() {
 		await db.docs.insertOne({ _id: id1, name: 'Doc1' });
 		await db.docs.insertOne({ _id: id2, name: 'Doc2' });
 
+		// Close and load with previous storage engine
+		await client.close();
+
 		// Load with previous storage engine
 
     client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
@@ -349,6 +384,9 @@ describe("Storage Engine", function() {
 			},
 			tags: ['tag1', 'tag2']
 		});
+
+		// Close and load with previous storage engine
+		await client.close();
 
 		// Load with previous storage engine
 

@@ -1,4 +1,20 @@
-import { navigator as opfsNavigator } from 'node-opfs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { StorageManager } from 'node-opfs';
+
+// Get project root directory for .opfs location
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const opfsDir = path.join(projectRoot, '.opfs');
+
+// Configure node-opfs to use project-local .opfs directory
+const customStorage = new StorageManager(opfsDir);
+const opfsNavigator = {
+	storage: {
+		getDirectory: () => customStorage.getDirectory()
+	}
+};
 
 // Ensure bjson sees OPFS APIs in Node
 if (typeof globalThis.navigator === 'undefined') {
@@ -50,7 +66,7 @@ describe("DB no options", function() {
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
-		db.dropDatabase();
+		await db.dropDatabase();
 		expect(db.getCollectionNames().length).to.equal(0);
 		// After dropping, accessing the collection will auto-create it (like real MongoDB)
 		// So we check getCollectionNames() to verify it's truly gone
@@ -101,7 +117,7 @@ describe("DB", function() {
 		db.createCollection("myCollection");
 		expect(db.getCollectionNames().length).to.equal(1);
 		expect(db.myCollection).to.not.be.undefined;
-		db.dropDatabase();
+		await db.dropDatabase();
 		expect(db.getCollectionNames().length).to.equal(0);
 		// After dropping, accessing the collection will auto-create it (like real MongoDB)
 		// So we check getCollectionNames() to verify it's truly gone
@@ -325,7 +341,7 @@ describe("DB", function() {
 		}
 	
 		async function reset() {
-			db.dropDatabase();
+			await db.dropDatabase();
 			await initDB();
 		}
 			
@@ -2135,7 +2151,7 @@ describe("DB", function() {
 			});
 
 			afterEach(async function() {
-				db.dropDatabase();
+				await db.dropDatabase();
 			});
 
 			it('should create a text index', async function() {
@@ -2355,7 +2371,7 @@ describe("DB", function() {
 			});
 
 			afterEach(async function() {
-				db.dropDatabase();
+				await db.dropDatabase();
 			});
 
 			it('should create a 2dsphere index', async function() {

@@ -1,4 +1,23 @@
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { StorageManager } from 'node-opfs';
 import { expect } from 'chai';
+
+// Get project root directory for .opfs location
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const opfsDir = path.join(projectRoot, '.opfs');
+
+// Configure node-opfs to use project-local .opfs directory
+const customStorage = new StorageManager(opfsDir);
+if (typeof globalThis.navigator === 'undefined') {
+	globalThis.navigator = {};
+}
+globalThis.navigator.storage = {
+	getDirectory: () => customStorage.getDirectory()
+};
+
 import * as mongo from '../main.js';
 
 /**

@@ -9,6 +9,7 @@ export class MongoClient extends EventEmitter {
     this.options = Object.freeze({ ...options }); // Make immutable
     this._isConnected = false;
     this._defaultDb = this._parseDefaultDbName(uri);
+    this._databases = new Map(); // Track database instances
   }
 
   static async connect(uri, options = {}) {
@@ -32,12 +33,27 @@ export class MongoClient extends EventEmitter {
       throw new Error('No database name provided and no default in connection string');
     }
     
+    // Return cached database instance if it exists
+    if (this._databases.has(dbName)) {
+      return this._databases.get(dbName);
+    }
+    
     const dbOptions = { ...this.options, ...opts, dbName };
-    return new DB(dbOptions);
+    const database = new DB(dbOptions);
+    this._databases.set(dbName, database);
+    return database;
   }
 
   async close(force = false) {
     if (!this._isConnected) return;
+    
+    // Close all database connections (which closes all collections and indexes)
+    for (const [dbName, database] of this._databases) {
+      if (database && typeof database.close === 'function') {
+        await database.close();
+      }
+    }
+    this._databases.clear();
     
     this._isConnected = false;
     this.emit('close');

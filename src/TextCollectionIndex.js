@@ -41,7 +41,14 @@ export class TextCollectionIndex extends Index {
 	 */
 	async close() {
 		if (this.isOpen) {
-			await this.textIndex.close();
+			try {
+				await this.textIndex.close();
+			} catch (error) {
+				// Ignore errors from already-closed files
+				if (!error.message || !error.message.includes('File is not open')) {
+					throw error;
+				}
+			}
 			this.isOpen = false;
 		}
 	}

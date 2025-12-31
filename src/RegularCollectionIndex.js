@@ -22,8 +22,31 @@ export class RegularCollectionIndex extends Index {
 		if (this.isOpen) {
 			return;
 		}
-		await this.data.open();
-		this.isOpen = true;
+		try {
+			await this.data.open();
+			this.isOpen = true;
+		} catch (error) {
+			// If file is corrupted, delete and recreate
+			if (error.message && (error.message.includes('Unknown type byte') || 
+					error.message.includes('Failed to read metadata') ||
+					error.message.includes('Invalid tree file'))) {
+				// Try to delete the corrupted file
+				if (typeof navigator !== 'undefined' && navigator.storage) {
+					const opfsRoot = await navigator.storage.getDirectory();
+					try {
+						await opfsRoot.removeEntry(this.storage);
+					} catch (e) {
+						// File might not exist, ignore
+					}
+				}
+				// Create fresh BPlusTree
+				this.data = new BPlusTree(this.storage, 50);
+				await this.data.open();
+				this.isOpen = true;
+			} else {
+				throw error;
+			}
+		}
 	}
 
 	/**
@@ -31,7 +54,14 @@ export class RegularCollectionIndex extends Index {
 	 */
 	async close() {
 		if (this.isOpen) {
-			await this.data.close();
+			try {
+				await this.data.close();
+			} catch (error) {
+				// Ignore errors from already-closed files
+				if (!error.message || !error.message.includes('File is not open')) {
+					throw error;
+				}
+			}
 			this.isOpen = false;
 		}
 	}

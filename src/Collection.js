@@ -38,6 +38,17 @@ export class Collection extends EventEmitter {
 	}
 
 	/**
+	 * Close all indexes
+	 */
+	async close() {
+		for (const [indexName, index] of this.indexes) {
+			if (index && typeof index.close === 'function') {
+				await index.close();
+			}
+		}
+	}
+
+	/**
 	 * Generate index name from keys
 	 */
 	generateIndexName(keys) {
