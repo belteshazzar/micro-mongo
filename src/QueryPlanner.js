@@ -341,17 +341,17 @@ export class QueryPlanner {
 	 * Execute a single index scan that was deferred from planning
 	 * @private
 	 */
-	_executeIndexScan(scan) {
+	async _executeIndexScan(scan) {
 		const { index, query, textQuery } = scan;
 		
 		// Handle text search
 		if (textQuery !== undefined) {
-			return index.search(textQuery);
+			return await index.search(textQuery);
 		}
 		
 		// Handle regular index query
 		if (query !== undefined) {
-			const docIds = index.query(query);
+			const docIds = await index.query(query);
 			return docIds !== null ? docIds : [];
 		}
 		
@@ -389,9 +389,9 @@ export class QueryPlanner {
 	/**
 	 * Execute a query plan and return document IDs
 	 * @param {QueryPlan} plan - The execution plan
-	 * @returns {Array|null} Array of document IDs or null for full scan
+	 * @returns {Promise<Array|null>} Array of document IDs or null for full scan
 	 */
-	execute(plan) {
+	async execute(plan) {
 		if (plan.type === 'full_scan') {
 			return null; // Signals cursor to do full scan
 		}
@@ -399,7 +399,7 @@ export class QueryPlanner {
 		if (plan.type === 'index_scan') {
 			// Execute the query now
 			const scan = plan.indexScans[0];
-			return this._executeIndexScan(scan);
+			return await this._executeIndexScan(scan);
 		}
 
 		if (plan.type === 'index_intersection') {
@@ -407,10 +407,13 @@ export class QueryPlanner {
 			if (plan.indexScans.length === 0) return null;
 			
 			// Execute all scans
-			const results = plan.indexScans.map(scan => ({
-				docIds: this._executeIndexScan(scan),
-				indexName: scan.indexName
-			}));
+			const results = [];
+			for (const scan of plan.indexScans) {
+				results.push({
+					docIds: await this._executeIndexScan(scan),
+					indexName: scan.indexName
+				});
+			}
 			
 			// Start with the smallest set for efficiency
 			const sorted = results.slice().sort((a, b) => a.docIds.length - b.docIds.length);
@@ -432,7 +435,7 @@ export class QueryPlanner {
 			// Union: docs in ANY index result
 			const result = new Set();
 			for (const scan of plan.indexScans) {
-				const docIds = this._executeIndexScan(scan);
+				const docIds = await this._executeIndexScan(scan);
 				docIds.forEach(id => result.add(id));
 			}
 			return Array.from(result);

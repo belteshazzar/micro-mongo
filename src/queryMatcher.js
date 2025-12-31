@@ -1,5 +1,5 @@
 import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
-import { TextIndex } from './TextIndex.js';
+import { TextIndex } from 'bjson/textindex';
 import { ObjectId } from 'bjson';
 import { evaluateExpression } from './aggregationExpressions.js';
 
@@ -227,14 +227,46 @@ function fieldValueMatches(fieldValue, checkFn) {
 }
 
 /**
- * Text search helper
- * Creates a temporary TextIndex to check if the text matches the query
+ * Simple stemmer for text search
+ * Basic Porter stemmer implementation for English
  */
-export function text(prop, query) {
-	const textIndex = new TextIndex();
-	textIndex.add('id', prop);
-	const results = textIndex.query(query, { scored: false });
-	return results.length === 1;
+function simpleStemmer(word) {
+	word = word.toLowerCase();
+	// Very basic stemming - just remove common endings
+	if (word.endsWith('ing')) word = word.slice(0, -3);
+	if (word.endsWith('ed')) word = word.slice(0, -2);
+	if (word.endsWith('ies')) word = word.slice(0, -3) + 'i';
+	if (word.endsWith('es')) word = word.slice(0, -2);
+	if (word.endsWith('s')) word = word.slice(0, -1);
+	return word;
+}
+
+/**
+ * Tokenize text for search
+ */
+function tokenizeText(text) {
+	if (typeof text !== 'string') return [];
+	const stopwords = new Set([
+		'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he',
+		'in', 'is', 'it', 'its', 'of', 'on', 'or', 'that', 'the', 'to', 'was', 'will'
+	]);
+	
+	const words = text.toLowerCase().split(/\W+/).filter(w => w.length > 0);
+	return words.filter(w => !stopwords.has(w)).map(w => simpleStemmer(w));
+}
+
+/**
+ * Text search helper
+ * Matches if the property contains tokens from the query
+ */
+export function text(prop, queryText) {
+	if (typeof prop !== 'string') return false;
+	
+	const propTokens = new Set(tokenizeText(prop));
+	const queryTokens = tokenizeText(queryText);
+	
+	// Match if any query term is in the document
+	return queryTokens.some(term => propTokens.has(term));
 }
 
 /**
@@ -358,6 +390,81 @@ function extractCoordinatesFromGeoJSON(geoJson) {
 	}
 
 	return null;
+}
+
+/**
+ * Calculate haversine distance between two points in kilometers
+ */
+function haversineDistance(lat1, lng1, lat2, lng2) {
+	const R = 6371; // Earth's radius in kilometers
+	const dLat = (lat2 - lat1) * Math.PI / 180;
+	const dLng = (lng2 - lng1) * Math.PI / 180;
+	const a = 
+		Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+		Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+		Math.sin(dLng / 2) * Math.sin(dLng / 2);
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+	return R * c;
+}
+
+/**
+ * Check if a point is within a certain distance (in meters) of a reference point
+ */
+function isNear(geoJson, refLng, refLat, maxDistanceMeters) {
+	const coords = extractCoordinatesFromGeoJSON(geoJson);
+	if (!coords) return false;
+	const distanceKm = haversineDistance(coords.lat, coords.lng, refLat, refLng);
+	const distanceM = distanceKm * 1000;
+	return distanceM <= maxDistanceMeters;
+}
+
+/**
+ * Check if geometries intersect (simple implementation)
+ */
+function geoIntersects(geoJson, queryGeo) {
+	if (!geoJson || !queryGeo) return false;
+	
+	// Get coordinates from query geometry
+	const queryCoords = extractCoordinatesFromGeoJSON(queryGeo);
+	if (!queryCoords) return false;
+	
+	// Get coordinates from document geometry
+	const docCoords = extractCoordinatesFromGeoJSON(geoJson);
+	if (!docCoords) return false;
+	
+	// For now, simple point-in-polygon check for polygons
+	// If query is a polygon, check if document point is inside
+	if (queryGeo.type === 'Polygon' && geoJson.type === 'Point') {
+		return pointInPolygon(docCoords.lng, docCoords.lat, queryGeo.coordinates[0]);
+	}
+	
+	// If document is a polygon and query is a point, check if point is inside
+	if (geoJson.type === 'Polygon' && queryGeo.type === 'Point') {
+		const queryPt = queryGeo.coordinates;
+		return pointInPolygon(queryPt[0], queryPt[1], geoJson.coordinates[0]);
+	}
+	
+	// For points, check if they're the same or very close
+	if (geoJson.type === 'Point' && queryGeo.type === 'Point') {
+		const dist = haversineDistance(docCoords.lat, docCoords.lng, queryCoords.lat, queryCoords.lng);
+		return dist < 0.001; // Within about 1 meter
+	}
+	
+	return false;
+}
+
+/**
+ * Point-in-polygon test using ray casting algorithm
+ */
+function pointInPolygon(lng, lat, ring) {
+	let inside = false;
+	for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+		const xi = ring[i][0], yi = ring[i][1];
+		const xj = ring[j][0], yj = ring[j][1];
+		const intersect = ((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+		if (intersect) inside = !inside;
+	}
+	return inside;
 }
 
 /**
@@ -489,12 +596,28 @@ export function opMatches(doc, key, value) {
 					}
 				} else if (operator == "$geoWithin") {
 						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && geoWithin(v, operand); })) return false;
-					} else if (operator == "$near" || operator == "$nearSphere" || operator == "$geoIntersects") {
-						// These operators MUST be handled by an index
-						// They should never reach the matcher level
-						// If they do, the query planner should have already filtered documents via the index
-						// So we just skip validation here - the index already did the work
-						// Don't return false, as that would exclude documents that the index already selected
+					} else if (operator == "$near" || operator == "$nearSphere") {
+						// Handle $near and $nearSphere with distance calculation
+						let coordinates;
+						if (operand.$geometry) {
+							coordinates = operand.$geometry.coordinates;
+						} else if (operand.coordinates) {
+							coordinates = operand.coordinates;
+						} else if (Array.isArray(operand)) {
+							coordinates = operand;
+						}
+						
+						if (coordinates && coordinates.length >= 2) {
+							const [lng, lat] = coordinates;
+							const maxDistanceMeters = operand.$maxDistance || 1000000; // Default to 1000km
+							if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && isNear(v, lng, lat, maxDistanceMeters); })) return false;
+						} else {
+							return false;
+						}
+					} else if (operator == "$geoIntersects") {
+						// Handle $geoIntersects
+						const geometry = operand.$geometry || operand;
+						if (!fieldValueMatches(fieldValue, function(v) { return v != undefined && geoIntersects(v, geometry); })) return false;
 					} else if (operator == "$not") {
 						if (opMatches(doc, key, operand)) return false;
 					} else if (operator == "$all") {

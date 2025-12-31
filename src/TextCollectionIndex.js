@@ -1,16 +1,17 @@
 import { Index } from './Index.js';
-import { TextIndex } from './TextIndex.js';
+import { TextIndex } from 'bjson/textindex';
 import { getProp } from './utils.js';
 
 /**
- * Text index implementation using TextIndex
- * Supports full-text search on one or more fields
+ * Text index implementation
+ * OPFS-backed async implementation using bjson TextIndex
  */
 export class TextCollectionIndex extends Index {
 	constructor(name, keys, storage, options = {}) {
-		super(name, keys, storage, options);
-		// Create the underlying TextIndex
-		this.textIndex = new TextIndex(storage);
+		super(name, keys, storage);
+		// Use OPFS-backed TextIndex for persistent full-text search
+		this.textIndex = new TextIndex({ baseFilename: storage });
+		this.isOpen = false;
 		// Track which fields are indexed
 		this.indexedFields = [];
 		for (const field in keys) {
@@ -21,7 +22,28 @@ export class TextCollectionIndex extends Index {
 		if (this.indexedFields.length === 0) {
 			throw new Error('Text index must have at least one field with type "text"');
 		}
-		
+	}
+
+	/**
+	 * Open the index files
+	 * Must be called before using the index
+	 */
+	async open() {
+		if (this.isOpen) {
+			return;
+		}
+		await this.textIndex.open();
+		this.isOpen = true;
+	}
+
+	/**
+	 * Close the index files
+	 */
+	async close() {
+		if (this.isOpen) {
+			await this.textIndex.close();
+			this.isOpen = false;
+		}
 	}
 
 	/**
@@ -44,13 +66,13 @@ export class TextCollectionIndex extends Index {
 	 * Add a document to the text index
 	 * @param {Object} doc - The document to index
 	 */
-	add(doc) {
+	async add(doc) {
 		if (!doc._id) {
 			throw new Error('Document must have an _id field');
 		}
 		const text = this._extractText(doc);
 		if (text) {
-			this.textIndex.add(String(doc._id), text);
+			await this.textIndex.add(String(doc._id), text);
 		}
 	}
 
@@ -58,11 +80,11 @@ export class TextCollectionIndex extends Index {
 	 * Remove a document from the text index
 	 * @param {Object} doc - The document to remove
 	 */
-	remove(doc) {
+	async remove(doc) {
 		if (!doc._id) {
 			return;
 		}
-		this.textIndex.remove(String(doc._id));
+		await this.textIndex.remove(String(doc._id));
 	}
 
 	/**
@@ -80,18 +102,23 @@ export class TextCollectionIndex extends Index {
 	 * Search the text index
 	 * @param {string} searchText - The text to search for
 	 * @param {Object} options - Search options
-	 * @returns {Array} Array of document IDs
+	 * @returns {Promise<Array>} Array of document IDs
 	 */
-	search(searchText, options = {}) {
-		const results = this.textIndex.query(searchText, { scored: false, ...options });
+	async search(searchText, options = {}) {
+		const results = await this.textIndex.query(searchText, { scored: false, ...options });
 		return results;
 	}
 
 	/**
 	 * Clear all data from the index
 	 */
-	clear() {
-		this.textIndex.clear();
+	async clear() {
+		// Recreate the index by closing and reopening
+		if (this.isOpen) {
+			await this.close();
+		}
+		this.textIndex = new TextIndex({ baseFilename: this.storage });
+		await this.open();
 	}
 
 	/**

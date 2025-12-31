@@ -20,17 +20,19 @@ export class Cursor {
 			let hasExclusion = false;
 			for (let i = 0; i < keys.length; i++) {
 				if (keys[i] === '_id') continue; // _id is special
-			if (projection[keys[i]]) hasInclusion = true;
-			else hasExclusion = true;
+				if (projection[keys[i]]) hasInclusion = true;
+				else hasExclusion = true;
+			}
+			
+			if (hasInclusion && hasExclusion) {
+				throw new QueryError("Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.", { 
+					code: ErrorCodes.FAILED_TO_PARSE,
+					collection: collection.name 
+				});
+			}
 		}
 		
-		if (hasInclusion && hasExclusion) {
-			throw new QueryError("Can't canonicalize query: BadValue Projection cannot have a mix of inclusion and exclusion.", { 
-				code: ErrorCodes.FAILED_TO_PARSE,
-				collection: collection.name 
-			});
-		}
-	}		this.pos = 0;
+		this.pos = 0;
 		this._limit = 0;
 		this._skip = 0;
 		this._closed = false;

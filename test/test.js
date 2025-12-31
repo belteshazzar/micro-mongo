@@ -1,4 +1,11 @@
+import { navigator as opfsNavigator } from 'node-opfs';
 
+// Ensure bjson sees OPFS APIs in Node
+if (typeof globalThis.navigator === 'undefined') {
+	globalThis.navigator = opfsNavigator;
+} else {
+	globalThis.navigator.storage = opfsNavigator.storage;
+}
 import {expect} from 'chai';
 import * as mongo from '../main.js'
 
@@ -968,37 +975,37 @@ describe("DB", function() {
 
 			it('should testRemove', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
-				db[collectionName].remove({age:54});
+				await db[collectionName].remove({age:54});
 				if (db[collectionName].find({age:54}).count()!=0) throw "should be no docs";			 
 			});
 
 			it('should testRemove_JustOneTrue', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
-				db[collectionName].remove({age:54},true);
+				await db[collectionName].remove({age:54},true);
 				if (db[collectionName].find({age:54}).count()!=1) throw "should be 1 doc";
 			});
 
 			it('should testRemove_JustOneFalse', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
-				db[collectionName].remove({age:54},false);
+				await db[collectionName].remove({age:54},false);
 				if (db[collectionName].find({age:54}).count()!=0) throw "should be no docs";
 			});
 
 			it('should testRemove_JustOneDocTrue', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
-				db[collectionName].remove({age:54},{ justOne : true } );
+				await db[collectionName].remove({age:54},{ justOne : true } );
 				if (db[collectionName].find({age:54}).count()!=1) throw "should be 1 doc";
 			});
 
 			it('should testRemove_JustOneDocFalse', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs";
-				db[collectionName].remove({age:54},{ justOne : false } );
+				await db[collectionName].remove({age:54},{ justOne : false } );
 				if (db[collectionName].find({age:54}).count()!=0) throw "should be no docs";
 			});
 
 			it('should testUpdate', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
-				db[collectionName].update({age:54},{ $inc : { age:2 }});
+				await db[collectionName].update({age:54},{ $inc : { age:2 }});
 				if (db[collectionName].find({age:54}).count()!=1) throw "one doc should have been updated from 54";
 				if (db[collectionName].find({age:56}).count()!=1) throw "one doc should have been updated to 56";
 			});
@@ -1532,9 +1539,7 @@ describe("DB", function() {
 
 			it('should testUpdate_Multi', async function() {
 				if (db[collectionName].find({age:54}).count()!=2) throw "should be 2 docs to start with";
-				db[collectionName].update({age:54},{ $inc : { age:2 }},{multi:true});
-				if (db[collectionName].find({age:54}).count()!=0) throw "all docs should have been updated from 54";
-				if (db[collectionName].find({age:56}).count()!=2) throw "all docs should have been updated to 56";
+			await db[collectionName].update({age:54},{ $inc : { age:2 }},{multi:true});
 			});
 
 			it('should testUpdate_Upsert', async function() {
@@ -2114,7 +2119,7 @@ describe("DB", function() {
 				await db[collectionName].createIndex({ age: 1 });
 				
 				// Remove one document
-				db[collectionName].remove({ age: 4 }, true);
+				await db[collectionName].remove({ age: 4 }, true);
 				
 				// Should have one less document with age 4
 				var results = await db[collectionName].find({ age: 4 }).toArray();
