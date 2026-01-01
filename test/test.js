@@ -2442,7 +2442,7 @@ describe("DB", function() {
 
 			it('should maintain geospatial index on update', async function() {
 				await db[geoCollectionName].insertOne({ 
-					_id: 'loc1',
+					_id: new mongo.ObjectId(),
 					location: { type: 'Point', coordinates: [10, 20] }
 				});
 				await db[geoCollectionName].createIndex({ location: '2dsphere' });
@@ -2455,7 +2455,7 @@ describe("DB", function() {
 
 				// Update the location
 				await db[geoCollectionName].updateOne(
-					{ _id: 'loc1' },
+					{ _id: new mongo.ObjectId() },
 					{ $set: { location: { type: 'Point', coordinates: [100, 200] } } }
 				);
 
@@ -2474,8 +2474,8 @@ describe("DB", function() {
 
 			it('should maintain geospatial index on delete', async function() {
 				await db[geoCollectionName].insertMany([
-					{ _id: 'loc1', location: { type: 'Point', coordinates: [10, 20] } },
-					{ _id: 'loc2', location: { type: 'Point', coordinates: [11, 21] } }
+					{ _id: new mongo.ObjectId(), location: { type: 'Point', coordinates: [10, 20] } },
+					{ _id: new mongo.ObjectId(), location: { type: 'Point', coordinates: [11, 21] } }
 				]);
 				await db[geoCollectionName].createIndex({ location: '2dsphere' });
 

@@ -1,5 +1,5 @@
 import { TextCollectionIndex } from './TextCollectionIndex.js';
-import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
+import { GeospatialIndex } from './GeospatialIndex.js';
 
 /**
  * Query execution plan
@@ -204,7 +204,7 @@ export class QueryPlanner {
 	_planGeoQuery(query, analysis) {
 		// Find geospatial index
 		for (const [indexName,index] of this.indexes) {
-			if (index instanceof GeospatialCollectionIndex) {
+			if (index instanceof GeospatialIndex) {
 				// Check if this index can handle the query (don't execute yet)
 				const plan = new QueryPlan();
 				plan.type = 'index_scan';
@@ -319,7 +319,7 @@ export class QueryPlanner {
 		for (const [indexName,index] of this.indexes) {
 
 			// Skip special index types (they have their own planning)
-			if (index instanceof TextCollectionIndex || index instanceof GeospatialCollectionIndex) {
+			if (index instanceof TextCollectionIndex || index instanceof GeospatialIndex) {
 				continue;
 			}
 

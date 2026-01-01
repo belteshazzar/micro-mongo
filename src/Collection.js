@@ -6,7 +6,7 @@ import { matches, matchWithArrayIndices } from './queryMatcher.js';
 import { applyUpdates, createDocFromUpdate } from './updates.js';
 import { RegularCollectionIndex } from './RegularCollectionIndex.js';
 import { TextCollectionIndex } from './TextCollectionIndex.js';
-import { GeospatialCollectionIndex } from './GeospatialCollectionIndex.js';
+import { GeospatialIndex } from './GeospatialIndex.js';
 import { QueryPlanner } from './QueryPlanner.js';
 import { evaluateExpression } from './aggregationExpressions.js';
 import { ChangeStream } from './ChangeStream.js';
@@ -50,8 +50,9 @@ export class Collection extends EventEmitter {
 			if (meta.type === 'text') {
 				index = new TextCollectionIndex(name, meta.keys, meta.baseFilename, meta.options || {});
 			} else if (meta.type === 'geospatial') {
-				const storageFile = meta.storage || `${meta.baseFilename}-geo.bjson`;
-				index = new GeospatialCollectionIndex(name, meta.keys, storageFile, meta.options || {});
+				const geoField = Object.keys(meta.keys).find(field => meta.keys[field] === '2dsphere' || meta.keys[field] === '2d');
+				if (!geoField) continue;
+				index = new GeospatialIndex(this.name, geoField);
 			} else {
 				const storageFile = meta.storage || `${meta.baseFilename}.bjson`;
 				index = new RegularCollectionIndex(name, meta.keys, storageFile, meta.options || {});
@@ -131,6 +132,8 @@ export class Collection extends EventEmitter {
 		const baseFilename = this._getIndexBaseFilename(indexName);
 		let storageFile;
 		let type;
+
+    console.error('Building index', indexName, keys, options);
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
@@ -139,8 +142,12 @@ export class Collection extends EventEmitter {
 			index = new TextCollectionIndex(indexName, keys, storageFile, options);
 		} else if (this.isGeospatialIndex(keys)) {
 			type = 'geospatial';
+			const geoField = Object.keys(keys).find(field => keys[field] === '2dsphere' || keys[field] === '2d');
+			if (!geoField) {
+				throw new Error('Geospatial index requires a 2dsphere/2d key');
+			}
 			storageFile = `${baseFilename}-geo.bjson`;
-			index = new GeospatialCollectionIndex(indexName, keys, storageFile, options);
+			index = new GeospatialIndex(this.name, geoField);
 		} else {
 			type = 'regular';
 			storageFile = `${baseFilename}.bjson`;

@@ -1,5 +1,5 @@
 import { Index } from './Index.js';
-import { RTree } from 'bjson/rtree';
+import { RTree, haversineDistance } from 'bjson/rtree';
 import { getProp } from './utils.js';
 import { ObjectId } from 'bjson';
 
@@ -7,83 +7,16 @@ import { ObjectId } from 'bjson';
  * Geospatial index implementation
  * OPFS-backed async implementation using bjson RTree
  */
-export class GeospatialCollectionIndex extends Index {
-	constructor(name, keys, storage, options = {}) {
-		super(name, keys, storage, options);
-		// Use OPFS-backed RTree for geospatial indexing
-		this.rtree = new RTree(storage, 9);
+export class GeospatialIndex extends Index {
+	constructor(collectionName, geoField) {
+    console.error('GeospatialIndex constructor', collectionName, geoField);
+    const filename = `${collectionName}_${geoField}.rtree.bjson`
+    super(collectionName, { [geoField]: '2dsphere' }, filename);
+
+    this.collectionName = collectionName;
+    this.geoField = geoField;
+    this.rtree = new RTree(filename, 9);
 		this.isOpen = false;
-		this._idMap = new Map(); // docId string -> ObjectId
-		this._objectIdMap = new Map(); // ObjectId string -> original docId
-		// Track which field is the geospatial field
-		this.geoField = null;
-		for (const field in keys) {
-			if (keys[field] === '2dsphere' || keys[field] === '2d') {
-				this.geoField = field;
-				break;
-			}
-		}
-		if (!this.geoField) {
-			throw new Error('Geospatial index must have at least one field with type "2dsphere" or "2d"');
-		}
-	}
-
-
-	/**
-	 * Normalize a value so it can be stored in the RTree and compared via equals()
-	 * @param {*} id - Document identifier
-	 * @returns {*} ObjectId-compatible value with equals()/toString()
-	 */
-	_normalizeObjectId(id) {
-		if (id instanceof ObjectId) {
-			this._objectIdMap.set(id.toString(), id.toString());
-			return id;
-		}
-
-		const key = String(id);
-
-		if (this._idMap.has(key)) {
-			return this._idMap.get(key);
-		}
-
-		let objectId;
-		try {
-			if (typeof id === 'string' && ObjectId.isValid(id)) {
-				objectId = new ObjectId(id);
-			}
-		} catch (e) {
-			// Fall through to deterministic generation
-		}
-
-		if (!objectId) {
-			objectId = this._createDeterministicObjectId(key);
-		}
-
-		this._idMap.set(key, objectId);
-		this._objectIdMap.set(objectId.toString(), key);
-		return objectId;
-	}
-
-	_toDocId(id) {
-		if (id instanceof ObjectId) {
-			const mapped = this._objectIdMap.get(id.toString());
-			return mapped !== undefined ? mapped : id.toString();
-		}
-		if (id && typeof id === 'object' && 'objectId' in id) {
-			return this._toDocId(id.objectId);
-		}
-		return String(id);
-	}
-
-	_createDeterministicObjectId(key) {
-		let hash = 0x811c9dc5;
-		for (let i = 0; i < key.length; i++) {
-			hash ^= key.charCodeAt(i);
-			hash = Math.imul(hash, 0x01000193);
-		}
-		const hex = (hash >>> 0).toString(16).padStart(8, '0');
-		const idHex = (hex + hex + hex).slice(0, 24);
-		return new ObjectId(idHex);
 	}
 
 	/**
@@ -175,8 +108,7 @@ export class GeospatialCollectionIndex extends Index {
 		const coords = this._extractCoordinates(geoValue);
 		if (coords) {
 			// RTree.insert expects (lat, lng, objectId)
-			const objectId = this._normalizeObjectId(doc._id);
-			await this.rtree.insert(coords.lat, coords.lng, objectId);
+			await this.rtree.insert(coords.lat, coords.lng, doc._id);
 		}
 	}
 
@@ -188,9 +120,14 @@ export class GeospatialCollectionIndex extends Index {
 		if (!doc._id) {
 			return;
 		}
+
 		// RTree.remove expects just the ObjectId (or compatible value)
-		const objectId = this._normalizeObjectId(doc._id);
-		await this.rtree.remove(objectId);
+    if (!(doc._id instanceof ObjectId)) {
+      console.error(doc);
+      throw new Error('Document _id must be an ObjectId to remove from geospatial index');
+    }
+
+		await this.rtree.remove(doc._id);
 	}
 
 	/**
@@ -224,7 +161,7 @@ export class GeospatialCollectionIndex extends Index {
 				});
 
 				// searchBBox returns entries with coords
-				return results.map(entry => this._toDocId(entry.objectId));
+				return results.map(entry => entry.objectId);
 			}
 		}
 
@@ -262,7 +199,7 @@ export class GeospatialCollectionIndex extends Index {
 			results.sort((a, b) => a.distance - b.distance);
 
 			// Return just the document IDs
-			return results.map(entry => this._toDocId(entry.objectId));
+			return results.map(entry => entry.objectId);
 		}
 
 		// Handle $nearSphere with radius (uses spherical distance, same as $near)
@@ -299,7 +236,7 @@ export class GeospatialCollectionIndex extends Index {
 			results.sort((a, b) => a.distance - b.distance);
 
 			// Return just the document IDs
-			return results.map(entry => this._toDocId(entry.objectId));
+			return results.map(entry => entry.objectId);
 		}
 
 		// Handle $geoIntersects
@@ -333,7 +270,7 @@ export class GeospatialCollectionIndex extends Index {
 				});
 
 				// searchBBox returns entries with coords
-				return results.map(entry => this._toDocId(entry.objectId));
+				return results.map(entry => entry.objectId);
 			} else if (geometry.type === 'Polygon') {
 				const coordinates = geometry.coordinates;
 				if (!coordinates || coordinates.length === 0) {
@@ -369,7 +306,7 @@ export class GeospatialCollectionIndex extends Index {
 				// Filter by actual point-in-polygon test using returned coordinates
 				const results = candidates.filter(entry => this._pointInPolygon(entry.lat, entry.lng, ring));
 
-				return results.map(entry => this._toDocId(entry.objectId));
+				return results.map(entry => entry.objectId);
 			}
 
 			return null;
