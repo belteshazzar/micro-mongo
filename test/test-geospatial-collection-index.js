@@ -33,7 +33,7 @@ describe('GeospatialIndex (unit)', function() {
 
 	it('indexes and queries bounding boxes with string _id', async function() {
 		const collectionName = uniqueCollectionName();
-		const index = new GeospatialIndex(collectionName, 'location');
+		const index = new GeospatialIndex('location_2dsphere', {location: '2dsphere'}, `${collectionName}_location.rtree.bjson`);
 		await index.open();
 
     const loc1 = new ObjectId();
@@ -47,7 +47,7 @@ describe('GeospatialIndex (unit)', function() {
 
 	it('removes entries using the same string _id', async function() {
 		const collectionName = uniqueCollectionName();
-		const index = new GeospatialIndex(collectionName, 'location');
+		const index = new GeospatialIndex('location_2dsphere',  {location: '2dsphere'}, `${collectionName}_location.rtree.bjson`);
 		await index.open();
 
     const loc1 = new ObjectId();
@@ -65,14 +65,14 @@ describe('GeospatialIndex (unit)', function() {
 
 	it('persists to OPFS via bjson and can be reopened', async function() {
 		const collectionName = uniqueCollectionName();
-		const index = new GeospatialIndex(collectionName, 'location');
+		const index = new GeospatialIndex('location_2dsphere', {location: '2dsphere'}, `${collectionName}_location.rtree.bjson`);
 		await index.open();
 
     const loc1 = new ObjectId();
 		await index.add({ _id: loc1, location: { type: 'Point', coordinates: [10, 20] } });
 		await index.close();
 
-		const reopened = new GeospatialIndex(collectionName, 'location');
+		const reopened = new GeospatialIndex('location_2dsphere', {location: '2dsphere'}, `${collectionName}_location.rtree.bjson`);
 		await reopened.open();
 		const results = await reopened.query({ location: { $geoWithin: [[5, 25], [15, 15]] } });
 		expect(results).to.deep.equal([loc1]);
@@ -81,7 +81,7 @@ describe('GeospatialIndex (unit)', function() {
 
 	it('clears underlying bjson file and rebuilds empty tree', async function() {
 		const collectionName = uniqueCollectionName();
-		const index = new GeospatialIndex(collectionName, 'location');
+		const index = new GeospatialIndex('location_2dsphere', {location: '2dsphere'}, `${collectionName}_location.rtree.bjson`);
 		await index.open();
 
     const loc1 = new ObjectId();

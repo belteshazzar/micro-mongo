@@ -8,14 +8,11 @@ import { ObjectId } from 'bjson';
  * OPFS-backed async implementation using bjson RTree
  */
 export class GeospatialIndex extends Index {
-	constructor(collectionName, geoField) {
-    console.error('GeospatialIndex constructor', collectionName, geoField);
-    const filename = `${collectionName}_${geoField}.rtree.bjson`
-    super(collectionName, { [geoField]: '2dsphere' }, filename);
+	constructor(indexName, keys, storageFile, options = {}) {
+    super(indexName, keys, storageFile, options);
 
-    this.collectionName = collectionName;
-    this.geoField = geoField;
-    this.rtree = new RTree(filename, 9);
+    this.geoField = Object.keys(keys)[0]; // Assume single geospatial field
+    this.rtree = new RTree(storageFile, 9);
 		this.isOpen = false;
 	}
 

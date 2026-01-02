@@ -50,9 +50,7 @@ export class Collection extends EventEmitter {
 			if (meta.type === 'text') {
 				index = new TextCollectionIndex(name, meta.keys, meta.baseFilename, meta.options || {});
 			} else if (meta.type === 'geospatial') {
-				const geoField = Object.keys(meta.keys).find(field => meta.keys[field] === '2dsphere' || meta.keys[field] === '2d');
-				if (!geoField) continue;
-				index = new GeospatialIndex(this.name, geoField);
+				index = new GeospatialIndex(name, meta.keys, `${meta.baseFilename}.rtree.bjson`, meta.options || {});
 			} else {
 				const storageFile = meta.storage || `${meta.baseFilename}.bjson`;
 				index = new RegularCollectionIndex(name, meta.keys, storageFile, meta.options || {});
@@ -132,8 +130,6 @@ export class Collection extends EventEmitter {
 		const baseFilename = this._getIndexBaseFilename(indexName);
 		let storageFile;
 		let type;
-
-    console.error('Building index', indexName, keys, options);
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
@@ -142,12 +138,8 @@ export class Collection extends EventEmitter {
 			index = new TextCollectionIndex(indexName, keys, storageFile, options);
 		} else if (this.isGeospatialIndex(keys)) {
 			type = 'geospatial';
-			const geoField = Object.keys(keys).find(field => keys[field] === '2dsphere' || keys[field] === '2d');
-			if (!geoField) {
-				throw new Error('Geospatial index requires a 2dsphere/2d key');
-			}
-			storageFile = `${baseFilename}-geo.bjson`;
-			index = new GeospatialIndex(this.name, geoField);
+			storageFile = `${baseFilename}.rtree.bjson`;
+			index = new GeospatialIndex(indexName, keys, storageFile, options);
 		} else {
 			type = 'regular';
 			storageFile = `${baseFilename}.bjson`;
