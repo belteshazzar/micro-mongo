@@ -149,13 +149,12 @@ export class OPFSStorageEngine {
 		if (!collectionsDir || typeof collectionsDir.entries !== 'function') return;
 		for await (const [name, handle] of collectionsDir.entries()) {
 			if (handle && handle.kind === 'directory') {
-				if (!this.collections.has(name)) {
-					const store = this.createCollectionStore(name);
-					if (typeof store.ready === 'function') {
-						await store.ready();
-					}
-					await this._loadIndexesForCollection(name, store);
+				// Always hydrate the store, even if it was created earlier
+				const store = this.createCollectionStore(name);
+				if (typeof store.ready === 'function') {
+					await store.ready();
 				}
+				await this._loadIndexesForCollection(name, store);
 			}
 		}
 	}

@@ -57,7 +57,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Charlie', address: { city: 'NYC', zip: '10002' } }
 			]);
 
-			const results = await db[collectionName].find({ 'address.city': 'NYC' }).toArray();
+			const results = await (await db[collectionName].find({ 'address.city': 'NYC' })).toArray();
 			expect(results).to.have.lengthOf(2);
 			expect(results.map(r => r.name)).to.include('Alice');
 			expect(results.map(r => r.name)).to.include('Charlie');
@@ -70,14 +70,14 @@ describe('Dot Notation in Queries', function() {
 				{ user: { profile: { name: 'Charlie', age: 30 } } }
 			]);
 
-			const results = await db[collectionName].find({ 'user.profile.age': 30 }).toArray();
+			const results = await (await db[collectionName].find({ 'user.profile.age': 30 })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 
 		it('should return undefined for non-existent nested paths', async function() {
 			await db[collectionName].insertOne({ name: 'Alice', age: 30 });
 
-			const results = await db[collectionName].find({ 'address.city': 'NYC' }).toArray();
+			const results = await (await db[collectionName].find({ 'address.city': 'NYC' })).toArray();
 			expect(results).to.have.lengthOf(0);
 		});
 	});
@@ -92,46 +92,46 @@ describe('Dot Notation in Queries', function() {
 		});
 
 		it('should support $gt with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.price': { $gt: 100 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $gt: 100 } })).toArray();
 			expect(results).to.have.lengthOf(2);
 			expect(results.map(r => r.name)).to.include('Product B');
 			expect(results.map(r => r.name)).to.include('Product C');
 		});
 
 		it('should support $gte with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.price': { $gte: 150 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $gte: 150 } })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 
 		it('should support $lt with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.price': { $lt: 150 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $lt: 150 } })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Product A');
 		});
 
 		it('should support $lte with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.price': { $lte: 150 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $lte: 150 } })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 
 		it('should support $eq with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.stock': { $eq: 0 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.stock': { $eq: 0 } })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Product C');
 		});
 
 		it('should support $ne with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.stock': { $ne: 0 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.stock': { $ne: 0 } })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 
 		it('should support $in with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.price': { $in: [100, 200] } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $in: [100, 200] } })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 
 		it('should support $nin with dot notation', async function() {
-			const results = await db[collectionName].find({ 'details.price': { $nin: [100, 200] } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $nin: [100, 200] } })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Product C');
 		});
@@ -139,10 +139,10 @@ describe('Dot Notation in Queries', function() {
 		it('should support $exists with dot notation', async function() {
 			await db[collectionName].insertOne({ name: 'Product D' });
 			
-			const withDetails = await db[collectionName].find({ 'details.price': { $exists: true } }).toArray();
+			const withDetails = await (await db[collectionName].find({ 'details.price': { $exists: true } })).toArray();
 			expect(withDetails).to.have.lengthOf(3);
 
-			const withoutDetails = await db[collectionName].find({ 'details.price': { $exists: false } }).toArray();
+			const withoutDetails = await (await db[collectionName].find({ 'details.price': { $exists: false } })).toArray();
 			expect(withoutDetails).to.have.lengthOf(1);
 			expect(withoutDetails[0].name).to.equal('Product D');
 		});
@@ -156,7 +156,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Charlie', tags: ['javascript', 'vue', 'angular'] }
 			]);
 
-			const results = await db[collectionName].find({ 'tags.0': 'javascript' }).toArray();
+			const results = await (await db[collectionName].find({ 'tags.0': 'javascript' })).toArray();
 			expect(results).to.have.lengthOf(2);
 			expect(results.map(r => r.name)).to.include('Alice');
 			expect(results.map(r => r.name)).to.include('Charlie');
@@ -181,7 +181,7 @@ describe('Dot Notation in Queries', function() {
 			]);
 
 			// Query for orders containing an item with specific price
-			const results = await db[collectionName].find({ 'items.price': 999 }).toArray();
+			const results = await (await db[collectionName].find({ 'items.price': 999 })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Order 1');
 		});
@@ -204,7 +204,7 @@ describe('Dot Notation in Queries', function() {
 				}
 			]);
 
-			const results = await db[collectionName].find({ 'items.0.price': 999 }).toArray();
+			const results = await (await db[collectionName].find({ 'items.0.price': 999 })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Order 1');
 		});
@@ -238,9 +238,9 @@ describe('Dot Notation in Queries', function() {
 		});
 
 		it('should use $elemMatch with nested fields', async function() {
-			const results = await db[collectionName].find({
+			const results = await (await db[collectionName].find({
 				scores: { $elemMatch: { subject: 'math', grade: { $gte: 90 } } }
-			}).toArray();
+			})).toArray();
 
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Student B');
@@ -328,7 +328,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Charlie', address: { city: 'NYC', zip: '10002' } }
 			]);
 
-			const results = await db[collectionName].find({ 'address.city': 'NYC' }).toArray();
+			const results = await (await db[collectionName].find({ 'address.city': 'NYC' })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 
@@ -341,7 +341,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Product C', details: { price: 150 } }
 			]);
 
-			const results = await db[collectionName].find({ 'details.price': { $gt: 100 } }).toArray();
+			const results = await (await db[collectionName].find({ 'details.price': { $gt: 100 } })).toArray();
 			expect(results).to.have.lengthOf(2);
 		});
 	});
@@ -357,7 +357,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Bob', address: { city: 'NYC' } }
 			]);
 
-			const results = await db[collectionName].find({ 'address.city': 'NYC' }).toArray();
+			const results = await (await db[collectionName].find({ 'address.city': 'NYC' })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Bob');
 		});
@@ -370,7 +370,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Bob', address: { city: 'NYC', zip: '10002' } }
 			]);
 
-			const results = await db[collectionName].find({ 'address.city': { $exists: false } }).toArray();
+			const results = await (await db[collectionName].find({ 'address.city': { $exists: false } })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Alice');
 		});
@@ -383,7 +383,7 @@ describe('Dot Notation in Queries', function() {
 				{ name: 'Bob', address: { city: 'NYC' } }
 			]);
 
-			const results = await db[collectionName].find({ 'address.city': { $exists: true } }).toArray();
+			const results = await (await db[collectionName].find({ 'address.city': { $exists: true } })).toArray();
 			expect(results).to.have.lengthOf(1);
 			expect(results[0].name).to.equal('Bob');
 		});

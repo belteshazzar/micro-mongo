@@ -209,7 +209,7 @@ describe('Filtered Positional Operator with arrayFilters', function() {
 				{ arrayFilters: [{ 'elem.quantity': 0 }] }
 			);
 
-			const docs = await db[collectionName].find({}).toArray();
+			const docs = await (await db[collectionName].find({})).toArray();
 			expect(docs[0].items[0].quantity).to.equal(5); // apple: unchanged
 			expect(docs[0].items[1].quantity).to.equal(1); // banana: 0 -> 1
 			expect(docs[1].items[0].quantity).to.equal(1); // orange: 0 -> 1

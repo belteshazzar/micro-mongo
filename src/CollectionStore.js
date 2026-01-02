@@ -1,6 +1,43 @@
 import { PersistentDocumentStore } from './PersistentDocumentStore.js';
 import { IndexStore } from './IndexStore.js';
 
+// Lightweight in-memory document store used when no documentPath is provided
+class InMemoryDocumentStore {
+	constructor() {
+		this.docs = new Map();
+	}
+
+	async ready() {}
+
+	async clear() {
+		this.docs.clear();
+	}
+
+	async keys() {
+		return Array.from(this.docs.keys());
+	}
+
+	async getAllDocuments() {
+		return Array.from(this.docs.values());
+	}
+
+	async get(key) {
+		return this.docs.get(key);
+	}
+
+	async set(key, value) {
+		this.docs.set(key, value);
+	}
+
+	async remove(key) {
+		this.docs.delete(key);
+	}
+
+	async size() {
+		return this.docs.size;
+	}
+}
+
 /**
  * CollectionStore - Unified storage for collection documents and indexes
  * 
@@ -11,11 +48,11 @@ import { IndexStore } from './IndexStore.js';
  */
 export class CollectionStore {
 	constructor(options = {}) {
-		if (!options.documentPath) {
-			throw new Error('CollectionStore requires a documentPath for PersistentDocumentStore');
+		if (options.documentPath) {
+			this.documents = new PersistentDocumentStore(options.documentPath);
+		} else {
+			this.documents = new InMemoryDocumentStore();
 		}
-
-		this.documents = new PersistentDocumentStore(options.documentPath);
 		
 		// Index storage - plain object to store index data
 		// Structure: { indexName: indexDataObject }
@@ -31,10 +68,9 @@ export class CollectionStore {
 	/**
 	 * Clear all documents and indexes
 	 */
-	clear() {
-		const maybe = this.documents.clear && this.documents.clear();
-		if (maybe && typeof maybe.then === 'function') {
-			return maybe.then(() => this.indexes.clear());
+	async clear() {
+		if (this.documents && typeof this.documents.clear === 'function') {
+			await this.documents.clear();
 		}
 		this.indexes.clear();
 	}
@@ -43,19 +79,19 @@ export class CollectionStore {
    * Get all document keys
    * @returns {[string]} Array of document keys
    */
-  documentKeys() {
-    return this.documents.keys();
-  }
+	async documentKeys() {
+		return await this.documents.keys();
+	}
 
 	/**
 	 * Get all documents as an array
 	 * @returns {Array} Array of all documents
 	 */
-	getAllDocuments() {
+	async getAllDocuments() {
 		if (typeof this.documents.getAllDocuments === 'function') {
-			return this.documents.getAllDocuments();
+			return await this.documents.getAllDocuments();
 		}
-		return this.documents && this.documents.data ? Array.from(this.documents.data.values()) : [];
+		return [];
 	}
 
 	/**
@@ -63,42 +99,44 @@ export class CollectionStore {
 	 * @param {string} docId - Document ID
 	 * @returns {Object|undefined} Document or undefined
 	 */
-	get(key) {
+	async get(key) {
     if (typeof key !== 'string') throw new Error("Document key must be a string");
-		return this.documents.get(key);
+		return await this.documents.get(key);
 	}
 
 	/**
 	 * 
 	 */
-	set(key, value) {
+	async set(key, value) {
     if (typeof key !== 'string') throw new Error("Document key must be a string");
-    this.documents.set(key, value);
+    return await this.documents.set(key, value);
 	}
 
 	/**
 	 * 
 	 */
-	remove(key) {
+	async remove(key) {
     if (typeof key !== 'string') throw new Error("Document key must be a string");
-		this.documents.remove(key);
+		return await this.documents.remove(key);
 	}
 
 	/**
 	 *
 	 */
-	size() {
-		return this.documents.size();
+	async size() {
+		return await this.documents.size();
 	}
 
 	/**
 	 * Get entire document store (for export/save)
 	 * @returns {Object} Document store object
 	 */
-	getStore() {
+	async getStore() {
 		const store = {};
-		for (const key of this.documents.keys()) {
-			store[key] = this.documents.get(key);
+		if (!this.documents || typeof this.documents.keys !== 'function') return store;
+		const keys = await this.documents.keys();
+		for (const key of keys) {
+			store[key] = await this.documents.get(key);
 		}
 		return store;
 	}

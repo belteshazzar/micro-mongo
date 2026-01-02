@@ -1,5 +1,6 @@
 import { Collection } from './Collection.js';
 import { OPFSStorageEngine } from './OPFSStorageEngine.js';
+import { StorageEngine } from './StorageEngine.js';
 import { ObjectId } from 'bjson';
 import { ChangeStream } from './ChangeStream.js';
 import { NotImplementedError } from './errors.js';
@@ -12,8 +13,15 @@ export class DB {
 		this.options = options || {};
 		this.dbName = this.options.dbName || 'default';
 			
-		// Always use OPFS storage; ignore user-supplied storage engines
-		this.storageEngine = new OPFSStorageEngine(this.dbName, this.options.rootPath || '/micro-mongo', { rootPath: this.options.rootPath });
+		// Choose storage engine: prefer user-supplied, then OPFS when available, otherwise in-memory
+		const hasOPFS = !!(globalThis.navigator && globalThis.navigator.storage && typeof globalThis.navigator.storage.getDirectory === 'function');
+		if (this.options.storageEngine) {
+			this.storageEngine = this.options.storageEngine;
+		} else if (hasOPFS) {
+			this.storageEngine = new OPFSStorageEngine(this.dbName, this.options.rootPath || '/micro-mongo', { rootPath: this.options.rootPath });
+		} else {
+			this.storageEngine = new StorageEngine(this.options);
+		}
 		this._initPromise = (async () => {
 			if (typeof this.storageEngine.initialize === 'function') {
 				await this.storageEngine.initialize();
@@ -44,7 +52,22 @@ export class DB {
           if (Object.prototype.hasOwnProperty.call(target, property)) {
             return target[property];
           }
-          // Auto-create the collection
+          
+          // Check if collection exists in storage engine
+          // If it does, reuse it instead of creating new one
+          const existingStore = target.storageEngine.getCollectionStore(property);
+          if (existingStore) {
+            // Create Collection instance for existing store
+            target[property] = new Collection(
+              target,
+              property,
+              existingStore,
+              target._id.bind(target)
+            );
+            return target[property];
+          }
+          
+          // Auto-create the collection if it doesn't exist in storage
           target.createCollection(property);
           return target[property];
         }

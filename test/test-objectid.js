@@ -223,7 +223,7 @@ describe("ObjectId", function() {
 			await db.users.insertOne({ _id: id1, name: 'Frank' });
 			await db.users.insertOne({ _id: id2, name: 'Grace' });
 			
-			const docs = await db.users.find({ _id: { $ne: id1 } }).toArray();
+			const docs = await (await db.users.find({ _id: { $ne: id1 } })).toArray();
 			expect(docs.length).to.equal(1);
 			expect(docs[0].name).to.equal('Grace');
 		});
@@ -240,7 +240,7 @@ describe("ObjectId", function() {
 				{ _id: id3, name: 'User3' }
 			]);
 			
-			const docs = await db.users.find({ _id: { $in: [id1, id3] } }).toArray();
+			const docs = await (await db.users.find({ _id: { $in: [id1, id3] } })).toArray();
 			expect(docs.length).to.equal(2);
 			expect(docs.map(d => d.name).sort()).to.deep.equal(['User1', 'User3']);
 		});
@@ -256,7 +256,7 @@ describe("ObjectId", function() {
 				await db.messages.insertOne({ _id: id, text: `Message ${i}` });
 			}
 			
-			const sorted = await db.messages.find().sort({ _id: 1 }).toArray();
+			const sorted = await (await db.messages.find().sort({ _id: 1 })).toArray();
 			expect(sorted.length).to.equal(3);
 			
 			// Should be in chronological order (roughly, if created close together)

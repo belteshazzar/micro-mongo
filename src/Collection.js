@@ -179,7 +179,7 @@ export class Collection extends EventEmitter {
 		}
 
 		// Build index by scanning all documents
-		const allDocs = this.storage.getAllDocuments();
+		const allDocs = await this.storage.getAllDocuments();
 		for (const doc of allDocs) {
 			if (doc) {
 				await index.add(doc);
@@ -278,7 +278,7 @@ export class Collection extends EventEmitter {
 	}
 
 	// Collection methods
-	aggregate(pipeline) {
+	async aggregate(pipeline) {
 		if (!pipeline || !isArray(pipeline)) {
 			throw new QueryError('Pipeline must be an array', { 
 				collection: this.name, 
@@ -288,7 +288,7 @@ export class Collection extends EventEmitter {
 
 		// Start with all documents
 		let results = [];
-		const cursor = this.find({});
+		const cursor = await this.find({});
 		while (cursor.hasNext()) {
 			results.push(cursor.next());
 		}
@@ -863,7 +863,7 @@ results = unwound;
 	
 	// Drop and recreate target collection
 	if (this.db[targetCollectionName]) {
-		this.db.dropCollection(targetCollectionName);
+		await this.db.dropCollection(targetCollectionName);
 	}
 	this.db.createCollection(targetCollectionName);
 	
@@ -874,7 +874,7 @@ results = unwound;
 		const doc = results[j];
 		const docId = doc._id;
 		const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-		targetCollection.storage.set(key, doc);
+		await targetCollection.storage.set(key, doc);
 	}
 	
 	// $out returns empty results (MongoDB behavior)
@@ -916,19 +916,19 @@ results = unwound;
 		const matchValue = getProp(doc, matchField);
 		
 		// Find existing document
-		const existingCursor = targetCollection.find({ [matchField]: matchValue });
+		const existingCursor = await targetCollection.find({ [matchField]: matchValue });
 		const existing = existingCursor.hasNext() ? existingCursor.next() : null;
 		
 		if (existing) {
 			if (whenMatched === 'replace') {
 				const docId = doc._id;
 				const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-				targetCollection.storage.set(key, doc);
+				await targetCollection.storage.set(key, doc);
 			} else if (whenMatched === 'merge') {
 				const merged = Object.assign({}, existing, doc);
 				const docId = merged._id;
 				const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-				targetCollection.storage.set(key, merged);
+				await targetCollection.storage.set(key, merged);
 			} else if (whenMatched === 'keepExisting') {
 				// Do nothing
 			} else if (whenMatched === 'fail') {
@@ -941,7 +941,7 @@ results = unwound;
 			if (whenNotMatched === 'insert') {
 				const docId = doc._id;
 				const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-				targetCollection.storage.set(key, doc);
+				await targetCollection.storage.set(key, doc);
 			} else if (whenNotMatched === 'discard') {
 				// Do nothing
 			} else if (whenNotMatched === 'fail') {
@@ -982,7 +982,7 @@ results = unwound;
 		
 		// Find matching documents in foreign collection
 		const matches = [];
-		const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+		const foreignCursor = await fromCollection.find({ [stageSpec.foreignField]: localValue });
 		while (foreignCursor.hasNext()) {
 			matches.push(foreignCursor.next());
 		}
@@ -1040,7 +1040,7 @@ results = unwound;
 				query = { $and: [query, restrictSearchWithMatch] };
 			}
 			
-			const cursor = fromCollection.find(query);
+			const cursor = await fromCollection.find(query);
 			while (cursor.hasNext()) {
 				const match = cursor.next();
 				const matchCopy = copy(match);
@@ -1431,7 +1431,7 @@ return results;
 }	bulkWrite() { throw new NotImplementedError('bulkWrite', { collection: this.name }); }
 
 	async count() {
-		return this.storage.size();
+		return await this.storage.size();
 	}
 
 	async copyTo(destCollectionName) {
@@ -1440,7 +1440,7 @@ return results;
 		}
 		const destCol = this.db[destCollectionName];
 		let numCopied = 0;
-		const c = this.find({});
+		const c = await this.find({});
 		while (c.hasNext()) {
 			await destCol.insertOne(c.next());
 			numCopied++;
@@ -1502,7 +1502,7 @@ return results;
 	}
 
 	async deleteMany(query) {
-		const c = this.find(query);
+		const c = await this.find(query);
 		const ids = [];
 		const docs = [];
 		while (c.hasNext()) {
@@ -1521,7 +1521,7 @@ return results;
 
 	async distinct(field, query) {
 		const vals = {};
-		const c = this.find(query);
+		const c = await this.find(query);
 		while (c.hasNext()) {
 			const d = c.next();
 			if (d[field]) {
@@ -1566,7 +1566,7 @@ return results;
 	ensureIndex() { throw new NotImplementedError('ensureIndex', { collection: this.name }); }
 	explain() { throw new NotImplementedError('explain', { collection: this.name }); }
 
-	find(query, projection) {
+	async find(query, projection) {
 		const normalizedQuery = query == undefined ? {} : query;
 		const nearSpec = this._extractNearSpec(normalizedQuery);
 		
@@ -1577,7 +1577,7 @@ return results;
 		
 		// For now, always do full scan since index queries are async
 		// In the future, use planQueryAsync for index-based queries
-		const allDocs = this.storage.getAllDocuments();
+		const allDocs = await this.storage.getAllDocuments();
 		for (const doc of allDocs) {
 			if (!seen[doc._id] && matches(doc, normalizedQuery)) {
 				seen[doc._id] = true;
@@ -1692,7 +1692,7 @@ return results;
 	findAndModify() { throw new NotImplementedError('findAndModify', { collection: this.name }); }
 
 	async findOne(query, projection) {
-		const cursor = this.find(query, projection);
+		const cursor = await this.find(query, projection);
 		if (cursor.hasNext()) {
 			return cursor.next();
 		} else {
@@ -1701,7 +1701,7 @@ return results;
 	}
 
 	async findOneAndDelete(filter, options) {
-		let c = this.find(filter);
+		let c = await this.find(filter);
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
 		const doc = c.next();
@@ -1711,7 +1711,7 @@ return results;
 	}
 
 	async findOneAndReplace(filter, replacement, options) {
-		let c = this.find(filter);
+		let c = await this.find(filter);
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
 		const doc = c.next();
@@ -1727,7 +1727,7 @@ return results;
 	}
 
 	async findOneAndUpdate(filter, update, options) {
-		let c = this.find(filter);
+		let c = await this.find(filter);
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
 		const doc = c.next();
@@ -1800,7 +1800,7 @@ return results;
 	async replaceOne(query, replacement, options) { // only replace
 		// first
 		const result = {};
-		const c = this.find(query);
+		const c = await this.find(query);
 		result.matchedCount = c.count();
 		if (result.matchedCount == 0) {
 			result.modifiedCount = 0;
@@ -1825,7 +1825,7 @@ return results;
 	}
 
 	async remove(query, options) {
-		const c = this.find(query);
+		const c = await this.find(query);
 		if (!c.hasNext()) return;
 		if (options === true || (options && options.justOne)) {
 			const doc = c.next();
@@ -1848,7 +1848,7 @@ return results;
 	totalIndexSize() { throw new NotImplementedError('totalIndexSize', { collection: this.name }); }
 
 	async update(query, updates, options) {
-		const c = this.find(query);
+		const c = await this.find(query);
 		if (c.hasNext()) {
 			if (options && options.multi) {
 				while (c.hasNext()) {
@@ -1887,7 +1887,7 @@ return results;
 	}
 
 	async updateOne(query, updates, options) {
-		const c = this.find(query);
+		const c = await this.find(query);
 		if (c.hasNext()) {
 			const doc = c.next();
 			const originalDoc = JSON.parse(JSON.stringify(doc));
@@ -1914,7 +1914,7 @@ return results;
 	}
 
 	async updateMany(query, updates, options) {
-		const c = this.find(query);
+		const c = await this.find(query);
 		if (c.hasNext()) {
 			while (c.hasNext()) {
 				const doc = c.next();

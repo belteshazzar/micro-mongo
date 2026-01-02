@@ -29,33 +29,33 @@ describe('Advanced Query Operators', function() {
 		});
 
 		it('should match with case-sensitive regex', async function() {
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				name: { $regex: '^A' } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].name, 'Alice');
 		});
 
 		it('should match with case-insensitive regex using $options', async function() {
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				name: { $regex: '^a', $options: 'i' } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].name, 'Alice');
 		});
 
 		it('should match email domains with regex', async function() {
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				email: { $regex: '@example\\.com$', $options: 'i' } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2);
 		});
 
 		it('should support multiline mode', async function() {
 			await collection.insertOne({ text: 'Line 1\nLine 2\nLine 3' });
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				text: { $regex: '^Line 2', $options: 'm' } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 1);
 		});
 	});
@@ -75,63 +75,63 @@ describe('Advanced Query Operators', function() {
 		});
 
 		it('should match string type by name', async function() {
-			const docs = await collection.find({ field: { $type: 'string' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'string' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'string');
 		});
 
 		it('should match string type by BSON code', async function() {
-			const docs = await collection.find({ field: { $type: 2 } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 2 } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'string');
 		});
 
 		it('should match number types', async function() {
-			const docs = await collection.find({ field: { $type: 'int' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'int' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'number');
 		});
 
 		it('should match double types', async function() {
-			const docs = await collection.find({ field: { $type: 'double' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'double' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'double');
 		});
 
 		it('should match boolean type', async function() {
-			const docs = await collection.find({ field: { $type: 'bool' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'bool' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'boolean');
 		});
 
 		it('should match null type', async function() {
-			const docs = await collection.find({ field: { $type: 'null' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'null' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'null');
 		});
 
 		it('should match array type', async function() {
-			const docs = await collection.find({ field: { $type: 'array' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'array' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'array');
 		});
 
 		it('should match object type', async function() {
-			const docs = await collection.find({ field: { $type: 'object' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'object' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'object');
 		});
 
 		it('should match date type', async function() {
-			const docs = await collection.find({ field: { $type: 'date' } }).toArray();
+			const docs = await (await (await collection.find({ field: { $type: 'date' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 			assert.strictEqual(docs[0].type, 'date');
 		});
 
 		it('should match multiple types with array', async function() {
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				field: { $type: ['string', 'int'] } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2);
 		});
 	});
@@ -147,28 +147,28 @@ describe('Advanced Query Operators', function() {
 		});
 
 		it('should compare two fields with $expr', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$expr: { $eq: ['$total', { $multiply: ['$price', '$qty'] }] }
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 4); // All should match
 		});
 
 		it('should filter with $expr using $gt comparison', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$expr: { $gt: ['$total', 450] }
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3);
 		});
 
 		it('should use complex expressions in $expr', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$expr: { 
 					$and: [
 						{ $gte: ['$price', 50] },
 						{ $lte: ['$price', 100] }
 					]
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3); // price 50, 75, and 100
 		});
 	});
@@ -184,44 +184,44 @@ describe('Advanced Query Operators', function() {
 		});
 
 		it('should validate type with $jsonSchema', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					properties: {
 						age: { type: 'number' }
 					}
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3); // Excludes Charlie with string age
 		});
 
 		it('should validate required fields with $jsonSchema', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					required: ['email']
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3); // Excludes Bob without email
 		});
 
 		it('should validate with minimum constraint', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					properties: {
 						age: { type: 'number', minimum: 30 }
 					}
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2); // Alice and David
 		});
 
 		it('should validate with pattern constraint', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					properties: {
 						email: { type: 'string', pattern: '@example\\.com$' }
 					}
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2); // Alice and David
 		});
 
@@ -232,13 +232,13 @@ describe('Advanced Query Operators', function() {
 				{ status: 'pending' }
 			]);
 			
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					properties: {
 						status: { enum: ['active', 'inactive'] }
 					}
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2);
 		});
 	});
@@ -256,87 +256,87 @@ describe('Advanced Query Operators', function() {
 
 		describe('$bitsAllSet', function() {
 			it('should match when all specified bits are set (bitmask)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAllSet: 0b1010 } 
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 2); // A (1010) and B (1111)
 			});
 
 			it('should match when all specified bits are set (position array)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAllSet: [1, 3] }  // Bits 1 and 3
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 2); // A and B
 			});
 
 			it('should not match when not all bits are set', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAllSet: 0b1111 } 
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 1); // Only B
 			});
 		});
 
 		describe('$bitsAllClear', function() {
 			it('should match when all specified bits are clear (bitmask)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAllClear: 0b0101 } 
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 3); // A (1010), D (0000), and E (1000)
 			});
 
 			it('should match when all specified bits are clear (position array)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAllClear: [0, 2] }  // Bits 0 and 2 must be clear
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 3); // A, D, and E
 			});
 
 			it('should match zero when all bits clear', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAllClear: 0b1111 } 
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 1); // Only D (0000)
 			});
 		});
 
 		describe('$bitsAnySet', function() {
 			it('should match when any specified bit is set (bitmask)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAnySet: 0b0001 }  // Bit 0
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 2); // C (0101) and B (1111)
 			});
 
 			it('should match when any specified bit is set (position array)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAnySet: [0, 1] }  // Bits 0 or 1
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 3); // A, B, C
 			});
 		});
 
 		describe('$bitsAnyClear', function() {
 			it('should match when any specified bit is clear (bitmask)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAnyClear: 0b1111 } 
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 4); // All except B
 			});
 
 			it('should match when any specified bit is clear (position array)', async function() {
-				const docs = await collection.find({ 
+				const docs = await (await collection.find({ 
 					flags: { $bitsAnyClear: [0, 1, 2, 3] } 
-				}).toArray();
+				})).toArray();
 				assert.strictEqual(docs.length, 4); // All except B (1111)
 			});
 		});
 
 		it('should not match non-numeric values', async function() {
 			await collection.insertOne({ flags: 'not a number', name: 'F' });
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				flags: { $bitsAllSet: 0b0001 } 
-			}).toArray();
+			})).toArray();
 			// Should only match numeric values
 			assert(docs.every(doc => typeof doc.flags === 'number'));
 		});
@@ -352,17 +352,17 @@ describe('Advanced Query Operators', function() {
 		});
 
 		it('should not affect query results', async function() {
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				value: { $gt: 1 },
 				$comment: 'This is a comment explaining the query' 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2);
 		});
 
 		it('should work with empty query and comment', async function() {
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				$comment: 'Find all documents' 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3);
 		});
 	});
@@ -378,35 +378,35 @@ describe('Advanced Query Operators', function() {
 		});
 
 		it('should combine $regex with $expr', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				name: { $regex: '^[AC]', $options: 'i' },
 				$expr: { $gte: ['$age', 30] }
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2); // Alice and Charlie
 		});
 
 		it('should combine $type with bit operators', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				age: { $type: 'int' },
 				flags: { $bitsAnySet: [3] }  // Bit 3 set
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3); // Alice, Charlie, David
 		});
 
 		it('should use $comment with complex query', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$and: [
 					{ status: 'active' },
 					{ age: { $gte: 28 } },
 					{ name: { $regex: '^[A-D]' } }
 				],
 				$comment: 'Find active users aged 28+ with names A-D'
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 3); // Alice, Charlie, David
 		});
 
 		it('should combine $jsonSchema with other operators', async function() {
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					required: ['status'],
 					properties: {
@@ -414,7 +414,7 @@ describe('Advanced Query Operators', function() {
 					}
 				},
 				status: 'active'
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 2); // Alice and David
 		});
 	});
@@ -427,7 +427,7 @@ describe('Advanced Query Operators', function() {
 				{ b: 2 } // 'a' is undefined
 			]);
 			
-			const docs = await collection.find({ a: { $type: 'undefined' } }).toArray();
+			const docs = await (await (await collection.find({ a: { $type: 'undefined' } }))).toArray();
 			assert.strictEqual(docs.length, 1);
 		});
 
@@ -438,17 +438,17 @@ describe('Advanced Query Operators', function() {
 				{ text: 'hello world' }
 			]);
 			
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				text: { $regex: 'hello\\.world' } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 1);
 		});
 
 		it('should handle bit operators with zero', async function() {
 			await collection.insertOne({ flags: 0 });
-			const docs = await collection.find({ 
+			const docs = await (await collection.find({ 
 				flags: { $bitsAllClear: 0b1111 } 
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 1);
 		});
 
@@ -459,7 +459,7 @@ describe('Advanced Query Operators', function() {
 				{ user: { name: 'Charlie' } }
 			]);
 			
-			const docs = await collection.find({
+			const docs = await (await collection.find({
 				$jsonSchema: {
 					properties: {
 						user: {
@@ -471,7 +471,7 @@ describe('Advanced Query Operators', function() {
 						}
 					}
 				}
-			}).toArray();
+			})).toArray();
 			assert.strictEqual(docs.length, 1); // Only Alice
 		});
 	});

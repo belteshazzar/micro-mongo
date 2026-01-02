@@ -10,7 +10,6 @@ export class PersistentDocumentStore {
 		this.filePath = filePath;
 		this.order = order;
 		this.tree = null;
-		this.cache = new Map();
 		this.isOpen = false;
 		// Chain writes to avoid overlapping mutations on the underlying file
 		this.writeQueue = Promise.resolve();
@@ -32,10 +31,6 @@ export class PersistentDocumentStore {
 		try {
 			await this.tree.open();
 			this.isOpen = true;
-			const entries = await this.tree.toArray();
-			for (const entry of entries) {
-				this.cache.set(entry.key, entry.value);
-			}
 		} catch (error) {
 			// Handle empty/new files or missing directories
 			if (error.code === 'ENOENT' ||
@@ -110,7 +105,6 @@ export class PersistentDocumentStore {
 
 	async clear() {
 		await this.ready();
-		this.cache.clear();
 		if (this.tree) {
 			await this._deleteFile(this.filePath);
 			await this._ensureDirectoryForFile(this.filePath);
@@ -137,16 +131,18 @@ export class PersistentDocumentStore {
 		}
 	}
 
-	keys() {
-		return this.cache.keys();
+	async keys() {
+		await this.ready();
+		const entries = await this.tree.toArray();
+		return entries.map(entry => entry.key);
 	}
 
-	get(key) {
-		return this.cache.get(key);
+	async get(key) {
+		await this.ready();
+		return this.tree.search(key);
 	}
 
 	async set(key, value) {
-		this.cache.set(key, value);
 		if (!this.tree) {
 			return;
 		}
@@ -172,7 +168,6 @@ export class PersistentDocumentStore {
 	}
 
 	async remove(key) {
-		this.cache.delete(key);
 		if (!this.tree) {
 			return;
 		}
@@ -216,11 +211,6 @@ export class PersistentDocumentStore {
 			this.tree = new BPlusTree(this.filePath, this.order);
 			await this.tree.open();
 
-			// Repopulate from cache
-			for (const [key, value] of this.cache.entries()) {
-				await this.tree.add(key, value);
-			}
-
 			this.isOpen = true;
 			console.log('Successfully recovered from tree corruption');
 		} catch (err) {
@@ -228,11 +218,14 @@ export class PersistentDocumentStore {
 		}
 	}
 
-	size() {
-		return this.cache.size;
+	async size() {
+		await this.ready();
+		return this.tree.size();
 	}
 
-	getAllDocuments() {
-		return Array.from(this.cache.values());
+	async getAllDocuments() {
+		await this.ready();
+		const entries = await this.tree.toArray();
+		return entries.map(entry => entry.value);
 	}
 }

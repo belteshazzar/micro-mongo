@@ -29,7 +29,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ category: 'C', value: 40 });
 			await collection.insertOne({ category: 'A', value: 50 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $sortByCount: '$category' }
 			]);
 
@@ -48,7 +48,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ price: 25 });
 			await collection.insertOne({ price: 35 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $sortByCount: { $cond: [{ $gte: ['$price', 20] }, 'high', 'low'] } }
 			]);
 
@@ -65,7 +65,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ name: 'Alice', details: { age: 30, city: 'NYC' } });
 			await collection.insertOne({ name: 'Bob', details: { age: 25, city: 'LA' } });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $replaceRoot: { newRoot: '$details' } }
 			]);
 
@@ -79,7 +79,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ a: 1, b: 2 });
 			await collection.insertOne({ a: 3, b: 4 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $replaceRoot: { newRoot: { sum: { $add: ['$a', '$b'] }, product: { $multiply: ['$a', '$b'] } } } }
 			]);
 
@@ -93,9 +93,15 @@ describe('Additional Aggregation Stages', function() {
 		it('should throw error if newRoot is not an object', async function() {
 			await collection.insertOne({ value: 42 });
 
-			expect(() => collection.aggregate([
-				{ $replaceRoot: { newRoot: '$value' } }
-			])).to.throw();
+			let error;
+			try {
+				await collection.aggregate([
+					{ $replaceRoot: { newRoot: '$value' } }
+				]);
+			} catch (err) {
+				error = err;
+			}
+			expect(error).to.exist;
 		});
 	});
 
@@ -103,7 +109,7 @@ describe('Additional Aggregation Stages', function() {
 		it('should replace root with expression result', async function() {
 			await collection.insertOne({ name: 'Alice', details: { age: 30 } });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $replaceWith: '$details' }
 			]);
 
@@ -119,7 +125,7 @@ describe('Additional Aggregation Stages', function() {
 				await collection.insertOne({ value: i });
 			}
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $sample: { size: 10 } }
 			]);
 
@@ -136,7 +142,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ value: 1 });
 			await collection.insertOne({ value: 2 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $sample: { size: 10 } }
 			]);
 
@@ -146,9 +152,15 @@ describe('Additional Aggregation Stages', function() {
 		it('should throw error for negative size', async function() {
 			await collection.insertOne({ value: 1 });
 
-			expect(() => collection.aggregate([
-				{ $sample: { size: -1 } }
-			])).to.throw();
+			let error;
+			try {
+				await collection.aggregate([
+					{ $sample: { size: -1 } }
+				]);
+			} catch (err) {
+				error = err;
+			}
+			expect(error).to.exist;
 		});
 	});
 
@@ -159,7 +171,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ price: 25 });
 			await collection.insertOne({ price: 35 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$bucket: {
 						groupBy: '$price',
@@ -181,7 +193,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ category: 'A', price: 20 });
 			await collection.insertOne({ category: 'B', price: 30 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$bucket: {
 						groupBy: '$price',
@@ -205,7 +217,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ value: 5 });
 			await collection.insertOne({ value: 100 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$bucket: {
 						groupBy: '$value',
@@ -216,7 +228,7 @@ describe('Additional Aggregation Stages', function() {
 			]);
 
 			expect(results).to.have.lengthOf(2);
-			const defaultBucket = results.find(r => r._id === 'overflow');
+			const defaultBucket = await results.find(r => r._id === 'overflow');
 			expect(defaultBucket.count).to.equal(1);
 		});
 	});
@@ -227,7 +239,7 @@ describe('Additional Aggregation Stages', function() {
 				await collection.insertOne({ value: i * 10 });
 			}
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$bucketAuto: {
 						groupBy: '$value',
@@ -251,7 +263,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ score: 30 });
 			await collection.insertOne({ score: 40 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$bucketAuto: {
 						groupBy: '$score',
@@ -275,7 +287,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ name: 'Alice', age: 30 });
 			await collection.insertOne({ name: 'Bob', age: 25 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $match: { age: { $gte: 25 } } },
 				{ $out: 'output_collection' }
 			]);
@@ -284,7 +296,7 @@ describe('Additional Aggregation Stages', function() {
 			expect(results).to.have.lengthOf(0);
 
 			// Check output collection
-			const outputCursor = db.output_collection.find({});
+			const outputCursor = await db.output_collection.find({});
 			const outputDocs = [];
 			while (outputCursor.hasNext()) {
 				outputDocs.push(outputCursor.next());
@@ -302,11 +314,11 @@ describe('Additional Aggregation Stages', function() {
 
 			await collection.insertOne({ new: 'data' });
 
-			collection.aggregate([
+			await collection.aggregate([
 				{ $out: 'existing' }
 			]);
 
-			const cursor = db.existing.find({});
+			const cursor = await db.existing.find({});
 			const docs = [];
 			while (cursor.hasNext()) {
 				docs.push(cursor.next());
@@ -326,7 +338,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ _id: 1, name: 'Alice', age: 31, city: 'NYC' });
 			await collection.insertOne({ _id: 2, name: 'Bob', age: 25 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $merge: 'target' }
 			]);
 
@@ -334,14 +346,14 @@ describe('Additional Aggregation Stages', function() {
 			expect(results).to.have.lengthOf(0);
 
 			// Check merged collection
-			const cursor = db.target.find({});
+			const cursor = await db.target.find({});
 			const docs = [];
 			while (cursor.hasNext()) {
 				docs.push(cursor.next());
 			}
 			
 			expect(docs).to.have.lengthOf(2);
-			const alice = docs.find(d => d._id === 1);
+			const alice = await docs.find(d => d._id === 1);
 			expect(alice.age).to.equal(31); // Updated
 			expect(alice.city).to.equal('NYC'); // Merged
 		});
@@ -352,11 +364,11 @@ describe('Additional Aggregation Stages', function() {
 
 			await collection.insertOne({ _id: 1, name: 'Alice', age: 31 });
 
-			collection.aggregate([
+			await collection.aggregate([
 				{ $merge: { into: 'target', whenMatched: 'replace' } }
 			]);
 
-			const cursor = db.target.find({ _id: 1 });
+			const cursor = await db.target.find({ _id: 1 });
 			const doc = cursor.next();
 			
 			expect(doc.age).to.equal(31);
@@ -368,11 +380,11 @@ describe('Additional Aggregation Stages', function() {
 
 			await collection.insertOne({ _id: 1, name: 'Alice' });
 
-			collection.aggregate([
+			await collection.aggregate([
 				{ $merge: { into: 'target', whenNotMatched: 'discard' } }
 			]);
 
-			const cursor = db.target.find({});
+			const cursor = await db.target.find({});
 			const docs = [];
 			while (cursor.hasNext()) {
 				docs.push(cursor.next());
@@ -396,7 +408,7 @@ describe('Additional Aggregation Stages', function() {
 			await db.products.insertOne({ _id: 'A', name: 'Widget', price: 10 });
 			await db.products.insertOne({ _id: 'B', name: 'Gadget', price: 20 });
 
-			const results = db.orders.aggregate([
+			const results = await db.orders.aggregate([
 				{
 					$lookup: {
 						from: 'products',
@@ -409,7 +421,7 @@ describe('Additional Aggregation Stages', function() {
 
 			expect(results).to.have.lengthOf(3);
 			
-			const order1 = results.find(r => r._id === 1);
+			const order1 = await results.find(r => r._id === 1);
 			expect(order1.product_info).to.have.lengthOf(1);
 			expect(order1.product_info[0].name).to.equal('Widget');
 		});
@@ -418,7 +430,7 @@ describe('Additional Aggregation Stages', function() {
 			await db.orders.insertOne({ _id: 1, product_id: 'C', quantity: 5 });
 			await db.products.insertOne({ _id: 'A', name: 'Widget' });
 
-			const results = db.orders.aggregate([
+			const results = await db.orders.aggregate([
 				{
 					$lookup: {
 						from: 'products',
@@ -436,16 +448,22 @@ describe('Additional Aggregation Stages', function() {
 		it('should throw error for non-existent collection', async function() {
 			await collection.insertOne({ _id: 1 });
 
-			expect(() => collection.aggregate([
-				{
-					$lookup: {
-						from: 'nonexistent',
-						localField: 'field',
-						foreignField: 'field',
-						as: 'result'
+			let error;
+			try {
+				await collection.aggregate([
+					{
+						$lookup: {
+							from: 'nonexistent',
+							localField: 'field',
+							foreignField: 'field',
+							as: 'result'
+						}
 					}
-				}
-			])).to.throw();
+				]);
+			} catch (err) {
+				error = err;
+			}
+			expect(error).to.exist;
 		});
 	});
 
@@ -460,7 +478,7 @@ describe('Additional Aggregation Stages', function() {
 			await db.employees.insertOne({ _id: 3, name: 'Charlie', reports_to: 2 });
 			await db.employees.insertOne({ _id: 4, name: 'Dave', reports_to: 2 });
 
-			const results = db.employees.aggregate([
+			const results = await db.employees.aggregate([
 				{ $match: { _id: 1 } },
 				{
 					$graphLookup: {
@@ -487,7 +505,7 @@ describe('Additional Aggregation Stages', function() {
 			await db.employees.insertOne({ _id: 2, name: 'Bob', reports_to: 1 });
 			await db.employees.insertOne({ _id: 3, name: 'Charlie', reports_to: 2 });
 
-			const results = db.employees.aggregate([
+			const results = await db.employees.aggregate([
 				{ $match: { _id: 1 } },
 				{
 					$graphLookup: {
@@ -510,7 +528,7 @@ describe('Additional Aggregation Stages', function() {
 			await db.employees.insertOne({ _id: 1, name: 'Alice', reports_to: null });
 			await db.employees.insertOne({ _id: 2, name: 'Bob', reports_to: 1 });
 
-			const results = db.employees.aggregate([
+			const results = await db.employees.aggregate([
 				{ $match: { _id: 1 } },
 				{
 					$graphLookup: {
@@ -535,7 +553,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ price: 30, category: 'A' });
 			await collection.insertOne({ price: 40, category: 'B' });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$facet: {
 						byCategory: [
@@ -564,7 +582,7 @@ describe('Additional Aggregation Stages', function() {
 		it('should handle empty pipelines', async function() {
 			await collection.insertOne({ value: 1 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$facet: {
 						all: [],
@@ -585,7 +603,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ level: 5, data: 'private' });
 			await collection.insertOne({ level: 3, data: 'protected' });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$redact: {
 						$cond: {
@@ -607,7 +625,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ public: true, data: 'visible' });
 			await collection.insertOne({ public: false, data: 'hidden' });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$redact: {
 						$cond: {
@@ -630,7 +648,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ name: 'B', location: [3, 4] });
 			await collection.insertOne({ name: 'C', location: [1, 1] });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$geoNear: {
 						near: [0, 0],
@@ -651,7 +669,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ name: 'A', location: [0, 0] });
 			await collection.insertOne({ name: 'B', location: [10, 10] });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$geoNear: {
 						near: [0, 0],
@@ -672,7 +690,7 @@ describe('Additional Aggregation Stages', function() {
 			// LA coordinates (roughly 3,940 km away)
 			await collection.insertOne({ name: 'LA', location: [-118.2437, 34.0522] });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$geoNear: {
 						near: [-74.006, 40.7128],
@@ -694,7 +712,7 @@ describe('Additional Aggregation Stages', function() {
 				await collection.insertOne({ name: `Point${i}`, location: [i, i] });
 			}
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$geoNear: {
 						near: [0, 0],
@@ -716,7 +734,7 @@ describe('Additional Aggregation Stages', function() {
 			await collection.insertOne({ category: 'A', price: 30 });
 			await collection.insertOne({ category: 'C', price: 40 });
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{ $match: { price: { $gte: 15 } } },
 				{ $sortByCount: '$category' },
 				{ $limit: 2 }
@@ -730,7 +748,7 @@ describe('Additional Aggregation Stages', function() {
 				await collection.insertOne({ value: i, category: i % 3 === 0 ? 'A' : 'B' });
 			}
 
-			const results = collection.aggregate([
+			const results = await collection.aggregate([
 				{
 					$facet: {
 						categoryCounts: [

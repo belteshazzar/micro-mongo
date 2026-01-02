@@ -220,7 +220,7 @@ describe('$ Positional Operator', function() {
 				{ $set: { 'scores.$': 100 } }
 			);
 			
-			const docs = await db[collectionName].find({}).toArray();
+			const docs = await (await db[collectionName].find({})).toArray();
 			expect(docs[0].scores).to.deep.equal([75, 100, 92]); // 88 -> 100
 			expect(docs[1].scores).to.deep.equal([65, 100, 82]); // 95 -> 100
 			expect(docs[2].scores).to.deep.equal([100, 78, 90]); // 85 -> 100

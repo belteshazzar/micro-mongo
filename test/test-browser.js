@@ -85,7 +85,7 @@ describe("Browser Tests", function() {
 			await db.users.insertOne({ name: 'Bob', age: 25 });
 			
 			// Find
-			const users = await db.users.find().toArray();
+			const users = await (await db.users.find()).toArray();
 			
 			// Update
 			await db.users.updateOne({ name: 'Bob' }, { $set: { age: 26 } });
@@ -163,20 +163,20 @@ describe("Browser Tests", function() {
 			]);
 			
 			// Test $gt
-			const expensive = await db.products.find({ price: { $gt: 100 } }).toArray();
+			const expensive = await (await db.products.find({ price: { $gt: 100 } })).toArray();
 			
 			// Test $in
-			const cheap = await db.products.find({ 
+			const cheap = await (await db.products.find({ 
 				price: { $in: [25, 75] } 
-			}).toArray();
+			})).toArray();
 			
 			// Test $and
-			const midRange = await db.products.find({ 
+			const midRange = await (await db.products.find({ 
 				$and: [
 					{ price: { $gte: 50 } },
 					{ price: { $lte: 200 } }
 				]
-			}).toArray();
+			})).toArray();
 			
 			await client.close();
 			
@@ -249,7 +249,7 @@ describe("Browser Tests", function() {
 			]);
 			
 			// Query with index
-			const results = await db.indexed_collection.find({ age: { $gt: 28 } }).toArray();
+			const results = await (await db.indexed_collection.find({ age: { $gt: 28 } })).toArray();
 			
 			// Get indexes
 			const indexes = db.indexed_collection.getIndexes();
