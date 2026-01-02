@@ -32,8 +32,25 @@ export class TextCollectionIndex extends Index {
 		if (this.isOpen) {
 			return;
 		}
-		await this.textIndex.open();
-		this.isOpen = true;
+		try {
+			await this.textIndex.open();
+			this.isOpen = true;
+		} catch (error) {
+			// Handle missing or corrupted files
+			if (error.code === 'ENOENT' ||
+					(error.message && (error.message.includes('Failed to read metadata') ||
+					error.message.includes('missing required fields') ||
+					error.message.includes('Unknown type byte') ||
+					error.message.includes('Invalid') ||
+					error.message.includes('file too small')))) {
+				// Create fresh TextIndex for new/corrupted files
+				this.textIndex = new TextIndex({ baseFilename: this.storage });
+				await this.textIndex.open();
+				this.isOpen = true;
+			} else {
+				throw error;
+			}
+		}
 	}
 
 	/**

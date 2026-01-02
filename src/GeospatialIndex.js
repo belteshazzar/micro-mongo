@@ -24,8 +24,24 @@ export class GeospatialIndex extends Index {
 		if (this.isOpen) {
 			return;
 		}
-		await this.rtree.open();
-		this.isOpen = true;
+		try {
+			await this.rtree.open();
+			this.isOpen = true;
+		} catch (error) {
+			// Handle missing or corrupted files
+			if (error.code === 'ENOENT' ||
+					(error.message && (error.message.includes('Invalid R-tree') ||
+					error.message.includes('file too small') ||
+					error.message.includes('Failed to read metadata') ||
+					error.message.includes('Unknown type byte')))) {
+				// Create fresh RTree for new/corrupted files
+				this.rtree = new RTree(this.storage, 9);
+				await this.rtree.open();
+				this.isOpen = true;
+			} else {
+				throw error;
+			}
+		}
 	}
 
 	/**

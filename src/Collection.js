@@ -35,25 +35,34 @@ export class Collection extends EventEmitter {
 
 		// Indexes are loaded async via createIndex/openIndexes
 		// No synchronous index loading in OPFS-only mode
-		this._restoreIndexesFromStorage();
+		this._restoreIndexesFromStorage().catch(err => {
+			// Surface any restore errors without breaking construction
+			console.error('Failed to restore indexes for collection', name, err);
+		});
 	}
 
-	_restoreIndexesFromStorage() {
+	async _restoreIndexesFromStorage() {
+		if (this.storage && typeof this.storage.ready === 'function') {
+			await this.storage.ready();
+		}
 		if (!this.storage || !this.storage.indexes || typeof this.storage.indexes[Symbol.iterator] !== 'function') {
 			return;
 		}
 		for (const [indexName, indexStore] of this.storage.indexes) {
 			const meta = indexStore && typeof indexStore.getAllMeta === 'function' ? indexStore.getAllMeta() : null;
-			if (!meta || !meta.type || !meta.baseFilename || !meta.keys) continue;
+			if (!meta || !meta.type || !meta.keys) continue;
 			const name = meta.name || indexName;
+			const storagePath = meta.storage || meta.storageFile || meta.baseFilename;
 			let index;
 			if (meta.type === 'text') {
-				index = new TextCollectionIndex(name, meta.keys, meta.baseFilename, meta.options || {});
+				const path = storagePath || await this._getIndexPath(name, 'text');
+				index = new TextCollectionIndex(name, meta.keys, path, meta.options || {});
 			} else if (meta.type === 'geospatial') {
-				index = new GeospatialIndex(name, meta.keys, `${meta.baseFilename}.rtree.bjson`, meta.options || {});
+				const path = storagePath || await this._getIndexPath(name, 'geospatial');
+				index = new GeospatialIndex(name, meta.keys, path, meta.options || {});
 			} else {
-				const storageFile = meta.storage || `${meta.baseFilename}.bjson`;
-				index = new RegularCollectionIndex(name, meta.keys, storageFile, meta.options || {});
+				const path = storagePath || await this._getIndexPath(name, 'regular');
+				index = new RegularCollectionIndex(name, meta.keys, path, meta.options || {});
 			}
 			this.indexes.set(name, index);
 		}
@@ -113,13 +122,18 @@ export class Collection extends EventEmitter {
 		return false;
 	}
 
-	/**
-	 * Build a safe base filename for OPFS-backed index files
-	 */
-	_getIndexBaseFilename(indexName) {
+	async _getIndexPath(indexName, type) {
+		if (this.storage && typeof this.storage.getIndexFilePath === 'function') {
+			const maybePath = this.storage.getIndexFilePath(this.name, indexName, type);
+			return typeof maybePath?.then === 'function' ? await maybePath : maybePath;
+		}
+		// Fallback sanitize for non-OPFS storage
 		const sanitize = value => String(value).replace(/[^a-zA-Z0-9_-]/g, '_');
 		const dbName = this.db.dbName || this.db.name || 'db';
-		return `${sanitize(dbName)}-${sanitize(this.name)}-${sanitize(indexName)}`;
+		const baseFilename = `${sanitize(dbName)}-${sanitize(this.name)}-${sanitize(indexName)}`;
+		if (type === 'text') return baseFilename;
+		if (type === 'geospatial') return `${baseFilename}.rtree.bjson`;
+		return `${baseFilename}.bjson`;
 	}
 
 	/**
@@ -127,22 +141,21 @@ export class Collection extends EventEmitter {
 	 */
 	async buildIndex(indexName, keys, options = {}) {
 		let index;
-		const baseFilename = this._getIndexBaseFilename(indexName);
 		let storageFile;
 		let type;
 		
 		// Create appropriate index type
 		if (this.isTextIndex(keys)) {
 			type = 'text';
-			storageFile = baseFilename; // TextIndex uses base filename for its multiple files
+			storageFile = await this._getIndexPath(indexName, type);
 			index = new TextCollectionIndex(indexName, keys, storageFile, options);
 		} else if (this.isGeospatialIndex(keys)) {
 			type = 'geospatial';
-			storageFile = `${baseFilename}.rtree.bjson`;
+			storageFile = await this._getIndexPath(indexName, type);
 			index = new GeospatialIndex(indexName, keys, storageFile, options);
 		} else {
 			type = 'regular';
-			storageFile = `${baseFilename}.bjson`;
+			storageFile = await this._getIndexPath(indexName, type);
 			index = new RegularCollectionIndex(indexName, keys, storageFile, options);
 		}
 
@@ -152,7 +165,6 @@ export class Collection extends EventEmitter {
 				name: indexName,
 				keys,
 				type,
-				baseFilename,
 				storage: storageFile,
 				options
 			});

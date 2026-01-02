@@ -1,31 +1,42 @@
-import { DocumentStore } from './DocumentStore.js';
+import { PersistentDocumentStore } from './PersistentDocumentStore.js';
 import { IndexStore } from './IndexStore.js';
 
 /**
  * CollectionStore - Unified storage for collection documents and indexes
  * 
  * Provides:
- * - Document storage (via DocumentStore)
+ * - Document storage (via PersistentDocumentStore)
  * - Index data storage (plain objects for each index)
  * - Unified interface for Collection to manage all its data
  */
 export class CollectionStore {
-	constructor() {
+	constructor(options = {}) {
+		if (!options.documentPath) {
+			throw new Error('CollectionStore requires a documentPath for PersistentDocumentStore');
+		}
 
-		// Document storage - uses DocumentStore for document CRUD operations
-		this.documents = new DocumentStore();
+		this.documents = new PersistentDocumentStore(options.documentPath);
 		
 		// Index storage - plain object to store index data
 		// Structure: { indexName: indexDataObject }
 		this.indexes = new Map();
 	}
 
+	async ready() {
+		if (typeof this.documents.ready === 'function') {
+			await this.documents.ready();
+		}
+	}
+
 	/**
 	 * Clear all documents and indexes
 	 */
 	clear() {
-		this.documents.clear();
-    this.indexes.clear();
+		const maybe = this.documents.clear && this.documents.clear();
+		if (maybe && typeof maybe.then === 'function') {
+			return maybe.then(() => this.indexes.clear());
+		}
+		this.indexes.clear();
 	}
 
   /**
@@ -41,7 +52,10 @@ export class CollectionStore {
 	 * @returns {Array} Array of all documents
 	 */
 	getAllDocuments() {
-		return Array.from(this.documents.data.values());
+		if (typeof this.documents.getAllDocuments === 'function') {
+			return this.documents.getAllDocuments();
+		}
+		return this.documents && this.documents.data ? Array.from(this.documents.data.values()) : [];
 	}
 
 	/**

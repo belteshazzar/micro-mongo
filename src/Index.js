@@ -4,6 +4,7 @@
  */
 export class Index {
 	constructor(name, keys, storage, options = {}) {
+    // TODO: remove and put into subclasses
 		this.name = name;
 		this.keys = keys;
 		this.storage = storage;
@@ -56,25 +57,11 @@ export class Index {
 	 * Get index specification (for getIndexes())
 	 */
 	getSpec() {
+    // TODO: remove and put into subclasses
 		return {
 			name: this.name,
 			key: this.keys
 		};
 	}
 
-	/**
-	 * Serialize index state for storage
-	 * @returns {Object} Serializable index state
-	 */
-	serialize() {
-		throw new Error('serialize() must be implemented by subclass');
-	}
-
-	/**
-	 * Restore index state from serialized data
-	 * @param {Object} data - Serialized index state
-	 */
-	deserialize(data) {
-		throw new Error('deserialize() must be implemented by subclass');
-	}
 }

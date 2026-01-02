@@ -1,5 +1,5 @@
 import { Collection } from './Collection.js';
-import { StorageEngine } from './StorageEngine.js';
+import { OPFSStorageEngine } from './OPFSStorageEngine.js';
 import { ObjectId } from 'bjson';
 import { ChangeStream } from './ChangeStream.js';
 import { NotImplementedError } from './errors.js';
@@ -12,11 +12,17 @@ export class DB {
 		this.options = options || {};
 		this.dbName = this.options.dbName || 'default';
 			
-		// StorageEngine
-		this.storageEngine = this.options.storageEngine || new StorageEngine();
-
-		// Load existing collections from storage engine
-		this._loadExistingCollections();
+		// Always use OPFS storage; ignore user-supplied storage engines
+		this.storageEngine = new OPFSStorageEngine(this.dbName, this.options.rootPath || '/micro-mongo', { rootPath: this.options.rootPath });
+		this._initPromise = (async () => {
+			if (typeof this.storageEngine.initialize === 'function') {
+				await this.storageEngine.initialize();
+			}
+			if (typeof this.storageEngine.loadCollectionsFromDisk === 'function') {
+				await this.storageEngine.loadCollectionsFromDisk();
+			}
+			await this._loadExistingCollections();
+		})();
 
 		// Return a Proxy to enable dynamic collection creation
 		return new Proxy(this, {
@@ -55,6 +61,12 @@ export class DB {
 		else console.log(msg);
 	}
 
+	async _ready() {
+		if (this._initPromise) {
+			await this._initPromise;
+		}
+	}
+
 	/**
 	 * ID generator function
 	 */
@@ -67,10 +79,13 @@ export class DB {
 	 * Load existing collections from storage engine
 	 * @private
 	 */
-	_loadExistingCollections() {
+	async _loadExistingCollections() {
 		// Iterate through all collection stores in the storage engine
 		for (const collectionName of this.storageEngine.collectionStoreKeys()) {
 			const collectionStore = this.storageEngine.getCollectionStore(collectionName);
+			if (collectionStore && typeof collectionStore.ready === 'function') {
+				await collectionStore.ready();
+			}
 			// Create Collection instance for each existing collection
 			this[collectionName] = new Collection(
 				this,
@@ -102,10 +117,13 @@ export class DB {
 
 	createCollection(name) {
 		if (!name) return;
+		const store = this.storageEngine.createCollectionStore(name);
+		// Don't await ready here to avoid Proxy recursion
+		// Collection initialization will handle readiness
 		this[name] = new Collection(
 			this,
       name,
-			this.storageEngine.createCollectionStore(name),
+			store,
 			this._id.bind(this)
 		);
 	}
