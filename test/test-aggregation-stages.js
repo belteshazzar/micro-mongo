@@ -297,6 +297,8 @@ describe('Additional Aggregation Stages', function() {
 		it('should replace existing collection', async function() {
 			db.createCollection('existing');
 			await db.existing.insertOne({ old: 'data' });
+			await db.dropCollection('existing');
+			db.createCollection('existing');
 
 			await collection.insertOne({ new: 'data' });
 

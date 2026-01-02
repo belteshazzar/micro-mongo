@@ -407,7 +407,7 @@ describe("DB", function() {
 
 		it('should testDrop', async function() {
 			if ((await db[collectionName].count())!=6) throw "db should have 6 docs";
-			db[collectionName].drop();
+			await db[collectionName].drop();
 			if ((await db[collectionName].count())!=0) throw "db should have no docs";
 		});
 

@@ -43,11 +43,60 @@ export class TextCollectionIndex extends Index {
 					error.message.includes('Unknown type byte') ||
 					error.message.includes('Invalid') ||
 					error.message.includes('file too small')))) {
+				// Delete corrupted files and ensure directory exists
+				await this._deleteIndexFiles();
+				await this._ensureDirectoryForFile(this.storage + '-terms.bjson');
+				
 				// Create fresh TextIndex for new/corrupted files
 				this.textIndex = new TextIndex({ baseFilename: this.storage });
 				await this.textIndex.open();
 				this.isOpen = true;
 			} else {
+				throw error;
+			}
+		}
+	}
+	
+	async _deleteIndexFiles() {
+		// TextIndex creates multiple files: -terms.bjson, -documents.bjson, -lengths.bjson
+		const suffixes = ['-terms.bjson', '-documents.bjson', '-lengths.bjson'];
+		for (const suffix of suffixes) {
+			await this._deleteFile(this.storage + suffix);
+		}
+	}
+
+	async _deleteFile(filePath) {
+		if (!filePath) return;
+		try {
+			const pathParts = filePath.split('/').filter(Boolean);
+			const filename = pathParts.pop();
+			
+			let dir = await globalThis.navigator.storage.getDirectory();
+			for (const part of pathParts) {
+				dir = await dir.getDirectoryHandle(part, { create: false });
+			}
+			await dir.removeEntry(filename);
+		} catch (error) {
+			// Ignore errors - file might not exist
+		}
+	}
+
+	async _ensureDirectoryForFile(filePath) {
+		if (!filePath) return;
+		const pathParts = filePath.split('/').filter(Boolean);
+		// Remove filename, keep only directory parts
+		pathParts.pop();
+		
+		if (pathParts.length === 0) return;
+		
+		try {
+			let dir = await globalThis.navigator.storage.getDirectory();
+			for (const part of pathParts) {
+				dir = await dir.getDirectoryHandle(part, { create: true });
+			}
+		} catch (error) {
+			// Ignore EEXIST - directory already exists
+			if (error.code !== 'EEXIST') {
 				throw error;
 			}
 		}

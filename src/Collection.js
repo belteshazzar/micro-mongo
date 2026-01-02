@@ -1493,7 +1493,7 @@ return results;
 		const doc = await this.findOne(query);
 		if (doc) {
 			await this.updateIndexesOnDelete(doc);
-			this.storage.remove(doc._id.toString());
+			await this.storage.remove(doc._id.toString());
 			this.emit('delete', { _id: doc._id });
 			return { deletedCount: 1 };
 		} else {
@@ -1513,7 +1513,7 @@ return results;
 		const deletedCount = ids.length;
 		for (let i = 0; i < ids.length; i++) {
 			await this.updateIndexesOnDelete(docs[i]);
-			this.storage.remove(ids[i].toString());
+			await this.storage.remove(ids[i].toString());
 			this.emit('delete', { _id: ids[i] });
 		}
 		return { deletedCount: deletedCount };
@@ -1538,7 +1538,12 @@ return results;
 				await index.clear();
 			}
 		}
-		this.storage.clear();
+		try {
+			await this.storage.clear();
+		} catch (error) {
+			// Swallow storage errors during drop to keep cleanup best-effort
+			console.warn('Failed to clear storage during drop:', error);
+		}
 	}
 
 	dropIndex(indexName) {
@@ -1700,7 +1705,7 @@ return results;
 		if (options && options.sort) c = c.sort(options.sort);
 		if (!c.hasNext()) return null;
 		const doc = c.next();
-		this.storage.remove(doc._id.toString());
+		await this.storage.remove(doc._id.toString());
 		if (options && options.projection) return applyProjection(options.projection, doc);
 		else return doc;
 	}
@@ -1711,7 +1716,7 @@ return results;
 		if (!c.hasNext()) return null;
 		const doc = c.next();
 		replacement._id = doc._id;
-		this.storage.set(doc._id.toString(), replacement);
+		await this.storage.set(doc._id.toString(), replacement);
 		if (options && options.returnNewDocument) {
 			if (options && options.projection) return applyProjection(options.projection, replacement);
 			else return replacement;
@@ -1734,7 +1739,7 @@ return results;
 		const userArrayFilters = options && options.arrayFilters;
 		
 		applyUpdates(update, clone, false, positionalMatchInfo, userArrayFilters);
-		this.storage.set(doc._id.toString(), clone);
+		await this.storage.set(doc._id.toString(), clone);
 		if (options && options.returnNewDocument) {
 			if (options && options.projection) return applyProjection(options.projection, clone);
 			else return clone;
@@ -1773,7 +1778,7 @@ return results;
 
 	async insertOne(doc) {
 		if (doc._id == undefined) doc._id = this.idGenerator();
-		this.storage.set(doc._id.toString(), doc);
+		await this.storage.set(doc._id.toString(), doc);
 		await this.updateIndexesOnInsert(doc);
 		this.emit('insert', doc);
 		return { insertedId: doc._id };
@@ -1802,7 +1807,7 @@ return results;
 			if (options && options.upsert) {
 				const newDoc = replacement;
 				newDoc._id = this.idGenerator();
-				this.storage.set(newDoc._id.toString(), newDoc);
+				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 				this.emit('insert', newDoc);
 				result.upsertedId = newDoc._id;
@@ -1812,7 +1817,7 @@ return results;
 			const doc = c.next();
 			await this.updateIndexesOnDelete(doc);
 			replacement._id = doc._id;
-			this.storage.set(doc._id.toString(), replacement);
+			await this.storage.set(doc._id.toString(), replacement);
 			await this.updateIndexesOnInsert(replacement);
 			this.emit('replace', replacement);
 		}
@@ -1825,12 +1830,12 @@ return results;
 		if (options === true || (options && options.justOne)) {
 			const doc = c.next();
 			await this.updateIndexesOnDelete(doc);
-			this.storage.remove(doc._id.toString());
+			await this.storage.remove(doc._id.toString());
 		} else {
 			while (c.hasNext()) {
 				const doc = c.next();
 				await this.updateIndexesOnDelete(doc);
-				this.storage.remove(doc._id.toString());
+				await this.storage.remove(doc._id.toString());
 			}
 		}
 	}
@@ -1856,7 +1861,7 @@ return results;
 					
 					await this.updateIndexesOnDelete(doc);
 					applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-					this.storage.set(doc._id.toString(), doc);
+					await this.storage.set(doc._id.toString(), doc);
 					await this.updateIndexesOnInsert(doc);
 				}
 			} else {
@@ -1869,13 +1874,13 @@ return results;
 				
 				await this.updateIndexesOnDelete(doc);
 				applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-				this.storage.set(doc._id.toString(), doc);
+				await this.storage.set(doc._id.toString(), doc);
 				await this.updateIndexesOnInsert(doc);
 			}
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-				this.storage.set(newDoc._id.toString(), newDoc);
+				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 			}
 		}
@@ -1894,14 +1899,14 @@ return results;
 			
 			await this.updateIndexesOnDelete(doc);
 			applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-			this.storage.set(doc._id.toString(), doc);
+			await this.storage.set(doc._id.toString(), doc);
 			await this.updateIndexesOnInsert(doc);
 			const updateDescription = this._getUpdateDescription(originalDoc, doc);
 			this.emit('update', doc, updateDescription);
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-				this.storage.set(newDoc._id.toString(), newDoc);
+				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 				this.emit('insert', newDoc);
 			}
@@ -1922,7 +1927,7 @@ return results;
 				
 				await this.updateIndexesOnDelete(doc);
 				applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-				this.storage.set(doc._id.toString(), doc);
+				await this.storage.set(doc._id.toString(), doc);
 				await this.updateIndexesOnInsert(doc);
 				const updateDescription = this._getUpdateDescription(originalDoc, doc);
 				this.emit('update', doc, updateDescription);
@@ -1930,7 +1935,7 @@ return results;
 		} else {
 			if (options && options.upsert) {
 				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-				this.storage.set(newDoc._id.toString(), newDoc);
+				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 				this.emit('insert', newDoc);
 			}
