@@ -687,8 +687,8 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 /**
  * Create a new document from query and update operators for upsert
  */
-export function createDocFromUpdate(query, updates, idGenerator) {
-	var newDoc = { _id: idGenerator() };
+export function createDocFromUpdate(query, updates, id) {
+	var newDoc = { _id: id };
 	var onlyFields = true;
 	var updateKeys = Object.keys(updates);
 	for (var i = 0; i < updateKeys.length; i++) {

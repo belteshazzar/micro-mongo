@@ -18,27 +18,74 @@ import {
 	IndexNotFoundError,
 	ErrorCodes 
 } from './errors.js';
+import { ObjectId } from 'bjson';
+import { BPlusTree } from 'bjson/bplustree';
 
 /**
  * Collection class
  */
 export class Collection extends EventEmitter {
-	constructor(db, name, storage, idGenerator) {
+	constructor(db, name, options = {}) {
 		super();
 		this.db = db;
 		this.name = name;
-		this.storage = storage;
-		this.idGenerator = idGenerator;
+    this.path = `${this.db.baseFolder}/${this.db.dbName}/${this.name}`
+    this.documentsPath = `${this.path}/documents.bjson`;
+    this.order = options.bPlusTreeOrder || 50; // B+ tree order
+    this.documents = null; // Initialized in async _initialize()
 		this.indexes = new Map(); // Index storage - map of index name to index structure
-		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
-		this.isCollection = true; // TODO used by dropDatabase, ugly
+    this.initialized = false;
 
-		// Indexes are loaded async via createIndex/openIndexes
-		// No synchronous index loading in OPFS-only mode
-		this._restoreIndexesFromStorage().catch(err => {
-			// Surface any restore errors without breaking construction
-			console.error('Failed to restore indexes for collection', name, err);
-		});
+		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
+		// this.isCollection = true; // TODO used by dropDatabase, ugly
+
+    console.warn(`Collection created: ${this.path}`);
+	}
+
+  async _initialize() {
+    if (this.initialized) return;
+
+    console.warn(`Initializing collection ${this.path}`);
+		if (!globalThis.navigator || !globalThis.navigator.storage || typeof globalThis.navigator.storage.getDirectory !== 'function') {
+			throw new Error('OPFS not available: navigator.storage.getDirectory is missing');
+		}
+
+		// Ensure directory exists before opening file
+		await this._ensureDirectoryForFile(this.documentsPath);
+
+    this.documents = new BPlusTree(this.documentsPath, this.order);
+    await this.documents.open();
+
+    // this.documents = new PersistentDocumentStore(options.documentPath);
+
+    // // Indexes are loaded async via createIndex/openIndexes
+		// this._restoreIndexesFromStorage().catch(err => {
+		// 	// Surface any restore errors without breaking construction
+		// 	console.error('Failed to restore indexes for collection', name, err);
+		// });
+
+    this.initialized = true;
+  }
+
+  async _ensureDirectoryForFile(filePath) {
+		if (!filePath) return;
+		const pathParts = filePath.split('/').filter(Boolean);
+		// Remove filename, keep only directory parts
+		pathParts.pop();
+
+		if (pathParts.length === 0) return;
+
+		try {
+			let dir = await globalThis.navigator.storage.getDirectory();
+			for (const part of pathParts) {
+				dir = await dir.getDirectoryHandle(part, { create: true });
+			}
+		} catch (error) {
+			// Ignore EEXIST - directory already exists
+			if (error.code !== 'EEXIST') {
+				throw error;
+			}
+		}
 	}
 
 	async _restoreIndexesFromStorage() {
@@ -68,11 +115,6 @@ export class Collection extends EventEmitter {
 		}
 	}
 
-	async _ensureIndexOpen(index) {
-		if (index && typeof index.open === 'function' && !index.isOpen) {
-			await index.open();
-		}
-	}
 
 	/**
 	 * Close all indexes
@@ -1428,7 +1470,9 @@ results = unwound;
 }
 
 return results;
-}	bulkWrite() { throw new NotImplementedError('bulkWrite', { collection: this.name }); }
+}	
+
+  async bulkWrite() { throw new NotImplementedError('bulkWrite', { collection: this.name }); }
 
 	async count() {
 		return await this.storage.size();
@@ -1577,11 +1621,12 @@ return results;
 		
 		// For now, always do full scan since index queries are async
 		// In the future, use planQueryAsync for index-based queries
-		const allDocs = await this.storage.getAllDocuments();
-		for (const doc of allDocs) {
-			if (!seen[doc._id] && matches(doc, normalizedQuery)) {
-				seen[doc._id] = true;
-				documents.push(doc);
+		const allDocs = await this.documents.toArray();
+
+    for (const doc of allDocs) {
+			if (!seen[doc.value._id] && matches(doc.value, normalizedQuery)) {
+				seen[doc.value._id] = true;
+				documents.push(doc.value);
 			}
 		}
 
@@ -1777,15 +1822,19 @@ return results;
 	}
 
 	async insertOne(doc) {
-		if (doc._id == undefined) doc._id = this.idGenerator();
-		await this.storage.set(doc._id.toString(), doc);
+    if (!this.initialized) await this._initialize();
+
+    if (doc._id == undefined) doc._id = new ObjectId();
+		await this.documents.add(doc._id.toString(), doc);
 		await this.updateIndexesOnInsert(doc);
 		this.emit('insert', doc);
 		return { insertedId: doc._id };
 	}
 
 	async insertMany(docs) {
-		const insertedIds = [];
+    if (!this.initialized) await this._initialize();
+
+    const insertedIds = [];
 		for (let i = 0; i < docs.length; i++) {
 			const result = await this.insertOne(docs[i]);
 			insertedIds.push(result.insertedId);
@@ -1806,7 +1855,7 @@ return results;
 			result.modifiedCount = 0;
 			if (options && options.upsert) {
 				const newDoc = replacement;
-				newDoc._id = this.idGenerator();
+				newDoc._id = new ObjectId();
 				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 				this.emit('insert', newDoc);
@@ -1879,7 +1928,7 @@ return results;
 			}
 		} else {
 			if (options && options.upsert) {
-				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
+				const newDoc = createDocFromUpdate(query, updates, new ObjectId());
 				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 			}
@@ -1905,7 +1954,7 @@ return results;
 			this.emit('update', doc, updateDescription);
 		} else {
 			if (options && options.upsert) {
-				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
+				const newDoc = createDocFromUpdate(query, updates, new ObjectId());
 				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 				this.emit('insert', newDoc);
@@ -1934,7 +1983,7 @@ return results;
 			}
 		} else {
 			if (options && options.upsert) {
-				const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
+				const newDoc = createDocFromUpdate(query, updates, new ObjectId());
 				await this.storage.set(newDoc._id.toString(), newDoc);
 				await this.updateIndexesOnInsert(newDoc);
 				this.emit('insert', newDoc);

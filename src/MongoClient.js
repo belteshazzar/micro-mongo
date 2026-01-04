@@ -20,12 +20,13 @@ export class MongoClient extends EventEmitter {
 
   async connect() {
     if (this._isConnected) return this;
-    
     this._isConnected = true;
     this.emit('open', this);
     return this;
   }
 
+  // Note that db on real MongoClient is synchronous
+  // This is async as it loads from the file system
   db(name, opts = {}) {
     // Use default from URI if no name provided
     const dbName = name || this._defaultDb;
@@ -43,6 +44,51 @@ export class MongoClient extends EventEmitter {
     this._databases.set(dbName, database);
     return database;
   }
+
+  // async _loadExistingDatabases() {
+  //   const discoveredNames = await this._discoverDatabases();
+  //   console.log('Discovered databases:', discoveredNames);
+  //   const names = new Set(discoveredNames);
+
+  //   // Ensure default DB from URI is loaded when provided
+  //   if (this._defaultDb) {
+  //     names.add(this._defaultDb);
+  //   }
+
+  //   for (const dbName of names) {
+  //     if (this._databases.has(dbName)) continue;
+  //     const database = new DB({ ...this.options, dbName });
+  //     this._databases.set(dbName, database);
+  //   }
+  // }
+
+  // async _discoverDatabases() {
+  //   const dbNames = new Set();
+  //   const baseFolder = this.options.rootPath || '/micro-mongo';
+
+  //   const hasOPFS = !!(globalThis.navigator && globalThis.navigator.storage && typeof globalThis.navigator.storage.getDirectory === 'function');
+  //   if (!hasOPFS) {
+  //     return Array.from(dbNames);
+  //   }
+
+  //   try {
+  //     let dir = await globalThis.navigator.storage.getDirectory();
+  //     const parts = baseFolder.split('/').filter(Boolean);
+  //     for (const part of parts) {
+  //       dir = await dir.getDirectoryHandle(part, { create: true });
+  //     }
+
+  //     for await (const [name, handle] of dir.entries()) {
+  //       if (handle && handle.kind === 'directory') {
+  //         dbNames.add(name);
+  //       }
+  //     }
+  //   } catch (err) {
+  //     console.warn('Failed to discover databases', err);
+  //   }
+
+  //   return Array.from(dbNames);
+  // }
 
   async close(force = false) {
     if (!this._isConnected) return;

@@ -12,6 +12,7 @@ export class OPFSStorageEngine {
 		this.baseFolder = this.rootPath || baseFolder;
 		this.dbFolder = `${this.baseFolder}/${dbName}`;
 		this.initialized = false;
+    console.log(`OPFSStorageEngine created for DB "${this.dbName}" at base folder "${this.baseFolder}"`);
 	}
 
 	setRootPath(rootPath) {
@@ -22,13 +23,9 @@ export class OPFSStorageEngine {
 		}
 	}
 
-	collectionsCount() {
-		return this.collections.size;
-	}
-
-	collectionStoreKeys() {
-		return this.collections.keys();
-	}
+	// collectionStoreKeys() {
+	// 	return this.collections.keys();
+	// }
 
 	getCollectionStore(collectionName) {
 		return this.collections.get(collectionName);
@@ -45,8 +42,22 @@ export class OPFSStorageEngine {
 		}
 
 		await this._ensureDirectory(this.dbFolder);
+
+    const collectionsDir = await this._getDirectoryHandle(`${this.dbFolder}/collections`, { create: true });
+		if (!collectionsDir || typeof collectionsDir.entries !== 'function') return;
+		for await (const [name, handle] of collectionsDir.entries()) {
+			if (handle && handle.kind === 'directory') {
+				// Always hydrate the store, even if it was created earlier
+				const store = this.createCollectionStore(name);
+				if (typeof store.ready === 'function') {
+					await store.ready();
+				}
+				await this._loadIndexesForCollection(name, store);
+			}
+		}
+
 		this.initialized = true;
-	}
+  }
 
 	getCollectionDir(collectionName) {
 		return `${this.dbFolder}/collections/${collectionName}`;
@@ -141,22 +152,6 @@ export class OPFSStorageEngine {
 	removeCollectionStore(collectionName) {
 		this.collections.delete(collectionName);
 		// TODO: In a full implementation, we would also delete the files from OPFS
-	}
-
-	async loadCollectionsFromDisk() {
-		await this.initialize();
-		const collectionsDir = await this._getDirectoryHandle(`${this.dbFolder}/collections`, { create: true });
-		if (!collectionsDir || typeof collectionsDir.entries !== 'function') return;
-		for await (const [name, handle] of collectionsDir.entries()) {
-			if (handle && handle.kind === 'directory') {
-				// Always hydrate the store, even if it was created earlier
-				const store = this.createCollectionStore(name);
-				if (typeof store.ready === 'function') {
-					await store.ready();
-				}
-				await this._loadIndexesForCollection(name, store);
-			}
-		}
 	}
 
 	_parseKeysFromIndexName(indexName) {

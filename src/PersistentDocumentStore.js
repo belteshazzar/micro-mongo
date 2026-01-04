@@ -32,6 +32,7 @@ export class PersistentDocumentStore {
 			await this.tree.open();
 			this.isOpen = true;
 		} catch (error) {
+      console.error(`Error opening BPlusTree at "${this.filePath}":`, error);
 			// Handle empty/new files or missing directories
 			if (error.code === 'ENOENT' ||
 					(error.message && (error.message.includes('Failed to read metadata') ||
@@ -51,6 +52,8 @@ export class PersistentDocumentStore {
 				throw error;
 			}
 		}
+
+    console.error(`PersistentDocumentStore ready for file "${this.filePath}"`);
 	}
 
 	async _deleteFile(filePath) {
@@ -69,26 +72,7 @@ export class PersistentDocumentStore {
 		}
 	}
 
-	async _ensureDirectoryForFile(filePath) {
-		if (!filePath) return;
-		const pathParts = filePath.split('/').filter(Boolean);
-		// Remove filename, keep only directory parts
-		pathParts.pop();
 
-		if (pathParts.length === 0) return;
-
-		try {
-			let dir = await globalThis.navigator.storage.getDirectory();
-			for (const part of pathParts) {
-				dir = await dir.getDirectoryHandle(part, { create: true });
-			}
-		} catch (error) {
-			// Ignore EEXIST - directory already exists
-			if (error.code !== 'EEXIST') {
-				throw error;
-			}
-		}
-	}
 
 	async ready() {
 		if (this.readyPromise) {
