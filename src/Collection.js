@@ -1570,6 +1570,21 @@ export class Collection extends EventEmitter {
   }
 
   async drop() {
+    if (!this._initialized) await this._initialize();
+
+    // Close all indexes first
+    for (const [indexName, index] of this.indexes) {
+      if (index && typeof index.close === 'function') {
+        await index.close();
+      }
+    }
+
+    // Close the documents B+ tree
+    if (this.documents && typeof this.documents.close === 'function') {
+      await this.documents.close();
+    }
+
+    // Remove the entire collection directory recursively
     const pathParts = this.path.split('/').filter(Boolean);
     const filename = pathParts.pop();
 
@@ -1577,12 +1592,11 @@ export class Collection extends EventEmitter {
     for (const part of pathParts) {
       dir = await dir.getDirectoryHandle(part, { create: false });
     }
-    await dir.removeEntry(filename);
+    await dir.removeEntry(filename, { recursive: true });
 
-    this.documents.clear();
+    // Clear state but don't set to null (collection object is still alive)
     this.documents = null;
     this.indexes.clear();
-    this.indexes = null;
     this._initialized = false;
 
     this.emit('drop', { collection: this.name });

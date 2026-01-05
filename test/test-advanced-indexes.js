@@ -27,6 +27,14 @@ describe('Advanced Index Support', function() {
 	beforeEach(async function() {
 		client = await new MongoClient().connect();
 		db = await client.db('test_db_advanced');
+		
+		// Drop collection if it exists to start fresh
+		try {
+			await db[collectionName].drop();
+		} catch (e) {
+			// Ignore error if collection doesn't exist
+		}
+		
 		await db.createCollection(collectionName);
 	});
 
