@@ -37,15 +37,11 @@ export class Collection extends EventEmitter {
     this.initialized = false;
 
 		this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
-		// this.isCollection = true; // TODO used by dropDatabase, ugly
-
-    console.warn(`Collection created: ${this.path}`);
 	}
 
   async _initialize() {
     if (this.initialized) return;
 
-    console.warn(`Initializing collection ${this.path}`);
 		if (!globalThis.navigator || !globalThis.navigator.storage || typeof globalThis.navigator.storage.getDirectory !== 'function') {
 			throw new Error('OPFS not available: navigator.storage.getDirectory is missing');
 		}
@@ -1576,18 +1572,23 @@ return results;
 	}
 
 	async drop() {
-		// Clear all indexes
-		for (const [indexName, index] of this.indexes) {
-			if (index && typeof index.clear === 'function') {
-				await index.clear();
-			}
-		}
-		try {
-			await this.storage.clear();
-		} catch (error) {
-			// Swallow storage errors during drop to keep cleanup best-effort
-			console.warn('Failed to clear storage during drop:', error);
-		}
+    const pathParts = this.path.split('/').filter(Boolean);
+    const filename = pathParts.pop();
+
+    let dir = await globalThis.navigator.storage.getDirectory();
+    for (const part of pathParts) {
+      dir = await dir.getDirectoryHandle(part, { create: false });
+    }
+    await dir.removeEntry(filename);
+
+    this.documents.clear();
+    this.documents = null;
+    this.indexes.clear();
+    this.indexes = null;
+    this.initialized = false;
+
+    this.emit('drop', { collection: this.name });
+    return { ok: 1 };
 	}
 
 	dropIndex(indexName) {

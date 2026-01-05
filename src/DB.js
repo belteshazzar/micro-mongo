@@ -42,7 +42,7 @@ export class DB {
 	 * Close all collections
 	 */
 	async close() {
-    for (const [name, collection] of this.collections) {
+    for (const [_, collection] of this.collections) {
       await collection.close();
 		}
 	}
@@ -67,8 +67,13 @@ export class DB {
 	}
 
 	async dropDatabase() {
-    throw new NotImplementedError('dropDatabase', { database: this.dbName });
-	}
+    for (const [_, collection] of this.collections) {
+      await collection.drop();
+		}
+    this.collections.clear();
+    // TODO: delete database folder from OPFS
+    return {ok: 1};
+  }
 
 	eval() { throw new NotImplementedError('eval', { database: this.dbName }); }
 	fsyncLock() { throw new NotImplementedError('fsyncLock', { database: this.dbName }); }
