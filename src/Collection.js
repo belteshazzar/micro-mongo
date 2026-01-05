@@ -1588,11 +1588,28 @@ export class Collection extends EventEmitter {
     const pathParts = this.path.split('/').filter(Boolean);
     const filename = pathParts.pop();
 
-    let dir = await globalThis.navigator.storage.getDirectory();
-    for (const part of pathParts) {
-      dir = await dir.getDirectoryHandle(part, { create: false });
+    try {
+      let dir = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dir = await dir.getDirectoryHandle(part, { create: false });
+      }
+      // Try recursive removal first
+      try {
+        await dir.removeEntry(filename, { recursive: true });
+      } catch (e) {
+        // If recursive not supported, try non-recursive (for empty directories)
+        if (e.name === 'TypeError' || e.message?.includes('recursive')) {
+          await dir.removeEntry(filename);
+        } else {
+          throw e;
+        }
+      }
+    } catch (error) {
+      // Directory might not exist yet if collection was never initialized
+      if (error.name !== 'NotFoundError' && error.code !== 'ENOENT') {
+        throw error;
+      }
     }
-    await dir.removeEntry(filename, { recursive: true });
 
     // Clear state but don't set to null (collection object is still alive)
     this.documents = null;
@@ -1641,6 +1658,8 @@ export class Collection extends EventEmitter {
         for (const docId of queryPlan.docIds) {
           if (!seen[docId]) {
             const doc = await this.documents.search(docId);
+            // Always verify match - index may return candidates or query may have
+            // additional conditions not covered by the index
             if (doc && matches(doc, normalizedQuery)) {
               seen[docId] = true;
               documents.push(doc);

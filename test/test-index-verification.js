@@ -14,10 +14,10 @@ const opfsDir = path.join(projectRoot, '.opfs');
 // Configure node-opfs to use project-local .opfs directory
 const customStorage = new StorageManager(opfsDir);
 if (typeof globalThis.navigator === 'undefined') {
-	globalThis.navigator = {};
+  globalThis.navigator = {};
 }
 globalThis.navigator.storage = {
-	getDirectory: () => customStorage.getDirectory()
+  getDirectory: () => customStorage.getDirectory()
 };
 
 import { MongoClient } from '../main.js';
