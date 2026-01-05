@@ -30,13 +30,7 @@ export class DB {
 
         // Only auto-create if it's a valid collection name and doesn't already exist
         if (typeof property === 'string') {
-
-          // For collection names, create the collection if it doesn't exist
-          if (!target.collections.has(property)) {
-            target.collections.set(property, new Collection(target, property));
-          }
-
-          return target.collections.get(property);
+          return target.getCollection(property);
         }
 
         return undefined;
@@ -48,12 +42,8 @@ export class DB {
 	 * Close all collections
 	 */
 	async close() {
-		// Iterate through all collection properties and close them
-		for (const key of Object.keys(this)) {
-			const collection = this[key];
-			if (collection && collection.isCollection && typeof collection.close === 'function') {
-				await collection.close();
-			}
+    for (const [name, collection] of this.collections) {
+      await collection.close();
 		}
 	}
 
@@ -64,21 +54,15 @@ export class DB {
 	copyDatabase() { throw new NotImplementedError('copyDatabase', { database: this.dbName }); }
 
 	createCollection(name) {
-    throw new NotImplementedError('createCollection', { database: this.dbName });
+    if (!this.collections.has(name)) {
+      this.collections.set(name, new Collection(this, name));
+    }
+    return {ok:1};
   }
-
-	/**
-	 * Get or create a collection by name (MongoDB-compatible method)
-	 * @param {string} name - Collection name
-	 * @returns {Collection} The collection instance
-	 */
-	collection(name) {
-    throw new NotImplementedError('collection', { database: this.dbName });
-	}
 
 	currentOp() { throw new NotImplementedError('currentOp', { database: this.dbName }); }
 
-	async dropCollection(collectionName) {
+	async dropCollection(name) {
     throw new NotImplementedError('dropCollection', { database: this.dbName });
 	}
 
@@ -89,9 +73,20 @@ export class DB {
 	eval() { throw new NotImplementedError('eval', { database: this.dbName }); }
 	fsyncLock() { throw new NotImplementedError('fsyncLock', { database: this.dbName }); }
 	fsyncUnlock() { throw new NotImplementedError('fsyncUnlock', { database: this.dbName }); }
-	getCollection() { throw new NotImplementedError('getCollection', { database: this.dbName }); }
-	getCollectionInfos() { throw new NotImplementedError('getCollectionInfos', { database: this.dbName }); }
 
+  getCollection(name) { 
+    // For collection names, create the collection if it doesn't exist
+    if (!this.collections.has(name)) {
+      this.collections.set(name, new Collection(this, name));
+    }
+
+    return this.collections.get(name);
+  }
+
+  getCollectionInfos() { throw new NotImplementedError('getCollectionInfos', { database: this.dbName }); }
+  getCollectionNames() {
+    return Array.from(this.collections.keys());
+  }
 	getLastError() { throw new NotImplementedError('getLastError', { database: this.dbName }); }
 	getLastErrorObj() { throw new NotImplementedError('getLastErrorObj', { database: this.dbName }); }
 	getLogComponents() { throw new NotImplementedError('getLogComponents', { database: this.dbName }); }
