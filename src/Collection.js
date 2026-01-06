@@ -52,13 +52,7 @@ export class Collection extends EventEmitter {
     this.documents = new BPlusTree(this.documentsPath, this.order);
     await this.documents.open();
 
-    // this.documents = new PersistentDocumentStore(options.documentPath);
-
-    // // Indexes are loaded async via createIndex/openIndexes
-    // this._restoreIndexesFromStorage().catch(err => {
-    // 	// Surface any restore errors without breaking construction
-    // 	console.error('Failed to restore indexes for collection', name, err);
-    // });
+    await this._loadIndexes();
 
     this._initialized = true;
   }
@@ -84,31 +78,105 @@ export class Collection extends EventEmitter {
     }
   }
 
-  async _restoreIndexesFromStorage() {
-    if (this.storage && typeof this.storage.ready === 'function') {
-      await this.storage.ready();
-    }
-    if (!this.storage || !this.storage.indexes || typeof this.storage.indexes[Symbol.iterator] !== 'function') {
-      return;
-    }
-    for (const [indexName, indexStore] of this.storage.indexes) {
-      const meta = indexStore && typeof indexStore.getAllMeta === 'function' ? indexStore.getAllMeta() : null;
-      if (!meta || !meta.type || !meta.keys) continue;
-      const name = meta.name || indexName;
-      const storagePath = meta.storage || meta.storageFile || meta.baseFilename;
-      let index;
-      if (meta.type === 'text') {
-        const path = storagePath || await this._getIndexPath(name, 'text');
-        index = new TextCollectionIndex(name, meta.keys, path, meta.options || {});
-      } else if (meta.type === 'geospatial') {
-        const path = storagePath || await this._getIndexPath(name, 'geospatial');
-        index = new GeospatialIndex(name, meta.keys, path, meta.options || {});
-      } else {
-        const path = storagePath || await this._getIndexPath(name, 'regular');
-        index = new RegularCollectionIndex(name, meta.keys, path, meta.options || {});
+  async _loadIndexes() {
+    // Scan the collection folder for persisted index files and recreate them.
+    // Supported filenames:
+    //   <name>.textindex          -> TextCollectionIndex
+    //   <name>.rtree.bjson        -> GeospatialIndex
+    //   <name>.bplustree.bjson    -> RegularCollectionIndex
+
+    // Navigate to the collection directory inside OPFS
+    let dirHandle;
+    try {
+      const parts = this.path.split('/').filter(Boolean);
+      let handle = await globalThis.navigator.storage.getDirectory();
+      for (const part of parts) {
+        handle = await handle.getDirectoryHandle(part, { create: false });
       }
-      this.indexes.set(name, index);
+      dirHandle = handle;
+    } catch (err) {
+      // If the collection folder doesn't exist yet, there is nothing to load
+      if (err?.name === 'NotFoundError' || err?.code === 'ENOENT') {
+        return;
+      }
+      throw err;
     }
+
+    for await (const [entryName, entryHandle] of dirHandle.entries()) {
+      if (entryHandle.kind !== 'file') continue;
+
+      let type;
+      if (entryName.endsWith('.textindex-documents.bjson')) {
+        type = 'text';
+      } else if (entryName.endsWith('.rtree.bjson')) {
+        type = 'geospatial';
+      } else if (entryName.endsWith('.bplustree.bjson')) {
+        type = 'regular';
+      } else {
+        continue; // Not an index file we understand
+      }
+
+      const indexName = entryName
+        .replace(/\.textindex-documents\.bjson$/, '')
+        .replace(/\.rtree\.bjson$/, '')
+        .replace(/\.bplustree\.bjson$/, '');
+
+      // Skip if already loaded (avoid duplicates)
+      if (this.indexes.has(indexName)) continue;
+
+      const keys = this._parseIndexName(indexName, type);
+      if (!keys) {
+        // Can't recover keys for custom index names; skip to avoid broken indexes
+        continue;
+      }
+
+      let index;
+      if (type === 'text') {
+        const storageFile = await this._getIndexPath(indexName, type);
+        index = new TextCollectionIndex(indexName, keys, storageFile, {});
+      } else if (type === 'geospatial') {
+        const storageFile = await this._getIndexPath(indexName, type);
+        index = new GeospatialIndex(indexName, keys, storageFile, {});
+      } else {
+        const storageFile = await this._getIndexPath(indexName, type);
+        index = new RegularCollectionIndex(indexName, keys, storageFile, {});
+      }
+
+      try {
+        await index.open();
+        this.indexes.set(indexName, index);
+      } catch (err) {
+        // If an index file is corrupted, skip it but don't block collection init
+        console.warn(`Failed to open index ${indexName}:`, err);
+      }
+    }
+  }
+
+  _parseIndexName(indexName, type) {
+    // Reconstruct key spec from default generated index names like "field_1" or "a_1_b_-1".
+    const tokens = indexName.split('_');
+    if (tokens.length < 2 || tokens.length % 2 !== 0) return null;
+
+    const keys = {};
+    for (let i = 0; i < tokens.length; i += 2) {
+      const field = tokens[i];
+      const dir = tokens[i + 1];
+
+      if (!field || dir === undefined) return null;
+
+      if (type === 'text' || dir === 'text') {
+        keys[field] = 'text';
+      } else if (type === 'geospatial' || dir === '2dsphere' || dir === '2d') {
+        keys[field] = dir === '2d' ? '2d' : '2dsphere';
+      } else {
+        const num = Number(dir);
+        if (Number.isNaN(num) || (num !== 1 && num !== -1)) {
+          return null;
+        }
+        keys[field] = num;
+      }
+    }
+    return keys;
   }
 
 
@@ -178,7 +246,7 @@ export class Collection extends EventEmitter {
   /**
    * Build/rebuild an index
    */
-  async buildIndex(indexName, keys, options = {}) {
+  async _buildIndex(indexName, keys, options = {}) {
     if (!this._initialized) await this._initialize();
 
     let index;
@@ -1487,6 +1555,8 @@ export class Collection extends EventEmitter {
   }
 
   async createIndex(keys, options) {
+    if (!this._initialized) await this._initialize();
+
     // MongoDB-compliant createIndex
     // keys: { fieldName: 1 } for ascending, { fieldName: -1 } for descending, { fieldName: 'text' } for text
     // options: { name: "indexName", unique: true, ... }
@@ -1520,7 +1590,7 @@ export class Collection extends EventEmitter {
     }
 
     // Build the index
-    await this.buildIndex(indexName, keys, options);
+    await this._buildIndex(indexName, keys, options);
 
     return indexName;
   }
