@@ -4,7 +4,7 @@
 
 import { setProp, getProp, isArray } from './utils.js';
 import { opMatches, matches } from './queryMatcher.js';
-import { Timestamp } from './Timestamp.js';
+import { Timestamp } from 'bjson';
 
 /**
  * Extract identifier from a filtered positional operator pattern like $[identifier]

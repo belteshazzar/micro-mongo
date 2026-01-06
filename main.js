@@ -4,10 +4,7 @@
 
 // Export classes
 export { MongoClient } from './src/MongoClient.js';
-export { ObjectId } from 'bjson';
-export { Timestamp } from './src/Timestamp.js';
-// Storage: OPFS is the default persistent engine
-// export { IndexedDbStorageEngine } from './src/IndexedDbStorageEngine.js';
+export { ObjectId,Timestamp } from 'bjson';
 export { ChangeStream } from './src/ChangeStream.js';
 
 // Export error classes and codes
