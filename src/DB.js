@@ -1,5 +1,4 @@
 import { Collection } from './Collection.js';
-//import { OPFSStorageEngine } from './OPFSStorageEngine.js';
 import { ObjectId } from 'bjson';
 import { ChangeStream } from './ChangeStream.js';
 import { NotImplementedError } from './errors.js';
