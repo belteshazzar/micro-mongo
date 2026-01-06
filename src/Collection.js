@@ -161,23 +161,26 @@ export class Collection extends EventEmitter {
   }
 
   async _getIndexPath(indexName, type) {
-    if (this.storage && typeof this.storage.getIndexFilePath === 'function') {
-      const maybePath = this.storage.getIndexFilePath(this.name, indexName, type);
-      return typeof maybePath?.then === 'function' ? await maybePath : maybePath;
-    }
-    // Fallback sanitize for non-OPFS storage
+    // Create index files directly in the collection folder
     const sanitize = value => String(value).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const dbName = this.db.dbName || this.db.name || 'db';
-    const baseFilename = `${sanitize(dbName)}-${sanitize(this.name)}-${sanitize(indexName)}`;
-    if (type === 'text') return baseFilename;
-    if (type === 'geospatial') return `${baseFilename}.rtree.bjson`;
-    return `${baseFilename}.bjson`;
+    const sanitizedIndexName = sanitize(indexName);
+    
+    if (type === 'text') {
+      return `${this.path}/${sanitizedIndexName}.textindex`;
+    }
+    if (type === 'geospatial') {
+      return `${this.path}/${sanitizedIndexName}.rtree.bjson`;
+    }
+    // Regular index uses B+ tree
+    return `${this.path}/${sanitizedIndexName}.bplustree.bjson`;
   }
 
   /**
    * Build/rebuild an index
    */
   async buildIndex(indexName, keys, options = {}) {
+    if (!this._initialized) await this._initialize();
+
     let index;
     let storageFile;
     let type;
@@ -197,17 +200,6 @@ export class Collection extends EventEmitter {
       index = new RegularCollectionIndex(indexName, keys, storageFile, options);
     }
 
-    // Persist index metadata in the collection store so we can restore on reloads
-    if (this.storage && typeof this.storage.createIndexStore === 'function') {
-      this.storage.createIndexStore(indexName, {
-        name: indexName,
-        keys,
-        type,
-        storage: storageFile,
-        options
-      });
-    }
-
     // Open the index for use
     await index.open();
 
@@ -216,11 +208,11 @@ export class Collection extends EventEmitter {
       await index.clear();
     }
 
-    // Build index by scanning all documents
-    const allDocs = await this.storage.getAllDocuments();
-    for (const doc of allDocs) {
-      if (doc) {
-        await index.add(doc);
+    // Build index by scanning all documents from the B+ tree
+    const allDocs = await this.documents.toArray();
+    for (const entry of allDocs) {
+      if (entry && entry.value) {
+        await index.add(entry.value);
       }
     }
 
@@ -259,6 +251,16 @@ export class Collection extends EventEmitter {
     // Wait for all index operations to complete
     if (promises.length > 0) {
       await Promise.all(promises);
+    }
+  }
+
+  /**
+   * Ensure an index is open before using it
+   * @private
+   */
+  async _ensureIndexOpen(index) {
+    if (index && typeof index.open === 'function' && !index.isOpen) {
+      await index.open();
     }
   }
 
@@ -912,7 +914,7 @@ export class Collection extends EventEmitter {
           const doc = results[j];
           const docId = doc._id;
           const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-          await targetCollection.storage.set(key, doc);
+          await targetCollection.insertOne(doc);
         }
 
         // $out returns empty results (MongoDB behavior)
@@ -959,14 +961,10 @@ export class Collection extends EventEmitter {
 
           if (existing) {
             if (whenMatched === 'replace') {
-              const docId = doc._id;
-              const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-              await targetCollection.storage.set(key, doc);
+              await targetCollection.replaceOne({ _id: existing._id }, doc);
             } else if (whenMatched === 'merge') {
               const merged = Object.assign({}, existing, doc);
-              const docId = merged._id;
-              const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-              await targetCollection.storage.set(key, merged);
+              await targetCollection.replaceOne({ _id: existing._id }, merged);
             } else if (whenMatched === 'keepExisting') {
               // Do nothing
             } else if (whenMatched === 'fail') {
@@ -977,9 +975,7 @@ export class Collection extends EventEmitter {
             }
           } else {
             if (whenNotMatched === 'insert') {
-              const docId = doc._id;
-              const key = (typeof docId === 'object' && docId.toString) ? docId.toString() : String(docId);
-              await targetCollection.storage.set(key, doc);
+              await targetCollection.insertOne(doc);
             } else if (whenNotMatched === 'discard') {
               // Do nothing
             } else if (whenNotMatched === 'fail') {
@@ -1471,7 +1467,9 @@ export class Collection extends EventEmitter {
   async bulkWrite() { throw new NotImplementedError('bulkWrite', { collection: this.name }); }
 
   async count() {
-    return await this.storage.size();
+    if (!this._initialized) await this._initialize();
+    const entries = await this.documents.toArray();
+    return entries.length;
   }
 
   async copyTo(destCollectionName) {
@@ -1533,7 +1531,7 @@ export class Collection extends EventEmitter {
     const doc = await this.findOne(query);
     if (doc) {
       await this.updateIndexesOnDelete(doc);
-      await this.storage.remove(doc._id.toString());
+      await this.documents.delete(doc._id.toString());
       this.emit('delete', { _id: doc._id });
       return { deletedCount: 1 };
     } else {
@@ -1553,7 +1551,7 @@ export class Collection extends EventEmitter {
     const deletedCount = ids.length;
     for (let i = 0; i < ids.length; i++) {
       await this.updateIndexesOnDelete(docs[i]);
-      await this.storage.remove(ids[i].toString());
+      await this.documents.delete(ids[i].toString());
       this.emit('delete', { _id: ids[i] });
     }
     return { deletedCount: deletedCount };
@@ -1572,19 +1570,50 @@ export class Collection extends EventEmitter {
   }
 
   async drop() {
+    if (!this._initialized) await this._initialize();
+
+    // Close all indexes first
+    for (const [indexName, index] of this.indexes) {
+      if (index && typeof index.close === 'function') {
+        await index.close();
+      }
+    }
+
+    // Close the documents B+ tree
+    if (this.documents && typeof this.documents.close === 'function') {
+      await this.documents.close();
+    }
+
+    // Remove the entire collection directory recursively
     const pathParts = this.path.split('/').filter(Boolean);
     const filename = pathParts.pop();
 
-    let dir = await globalThis.navigator.storage.getDirectory();
-    for (const part of pathParts) {
-      dir = await dir.getDirectoryHandle(part, { create: false });
+    try {
+      let dir = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dir = await dir.getDirectoryHandle(part, { create: false });
+      }
+      // Try recursive removal first
+      try {
+        await dir.removeEntry(filename, { recursive: true });
+      } catch (e) {
+        // If recursive not supported, try non-recursive (for empty directories)
+        if (e.name === 'TypeError' || e.message?.includes('recursive')) {
+          await dir.removeEntry(filename);
+        } else {
+          throw e;
+        }
+      }
+    } catch (error) {
+      // Directory might not exist yet if collection was never initialized
+      if (error.name !== 'NotFoundError' && error.code !== 'ENOENT') {
+        throw error;
+      }
     }
-    await dir.removeEntry(filename);
 
-    this.documents.clear();
+    // Clear state but don't set to null (collection object is still alive)
     this.documents = null;
     this.indexes.clear();
-    this.indexes = null;
     this._initialized = false;
 
     this.emit('drop', { collection: this.name });
@@ -1612,22 +1641,49 @@ export class Collection extends EventEmitter {
   explain() { throw new NotImplementedError('explain', { collection: this.name }); }
 
   async find(query, projection) {
+    if (!this._initialized) await this._initialize();
+
     const normalizedQuery = query == undefined ? {} : query;
     const nearSpec = this._extractNearSpec(normalizedQuery);
 
-    // Get query plan (synchronous, returns null for index docIds)
-    const queryPlan = this.planQuery(normalizedQuery);
     const documents = [];
     const seen = {}; // Track which docs we've seen to avoid duplicates
 
-    // For now, always do full scan since index queries are async
-    // In the future, use planQueryAsync for index-based queries
-    const allDocs = await this.documents.toArray();
-
-    for (const doc of allDocs) {
-      if (!seen[doc.value._id] && matches(doc.value, normalizedQuery)) {
-        seen[doc.value._id] = true;
-        documents.push(doc.value);
+    // Try to use indexes if available
+    if (this.indexes.size > 0) {
+      const queryPlan = await this.planQueryAsync(normalizedQuery);
+      
+      if (queryPlan.useIndex && queryPlan.docIds && queryPlan.docIds.length > 0) {
+        // Use index results
+        for (const docId of queryPlan.docIds) {
+          if (!seen[docId]) {
+            const doc = await this.documents.search(docId);
+            // Always verify match - index may return candidates or query may have
+            // additional conditions not covered by the index
+            if (doc && matches(doc, normalizedQuery)) {
+              seen[docId] = true;
+              documents.push(doc);
+            }
+          }
+        }
+      } else {
+        // Fall back to full scan if index couldn't be used or returned no results
+        const allDocs = await this.documents.toArray();
+        for (const entry of allDocs) {
+          if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
+            seen[entry.value._id] = true;
+            documents.push(entry.value);
+          }
+        }
+      }
+    } else {
+      // No indexes available, do full scan
+      const allDocs = await this.documents.toArray();
+      for (const entry of allDocs) {
+        if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
+          seen[entry.value._id] = true;
+          documents.push(entry.value);
+        }
       }
     }
 
@@ -1751,7 +1807,7 @@ export class Collection extends EventEmitter {
     if (options && options.sort) c = c.sort(options.sort);
     if (!c.hasNext()) return null;
     const doc = c.next();
-    await this.storage.remove(doc._id.toString());
+    await this.documents.delete(doc._id.toString());
     if (options && options.projection) return applyProjection(options.projection, doc);
     else return doc;
   }
@@ -1762,7 +1818,7 @@ export class Collection extends EventEmitter {
     if (!c.hasNext()) return null;
     const doc = c.next();
     replacement._id = doc._id;
-    await this.storage.set(doc._id.toString(), replacement);
+    await this.documents.add(doc._id.toString(), replacement);
     if (options && options.returnNewDocument) {
       if (options && options.projection) return applyProjection(options.projection, replacement);
       else return replacement;
@@ -1785,7 +1841,7 @@ export class Collection extends EventEmitter {
     const userArrayFilters = options && options.arrayFilters;
 
     applyUpdates(update, clone, false, positionalMatchInfo, userArrayFilters);
-    await this.storage.set(doc._id.toString(), clone);
+    await this.documents.add(doc._id.toString(), clone);
     if (options && options.returnNewDocument) {
       if (options && options.projection) return applyProjection(options.projection, clone);
       else return clone;
@@ -1809,7 +1865,7 @@ export class Collection extends EventEmitter {
 
   // non-mongo
   getStore() {
-    return this.storage.getStore();
+    return this.documents;
   }
 
   group() { throw new NotImplementedError('group', { collection: this.name }); }
@@ -1857,7 +1913,7 @@ export class Collection extends EventEmitter {
       if (options && options.upsert) {
         const newDoc = replacement;
         newDoc._id = new ObjectId();
-        await this.storage.set(newDoc._id.toString(), newDoc);
+        await this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
         result.upsertedId = newDoc._id;
@@ -1867,7 +1923,7 @@ export class Collection extends EventEmitter {
       const doc = c.next();
       await this.updateIndexesOnDelete(doc);
       replacement._id = doc._id;
-      await this.storage.set(doc._id.toString(), replacement);
+      await this.documents.add(doc._id.toString(), replacement);
       await this.updateIndexesOnInsert(replacement);
       this.emit('replace', replacement);
     }
@@ -1880,12 +1936,12 @@ export class Collection extends EventEmitter {
     if (options === true || (options && options.justOne)) {
       const doc = c.next();
       await this.updateIndexesOnDelete(doc);
-      await this.storage.remove(doc._id.toString());
+      await this.documents.delete(doc._id.toString());
     } else {
       while (c.hasNext()) {
         const doc = c.next();
         await this.updateIndexesOnDelete(doc);
-        await this.storage.remove(doc._id.toString());
+        await this.documents.delete(doc._id.toString());
       }
     }
   }
@@ -1911,7 +1967,7 @@ export class Collection extends EventEmitter {
 
           await this.updateIndexesOnDelete(doc);
           applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-          await this.storage.set(doc._id.toString(), doc);
+          await this.documents.add(doc._id.toString(), doc);
           await this.updateIndexesOnInsert(doc);
         }
       } else {
@@ -1924,13 +1980,13 @@ export class Collection extends EventEmitter {
 
         await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-        await this.storage.set(doc._id.toString(), doc);
+        await this.documents.add(doc._id.toString(), doc);
         await this.updateIndexesOnInsert(doc);
       }
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.storage.set(newDoc._id.toString(), newDoc);
+        await this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
       }
     }
@@ -1949,14 +2005,14 @@ export class Collection extends EventEmitter {
 
       await this.updateIndexesOnDelete(doc);
       applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-      await this.storage.set(doc._id.toString(), doc);
+      await this.documents.add(doc._id.toString(), doc);
       await this.updateIndexesOnInsert(doc);
       const updateDescription = this._getUpdateDescription(originalDoc, doc);
       this.emit('update', doc, updateDescription);
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.storage.set(newDoc._id.toString(), newDoc);
+        await this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
       }
@@ -1977,7 +2033,7 @@ export class Collection extends EventEmitter {
 
         await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-        await this.storage.set(doc._id.toString(), doc);
+        await this.documents.add(doc._id.toString(), doc);
         await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit('update', doc, updateDescription);
@@ -1985,7 +2041,7 @@ export class Collection extends EventEmitter {
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.storage.set(newDoc._id.toString(), newDoc);
+        await this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
       }
