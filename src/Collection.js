@@ -184,10 +184,9 @@ export class Collection extends EventEmitter {
    * Close all indexes
    */
   async close() {
+    await this.documents.close();
     for (const [indexName, index] of this.indexes) {
-      if (index && typeof index.close === 'function') {
         await index.close();
-      }
     }
   }
 

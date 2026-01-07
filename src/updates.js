@@ -4,7 +4,6 @@
 
 import { setProp, getProp, isArray } from './utils.js';
 import { opMatches, matches } from './queryMatcher.js';
-import { Timestamp } from 'bjson';
 
 /**
  * Extract identifier from a filtered positional operator pattern like $[identifier]
@@ -476,10 +475,6 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 				// Handle boolean true or { $type: "date" }
 				if (typeSpec === true || (typeof typeSpec === 'object' && typeSpec.$type === 'date')) {
 					setProp(doc, field, new Date());
-				}
-				// Handle { $type: "timestamp" }
-				else if (typeof typeSpec === 'object' && typeSpec.$type === 'timestamp') {
-					setProp(doc, field, new Timestamp());
 				}
 				// Default to Date for backwards compatibility
 				else {

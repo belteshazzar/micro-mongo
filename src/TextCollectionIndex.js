@@ -185,6 +185,7 @@ export class TextCollectionIndex extends Index {
 	/**
 	 * Clear all data from the index
 	 */
+  // TODO: Recreate the index empty or delete
 	async clear() {
 		// Recreate the index by closing and reopening
 		if (this.isOpen) {

@@ -4,7 +4,7 @@
 
 // Export classes
 export { MongoClient } from './src/MongoClient.js';
-export { ObjectId,Timestamp } from 'bjson';
+export { ObjectId } from 'bjson';
 export { ChangeStream } from './src/ChangeStream.js';
 
 // Export error classes and codes

@@ -375,12 +375,11 @@ export class GeospatialIndex extends Index {
 	/**
 	 * Clear all data from the index
 	 */
+  // TODO: dont' delete the file or just clear the RTree contents
 	async clear() {
-		if (!this.isOpen) {
-			await this.rtree.open();
-			this.isOpen = true;
-		}
-		// Delete existing on-disk tree to avoid stale entries
+    await this.close();
+
+    // Delete existing on-disk tree to avoid stale entries
 		try {
 			await this.rtree.file.delete();
 		} catch (err) {
@@ -389,8 +388,8 @@ export class GeospatialIndex extends Index {
 				throw err;
 			}
 		}
-		this.isOpen = false;
-		// Recreate the RTree
+
+    // Recreate the RTree
 		this.rtree = new RTree(this.rtree.filename, 9);
 		await this.open();
 	}
