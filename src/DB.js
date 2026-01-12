@@ -70,7 +70,17 @@ export class DB {
       await collection.drop();
 		}
     this.collections.clear();
-    // TODO: delete database folder from OPFS
+    
+    const pathParts = this.dbFolder.split('/').filter(Boolean);
+    const dbFolder = pathParts.pop();
+
+    let dir = await globalThis.navigator.storage.getDirectory();
+    for (const part of pathParts) {
+      dir = await dir.getDirectoryHandle(part, { create: false });
+    }
+    
+    await dir.removeEntry(dbFolder, { recursive: true });
+
     return {ok: 1};
   }
 

@@ -184,6 +184,8 @@ export class Collection extends EventEmitter {
    * Close all indexes
    */
   async close() {
+    if (!this._initialized) return;
+
     await this.documents.close();
     for (const [indexName, index] of this.indexes) {
         await index.close();
@@ -1540,16 +1542,14 @@ export class Collection extends EventEmitter {
   }
 
   async copyTo(destCollectionName) {
-    if (!this.db[destCollectionName]) {
-      this.db.createCollection(destCollectionName);
-    }
-    const destCol = this.db[destCollectionName];
+    const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
     const c = await this.find({});
     while (c.hasNext()) {
       await destCol.insertOne(c.next());
       numCopied++;
     }
+
     return numCopied;
   }
 
@@ -1639,6 +1639,9 @@ export class Collection extends EventEmitter {
   }
 
   async drop() {
+
+    console.log('Dropping collection:', this.name);
+
     if (!this._initialized) await this._initialize();
 
     // Close all indexes first
@@ -1680,10 +1683,13 @@ export class Collection extends EventEmitter {
       }
     }
 
-    // Clear state but don't set to null (collection object is still alive)
+    // Clear state
     this.documents = null;
     this.indexes.clear();
     this._initialized = false;
+
+    // remove from db's collection list
+    this.db.collections.delete(this.name);
 
     this.emit('drop', { collection: this.name });
     return { ok: 1 };

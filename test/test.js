@@ -185,6 +185,7 @@ describe("DB", function() {
 	describe('Collection', function() {
 	
 		var collectionName = "myCollection";
+    const collectionName2 = "myCollection2";
 
 		const topLeft = [
 			129.64116138266587,
@@ -312,13 +313,13 @@ describe("DB", function() {
 		  };
 
 		async function initDB() {
-      db[collectionName] && await db[collectionName].drop();
+      await db.dropDatabase();
+
 			db.createCollection(collectionName);
 			await db[collectionName].insert({ age: 4,	legs: 0, geojson: polygonInBox });
 			await db[collectionName].insert([{ age: 4, legs: 5, geojson: pointInBox },{ age: 54, legs: 2, geojson: pointNotInBox }]);
 			await db[collectionName].insertMany([{ age: 54, legs: 12 },{ age: 16, geojson: partiallyInBox }]);
 			await db[collectionName].insertOne({ name: "steve", text: "this is a text string with paris and london", geojson: pointInBox });
-
 		}
 		
 		async function testFind(q) { 
@@ -367,14 +368,13 @@ describe("DB", function() {
 		});
 
 		it('should testCopyTo', async function() {
-			var dest = "backup";
-			if (db.getCollectionNames().includes(dest)) throw "backup collection shouldn't exist";
-			if ((await db[collectionName].copyTo(dest))!=6) throw "should have copied all 6 docs";
-			if (!db.getCollectionNames().includes(dest)) throw "backup collection should have been created";
-			if ((await db[dest].find()).count()!=6) throw "failed to copy all content";
+			if (db.getCollectionNames().includes(collectionName2)) throw "backup collection shouldn't exist";
+			if ((await db[collectionName].copyTo(collectionName2))!=6) throw "should have copied all 6 docs";
+			if (!db.getCollectionNames().includes(collectionName2)) throw "backup collection should have been created";
+			if ((await db[collectionName2].find()).count()!=6) throw "failed to copy all content";
 			if ((await db[collectionName].find()).count()!=6) throw "original collection should still have 6 docs";
-			if ((await db[collectionName].copyTo(dest))!=6) throw "should have copied all 6 docs";
-			if ((await db[dest].find()).count()!=6) throw "failed to copy all content";
+			if ((await db[collectionName].copyTo(collectionName2))!=6) throw "should have copied all 6 docs";
+			if ((await db[collectionName2].find()).count()!=6) throw "failed to copy all content";
 		});
 
 		it('should testDeleteOne', async function() {

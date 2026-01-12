@@ -162,6 +162,7 @@ describe("ObjectId", function() {
 		beforeEach(async function() {
 			client = await mongo.MongoClient.connect('mongodb://localhost:27017');
 			db = client.db('testdb');
+			await db['users'].drop();
 		});
 
 		afterEach(async function() {
@@ -180,7 +181,7 @@ describe("ObjectId", function() {
 		it('should allow manual ObjectId assignment', async function() {
 			db.createCollection('users');
 			const customId = new mongo.ObjectId();
-			await db.users.insertOne({ _id: customId, name: 'Bob' });
+      await db.users.insertOne({ _id: customId, name: 'Bob' });
 			
 			const doc = await db.users.findOne({ name: 'Bob' });
 			expect(doc._id.equals(customId)).to.be.true;
@@ -246,18 +247,20 @@ describe("ObjectId", function() {
 		});
 
 		it('should support sorting by ObjectId (_id)', async function() {
-			db.createCollection('messages');
+			db.createCollection('users');
 			
 			// Insert in random order but with timestamps that increase
 			const ids = [];
 			for (let i = 0; i < 3; i++) {
 				const id = new mongo.ObjectId();
 				ids.push(id);
-				await db.messages.insertOne({ _id: id, text: `Message ${i}` });
+				await db.users.insertOne({ _id: id, text: `Message ${i}` });
 			}
 			
-			const sorted = await (await db.messages.find().sort({ _id: 1 })).toArray();
-			expect(sorted.length).to.equal(3);
+      const cursor = await db.users.find();
+      const sorted = cursor.sort({ _id: 1 });
+      const array = sorted.toArray();
+			expect(array.length).to.equal(3);
 			
 			// Should be in chronological order (roughly, if created close together)
 			for (let i = 0; i < sorted.length - 1; i++) {

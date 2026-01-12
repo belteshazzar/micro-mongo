@@ -241,7 +241,7 @@ export class Cursor {
 	
 	tailable() { throw new NotImplementedError('tailable'); }
 	
-	async toArray() {
+	toArray() {
 		const results = [];
 		while (this.hasNext()) {
 			results.push(this.next());

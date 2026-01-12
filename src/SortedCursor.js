@@ -97,7 +97,7 @@ export class SortedCursor {
 	
 	tailable() { throw "Not Implemented"; }
 	
-	async toArray() {
+	toArray() {
 		const results = [];
 		while (this.hasNext()) {
 			results.push(this.next());
