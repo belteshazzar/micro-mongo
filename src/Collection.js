@@ -1639,13 +1639,10 @@ export class Collection extends EventEmitter {
   }
 
   async drop() {
-
-    console.log('Dropping collection:', this.name);
-
     if (!this._initialized) await this._initialize();
 
     // Close all indexes first
-    for (const [indexName, index] of this.indexes) {
+    for (const [_, index] of this.indexes) {
       if (index && typeof index.close === 'function') {
         await index.close();
       }
@@ -1716,6 +1713,32 @@ export class Collection extends EventEmitter {
   explain() { throw new NotImplementedError('explain', { collection: this.name }); }
 
   async find(query, projection) {
+    this._validateProjection(projection);
+    return this._findInternal(query, projection);
+  }
+
+  _validateProjection(projection) {
+    if (!projection || Object.keys(projection).length === 0) return;
+
+    const keys = Object.keys(projection);
+    let hasInclusion = false;
+    let hasExclusion = false;
+
+    for (const key of keys) {
+      if (key === '_id') continue; // _id can appear with either style
+      if (projection[key]) hasInclusion = true; else hasExclusion = true;
+      if (hasInclusion && hasExclusion) break;
+    }
+
+    if (hasInclusion && hasExclusion) {
+      throw new QueryError("Cannot do exclusion on field in inclusion projection", {
+        code: ErrorCodes.CANNOT_DO_EXCLUSION_ON_FIELD_ID_IN_INCLUSION_PROJECTION,
+        collection: this.name
+      });
+    }
+  }
+
+  async _findInternal(query, projection) {
     if (!this._initialized) await this._initialize();
 
     const normalizedQuery = query == undefined ? {} : query;

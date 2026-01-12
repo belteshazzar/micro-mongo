@@ -94,7 +94,7 @@ export class MongoClient extends EventEmitter {
     if (!this._isConnected) return;
     
     // Close all database connections (which closes all collections and indexes)
-    for (const [dbName, database] of this._databases) {
+    for (const [_, database] of this._databases) {
       await database.close();
     }
     this._databases.clear();

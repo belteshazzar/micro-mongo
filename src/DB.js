@@ -79,8 +79,14 @@ export class DB {
       dir = await dir.getDirectoryHandle(part, { create: false });
     }
     
-    await dir.removeEntry(dbFolder, { recursive: true });
-
+    try {
+      await dir.removeEntry(dbFolder, { recursive: true });
+    } catch (error) {
+      // Ignore not found errors
+      if (error.name !== 'NotFoundError' && error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
     return {ok: 1};
   }
 

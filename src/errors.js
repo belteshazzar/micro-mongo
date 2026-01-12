@@ -57,6 +57,7 @@ export const ErrorCodes = {
 	
 	// Collection errors
 	COLLECTION_IS_EMPTY: 26,
+  CANNOT_DO_EXCLUSION_ON_FIELD_ID_IN_INCLUSION_PROJECTION: 31254,
 	
 	// Not implemented (custom code)
 	NOT_IMPLEMENTED: 999,
