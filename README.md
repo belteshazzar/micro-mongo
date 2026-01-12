@@ -7,7 +7,7 @@ There are three main use cases that Micro-Mongo targets:
 - for use as an in memory mongo database that can be used in the browser or nodejs
 - **NEW:** persistent storage using IndexedDB for saving and restoring database state including indexes
 
-[![Build Status](https://travis-ci.org/belteshazzar/micro-mongo.svg?branch=master)](https://travis-ci.org/belteshazzar/micro-mongo) [![Coverage Status](https://coveralls.io/repos/github/belteshazzar/micro-mongo/badge.svg?branch=master)](https://coveralls.io/github/belteshazzar/micro-mongo?branch=master)
+[![Tests](https://github.com/belteshazzar/micro-mongo/actions/workflows/test.yml/badge.svg)](https://github.com/belteshazzar/micro-mongo/actions/workflows/test.yml) [![Coverage Status](https://coveralls.io/repos/github/belteshazzar/micro-mongo/badge.svg?branch=master)](https://coveralls.io/github/belteshazzar/micro-mongo?branch=master)
 
 ## In Node.js
 
