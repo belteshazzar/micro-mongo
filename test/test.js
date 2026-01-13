@@ -2330,6 +2330,24 @@ describe("DB", function() {
 				expect(docs.length).to.equal(1);
 				expect(docs[0].content).to.equal('some text');
 			});
+
+			it('should support top-level $text operator', async function() {
+				await db[textCollectionName].insertMany([
+					{ title: 'JavaScript Tutorial', body: 'Learn JavaScript programming' },
+					{ title: 'Python Guide', body: 'Python programming basics' },
+					{ title: 'Database Design', body: 'Design principles for databases' }
+				]);
+				await db[textCollectionName].createIndex({ body: 'text' });
+
+				// Top-level $text searches across all text-indexed fields
+				const docs = await (await db[textCollectionName].find({ 
+					$text: { $search: 'programming' } 
+				})).toArray();
+				expect(docs.length).to.equal(2);
+				
+				const titles = docs.map(d => d.title).sort();
+				expect(titles).to.deep.equal(['JavaScript Tutorial', 'Python Guide']);
+			});
 		});
 
 		describe("Geospatial Indexes", function() {

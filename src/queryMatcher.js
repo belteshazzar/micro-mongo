@@ -251,6 +251,44 @@ export function text(prop, queryText) {
 }
 
 /**
+ * Text search across all string fields in a document
+ * Used for top-level $text operator
+ */
+function textSearchDocument(doc, searchText) {
+	if (!doc || typeof doc !== 'object') return false;
+	
+	// Recursively search all string fields
+	function searchObject(obj) {
+		if (typeof obj === 'string') {
+			return text(obj, searchText);
+		}
+		
+		if (typeof obj !== 'object' || obj === null) {
+			return false;
+		}
+		
+		// Check arrays
+		if (isArray(obj)) {
+			for (let i = 0; i < obj.length; i++) {
+				if (searchObject(obj[i])) return true;
+			}
+			return false;
+		}
+		
+		// Check object properties
+		for (const key in obj) {
+			if (obj.hasOwnProperty(key)) {
+				if (searchObject(obj[key])) return true;
+			}
+		}
+		
+		return false;
+	}
+	
+	return searchObject(doc);
+}
+
+/**
  * Geo within helper - using bounding box logic instead of de9im
  * This is a simpler implementation that doesn't require de9im dependency
  */
@@ -487,6 +525,12 @@ export function tlMatches(doc, query) {
 		else if (key == "$where") return where(doc, value);
 		else if (key == "$comment") return true; // $comment is metadata, doesn't filter
 		else if (key == "$jsonSchema") return validateJsonSchema(doc, value); // Top-level schema validation
+		else if (key == "$text") {
+			// Handle $text as top-level operator
+			// Searches across all string fields in the document
+			const searchText = value.$search || value;
+			return textSearchDocument(doc, searchText);
+		}
 		else if (key == "$expr") {
 			// Handle $expr at top level
 			try {
