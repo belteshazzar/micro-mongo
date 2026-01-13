@@ -279,8 +279,7 @@ export class Collection extends EventEmitter {
     }
 
     // Build index by scanning all documents from the B+ tree
-    const allDocs = await this.documents.toArray();
-    for (const entry of allDocs) {
+    for await (const entry of this.documents) {
       if (entry && entry.value) {
         await index.add(entry.value);
       }
@@ -1534,8 +1533,12 @@ export class Collection extends EventEmitter {
 
   async count() {
     if (!this._initialized) await this._initialize();
-    const entries = await this.documents.toArray();
-    return entries.length;
+
+    let count = 0;
+    for await (const _ of this.documents) {
+      count++;
+    }
+    return count;
   }
 
   async copyTo(destCollectionName) {
@@ -1776,8 +1779,7 @@ export class Collection extends EventEmitter {
         }
       } else {
         // Fall back to full scan if index couldn't be used or returned no results
-        const allDocs = await this.documents.toArray();
-        for (const entry of allDocs) {
+        for await (const entry of this.documents) {
           if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
             seen[entry.value._id] = true;
             documents.push(entry.value);
@@ -1786,8 +1788,7 @@ export class Collection extends EventEmitter {
       }
     } else {
       // No indexes available, do full scan
-      const allDocs = await this.documents.toArray();
-      for (const entry of allDocs) {
+      for await (const entry of this.documents) {
         if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
           seen[entry.value._id] = true;
           documents.push(entry.value);
