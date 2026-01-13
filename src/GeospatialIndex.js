@@ -149,6 +149,11 @@ export class GeospatialIndex extends Index {
 	 * @returns {Promise<Array|null>} Array of document IDs or null if query is not a geospatial query
 	 */
 	async query(query) {
+		// Ensure the index is open before querying
+		if (!this.isOpen) {
+			await this.open();
+		}
+
 		// Check if this is a geospatial query on our indexed field
 		if (!query[this.geoField]) {
 			return null;
@@ -173,8 +178,8 @@ export class GeospatialIndex extends Index {
 					maxLng: maxLon
 				});
 
-				// searchBBox returns entries with coords
-				return results.map(entry => entry.objectId);
+				// searchBBox returns entries with coords - convert ObjectIds to strings
+				return results.map(entry => entry.objectId.toString());
 			}
 		}
 
@@ -211,8 +216,8 @@ export class GeospatialIndex extends Index {
 			// Sort by distance (ascending)
 			results.sort((a, b) => a.distance - b.distance);
 
-			// Return just the document IDs
-			return results.map(entry => entry.objectId);
+			// Return just the document IDs - convert ObjectIds to strings
+			return results.map(entry => entry.objectId.toString());
 		}
 
 		// Handle $nearSphere with radius (uses spherical distance, same as $near)
@@ -248,8 +253,8 @@ export class GeospatialIndex extends Index {
 			// Sort by distance (ascending)
 			results.sort((a, b) => a.distance - b.distance);
 
-			// Return just the document IDs
-			return results.map(entry => entry.objectId);
+			// Return just the document IDs - convert ObjectIds to strings
+			return results.map(entry => entry.objectId.toString());
 		}
 
 		// Handle $geoIntersects
@@ -282,8 +287,8 @@ export class GeospatialIndex extends Index {
 					maxLng: lng + epsilon
 				});
 
-				// searchBBox returns entries with coords
-				return results.map(entry => entry.objectId);
+				// searchBBox returns entries with coords - convert ObjectIds to strings
+				return results.map(entry => entry.objectId.toString());
 			} else if (geometry.type === 'Polygon') {
 				const coordinates = geometry.coordinates;
 				if (!coordinates || coordinates.length === 0) {
@@ -319,7 +324,8 @@ export class GeospatialIndex extends Index {
 				// Filter by actual point-in-polygon test using returned coordinates
 				const results = candidates.filter(entry => this._pointInPolygon(entry.lat, entry.lng, ring));
 
-				return results.map(entry => entry.objectId);
+				// Convert ObjectIds to strings
+				return results.map(entry => entry.objectId.toString());
 			}
 
 			return null;

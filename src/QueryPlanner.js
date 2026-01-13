@@ -344,6 +344,11 @@ export class QueryPlanner {
 	async _executeIndexScan(scan) {
 		const { index, query, textQuery } = scan;
 		
+		// Ensure async indexes are open before use
+		if (typeof index.open === 'function' && typeof index.isOpen !== 'undefined' && !index.isOpen) {
+			await index.open();
+		}
+		
 		// Handle text search
 		if (textQuery !== undefined) {
 			return await index.search(textQuery);
