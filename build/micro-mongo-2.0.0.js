@@ -3942,6 +3942,30 @@ function text(prop, queryText) {
   const queryTokens = tokenizeText(queryText);
   return queryTokens.some((term) => propTokens.has(term));
 }
+function textSearchDocument(doc, searchText) {
+  if (!doc || typeof doc !== "object") return false;
+  function searchObject(obj) {
+    if (typeof obj === "string") {
+      return text(obj, searchText);
+    }
+    if (typeof obj !== "object" || obj === null) {
+      return false;
+    }
+    if (isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        if (searchObject(obj[i])) return true;
+      }
+      return false;
+    }
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        if (searchObject(obj[key])) return true;
+      }
+    }
+    return false;
+  }
+  return searchObject(doc);
+}
 function geoWithin(prop, query) {
   try {
     if (!Array.isArray(query) || query.length !== 2) {
@@ -4096,7 +4120,10 @@ function tlMatches(doc, query) {
     else if (key == "$where") return where(doc, value);
     else if (key == "$comment") return true;
     else if (key == "$jsonSchema") return validateJsonSchema(doc, value);
-    else if (key == "$expr") {
+    else if (key == "$text") {
+      const searchText = value.$search || value;
+      return textSearchDocument(doc, searchText);
+    } else if (key == "$expr") {
       try {
         return evaluateExpression(value, doc);
       } catch (e) {
