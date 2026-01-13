@@ -4,6 +4,29 @@
  * Demonstrates basic usage of change streams to watch for data changes
  */
 
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { StorageManager } from 'node-opfs';
+
+// Setup OPFS for Node.js environment
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const opfsDir = path.join(projectRoot, '.opfs');
+
+const customStorage = new StorageManager(opfsDir);
+const opfsNavigator = {
+  storage: {
+    getDirectory: () => customStorage.getDirectory()
+  }
+};
+
+if (typeof globalThis.navigator === 'undefined') {
+  globalThis.navigator = opfsNavigator;
+} else {
+  globalThis.navigator.storage = opfsNavigator.storage;
+}
+
 import { MongoClient } from '../main.js';
 
 async function basicExample() {

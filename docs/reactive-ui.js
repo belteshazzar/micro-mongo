@@ -3,7 +3,32 @@
  * 
  * Demonstrates using change streams for reactive user interfaces in the browser.
  * This example shows patterns for React, Vue, and vanilla JS.
+ * 
+ * Note: This file is intended for browser use but includes Node.js OPFS setup for testing.
  */
+
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { StorageManager } from 'node-opfs';
+
+// Setup OPFS for Node.js environment (for testing purposes)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const opfsDir = path.join(projectRoot, '.opfs');
+
+const customStorage = new StorageManager(opfsDir);
+const opfsNavigator = {
+  storage: {
+    getDirectory: () => customStorage.getDirectory()
+  }
+};
+
+if (typeof globalThis.navigator === 'undefined') {
+  globalThis.navigator = opfsNavigator;
+} else {
+  globalThis.navigator.storage = opfsNavigator.storage;
+}
 
 import { MongoClient } from '../main.js';
 
@@ -68,7 +93,10 @@ function useReactiveCollection(collection, query = {}) {
 
 /**
  * React component using reactive data
+ * Note: JSX code commented out for Node.js compatibility
+ * Uncomment when using in a browser with React
  */
+/*
 function UserList({ collection }) {
   const { documents: users, loading } = useReactiveCollection(collection);
 
@@ -96,6 +124,7 @@ function UserList({ collection }) {
     </div>
   );
 }
+*/
 
 // ==========================================
 // Vue Pattern
@@ -281,7 +310,7 @@ async function dashboardExample() {
 
   changeStream.on('change', async (change) => {
     // Recalculate stats when metrics change
-    const allMetrics = await metrics.find().toArray();
+    const allMetrics = await (await metrics.find({})).toArray();
     
     stats.totalUsers = allMetrics.reduce((sum, m) => sum + (m.userCount || 0), 0);
     stats.activeUsers = allMetrics.reduce((sum, m) => sum + (m.activeCount || 0), 0);

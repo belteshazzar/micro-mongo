@@ -2,7 +2,30 @@
  * Example usage of micro-mongo with MongoClient (similar to MongoDB driver)
  */
 
-import { MongoClient, ObjectId } from './main.js';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { StorageManager } from 'node-opfs';
+
+// Setup OPFS for Node.js environment
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const opfsDir = path.join(projectRoot, '.opfs');
+
+const customStorage = new StorageManager(opfsDir);
+const opfsNavigator = {
+  storage: {
+    getDirectory: () => customStorage.getDirectory()
+  }
+};
+
+if (typeof globalThis.navigator === 'undefined') {
+  globalThis.navigator = opfsNavigator;
+} else {
+  globalThis.navigator.storage = opfsNavigator.storage;
+}
+
+import { MongoClient, ObjectId } from '../main.js';
 
 async function main() {
   // Create and connect to a client (async pattern like real MongoDB)
@@ -51,9 +74,9 @@ async function main() {
     { name: 'Keyboard', price: 75 }
   ]);
 
-  // Query documents (synchronous cursor iteration)
+  // Query documents (cursor iteration after awaiting find)
   console.log('\nUsers aged 30 or older:');
-  const users = db.users.find({ age: { $gte: 30 } });
+  const users = await db.users.find({ age: { $gte: 30 } });
   while (users.hasNext()) {
     const user = users.next();
     console.log(`${user.name} (ID: ${user._id.toString()})`);
@@ -61,14 +84,14 @@ async function main() {
 
   // Query with toArray() - now async!
   console.log('\nProducts over $50:');
-  const expensiveProducts = await db.products.find({ price: { $gt: 50 } }).toArray();
+  const expensiveProducts = await (await db.products.find({ price: { $gt: 50 } })).toArray();
   expensiveProducts.forEach(p => {
     console.log(`${p.name}: $${p.price} (ID: ${p._id})`);
   });
 
   // Async iterator support (for await...of)
   console.log('\nAll users (using async iteration):');
-  for await (const user of db.users.find({})) {
+  for await (const user of await db.users.find({})) {
     console.log(`${user.name} - ${user.age} years old`);
   }
 
@@ -78,9 +101,9 @@ async function main() {
   // Delete documents (now async!)
   await db.users.deleteOne({ name: 'Bob' });
 
-  // Aggregation pipeline
+  // Aggregation pipeline (now async!)
   console.log('\nAverage product price:');
-  const avgPrice = db.products.aggregate([
+  const avgPrice = await db.products.aggregate([
     { $group: { _id: null, avgPrice: { $avg: '$price' } } }
   ]);
   console.log(avgPrice);
