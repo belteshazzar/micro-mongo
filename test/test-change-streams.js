@@ -12,8 +12,8 @@ describe('Change Streams', () => {
 		db = setup.db;
 		client = setup.client;
 		collection = db.collection('users');
-		// Clear any existing data
-		await collection.drop();
+		// Clear any existing data without removing the collection from the DB map
+		await collection.deleteMany({});
 	});
 
 	afterEach(setup.afterEach);

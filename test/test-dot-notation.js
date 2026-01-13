@@ -18,15 +18,13 @@ describe('Dot Notation in Queries', function() {
 	beforeEach(async function() {
 		await setup.beforeEach();
 		db = setup.db;
+		await db.dropCollection(collectionName);
 		collection = db[collectionName];
-		if (collection) {
-			await collection.drop();
-		}
 	});
 
 	afterEach(async function() {
-		if (collection) {
-			await collection.drop();
+		if (db) {
+			await db.dropCollection(collectionName);
 		}
 		await setup.afterEach();
 	});

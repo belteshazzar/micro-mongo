@@ -1689,19 +1689,32 @@ export class Collection extends EventEmitter {
     return { ok: 1 };
   }
 
-  dropIndex(indexName) {
+  async dropIndex(indexName) {
     if (!this.indexes.has(indexName)) {
       throw new IndexNotFoundError(indexName, { collection: this.name });
     }
-    this.indexes.get(indexName).clear();
+
+    const index = this.indexes.get(indexName);
+    if (index && typeof index.clear === 'function') {
+      await index.clear();
+    }
+    if (index && typeof index.close === 'function') {
+      await index.close();
+    }
+
     this.indexes.delete(indexName);
     return { nIndexesWas: this.indexes.size + 1, ok: 1 };
   }
 
-  dropIndexes() {
+  async dropIndexes() {
     const count = this.indexes.size;
-    for (const [indexName, index] of this.indexes) {
-      index.clear();
+    for (const [_, index] of this.indexes) {
+      if (index && typeof index.clear === 'function') {
+        await index.clear();
+      }
+      if (index && typeof index.close === 'function') {
+        await index.close();
+      }
     }
     this.indexes.clear();
     return { nIndexesWas: count, msg: "non-_id indexes dropped", ok: 1 };

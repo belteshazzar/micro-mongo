@@ -381,6 +381,7 @@
     OID: 6,
     DATE: 7,
     POINTER: 8,
+    BINARY: 9,
     ARRAY: 16,
     OBJECT: 17
   };
@@ -569,6 +570,13 @@
         const view = new DataView(buffer);
         view.setBigUint64(0, BigInt(val.offset), true);
         buffers.push(new Uint8Array(buffer));
+      } else if (val instanceof Uint8Array) {
+        buffers.push(new Uint8Array([TYPE.BINARY]));
+        const lengthBuffer = new ArrayBuffer(4);
+        const lengthView = new DataView(lengthBuffer);
+        lengthView.setUint32(0, val.length, true);
+        buffers.push(new Uint8Array(lengthBuffer));
+        buffers.push(val);
       } else if (typeof val === "number") {
         if (Number.isInteger(val) && Number.isSafeInteger(val)) {
           buffers.push(new Uint8Array([TYPE.INT]));
@@ -728,6 +736,20 @@
           }
           return new Pointer(Number(pointerOffset));
         }
+        case TYPE.BINARY: {
+          if (offset + 4 > data.length) {
+            throw new Error("Unexpected end of data for BINARY length");
+          }
+          const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
+          const length = lengthView.getUint32(0, true);
+          offset += 4;
+          if (offset + length > data.length) {
+            throw new Error("Unexpected end of data for BINARY content");
+          }
+          const binaryData = data.slice(offset, offset + length);
+          offset += length;
+          return binaryData;
+        }
         case TYPE.ARRAY: {
           if (offset + 4 > data.length) {
             throw new Error("Unexpected end of data for ARRAY size");
@@ -789,12 +811,13 @@
       this.filename = filename;
       this.root = null;
       this.fileHandle = null;
-      this.file = null;
+      this.syncAccessHandle = null;
       this.mode = null;
       this.isOpen = false;
     }
     /**
      * Open the file with specified mode
+     * Note: This must be called from a Web Worker as it uses FileSystemSyncAccessHandle
      * @param {string} mode - 'r' for read-only, 'rw' for read-write
      */
     async open(mode = "r") {
@@ -807,7 +830,7 @@
       if (!navigator.storage || !navigator.storage.getDirectory) {
         throw new Error("Origin Private File System (OPFS) is not supported in this browser");
       }
-      this.root = await navigator.storage.getDirectory();
+      this.root = this.root || await navigator.storage.getDirectory();
       this.mode = mode;
       try {
         if (mode === "r") {
@@ -815,23 +838,30 @@
         } else {
           this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
         }
-        this.file = await this.fileHandle.getFile();
+        this.syncAccessHandle = await this.fileHandle.createSyncAccessHandle();
         this.isOpen = true;
       } catch (error) {
         if (error.name === "NotFoundError") {
           throw new Error(`File not found: ${this.filename}`);
         }
+        if (error.name === "NoModificationAllowedError" || error.message?.includes("createSyncAccessHandle")) {
+          throw new Error("FileSystemSyncAccessHandle is only available in Web Workers. BJsonFile must be used in a Web Worker context.");
+        }
         throw error;
       }
     }
     /**
-     * Close the file
+     * Close the file and flush any pending writes
      */
     async close() {
+      if (this.syncAccessHandle) {
+        this.syncAccessHandle.flush();
+        await this.syncAccessHandle.close();
+        this.syncAccessHandle = null;
+      }
       this.isOpen = false;
       this.mode = null;
       this.fileHandle = null;
-      this.file = null;
     }
     /**
      * Ensure file is open, throw if not
@@ -851,33 +881,42 @@
       }
     }
     /**
-     * Refresh the file reference (needed after writes to get updated size)
+     * Read a range of bytes from the file
      */
-    async refreshFile() {
+    #readRange(start, length) {
       this.ensureOpen();
-      this.file = await this.fileHandle.getFile();
+      const buffer = new Uint8Array(length);
+      const bytesRead = this.syncAccessHandle.read(buffer, { at: start });
+      if (bytesRead < length) {
+        return buffer.slice(0, bytesRead);
+      }
+      return buffer;
     }
-    async #readRange(start, length) {
+    /**
+     * Get the current file size
+     */
+    getFileSize() {
       this.ensureOpen();
-      const slice = this.file.slice(start, start + length);
-      const arrayBuffer = await slice.arrayBuffer();
-      return new Uint8Array(arrayBuffer);
+      return this.syncAccessHandle.getSize();
     }
-    async getFileSize() {
-      this.ensureOpen();
-      return this.file.size;
-    }
-    async write(data) {
+    /**
+     * Write data to file, truncating existing content
+     * @param {*} data - Data to encode and write
+     */
+    write(data) {
       this.ensureWritable();
       const binaryData = encode(data);
-      const writable = await this.fileHandle.createWritable();
-      await writable.write(binaryData);
-      await writable.close();
-      await this.refreshFile();
+      this.syncAccessHandle.truncate(0);
+      this.syncAccessHandle.write(binaryData, { at: 0 });
     }
-    async read(pointer = new Pointer(0)) {
+    /**
+     * Read and decode data from file starting at optional pointer offset
+     * @param {Pointer} pointer - Optional offset to start reading from (default: 0)
+     * @returns {*} - Decoded data
+     */
+    read(pointer = new Pointer(0)) {
       this.ensureOpen();
-      const fileSize = await this.getFileSize();
+      const fileSize = this.getFileSize();
       if (fileSize === 0) {
         throw new Error(`File is empty: ${this.filename}`);
       }
@@ -885,29 +924,40 @@
       if (pointerValue < 0 || pointerValue >= fileSize) {
         throw new Error(`Pointer offset ${pointer} out of file bounds [0, ${fileSize})`);
       }
-      const binaryData = await this.#readRange(pointerValue, fileSize - pointerValue);
+      const binaryData = this.#readRange(pointerValue, fileSize - pointerValue);
       return decode(binaryData);
     }
-    async append(data) {
+    /**
+     * Append data to file without truncating existing content
+     * @param {*} data - Data to encode and append
+     */
+    append(data) {
       this.ensureWritable();
       const binaryData = encode(data);
-      const existingSize = this.file.size;
-      const writable = await this.fileHandle.createWritable({ keepExistingData: true });
-      await writable.seek(existingSize);
-      await writable.write(binaryData);
-      await writable.close();
-      await this.refreshFile();
+      const existingSize = this.getFileSize();
+      this.syncAccessHandle.write(binaryData, { at: existingSize });
     }
-    async *scan() {
+    /**
+     * Explicitly flush any pending writes to disk
+     */
+    flush() {
+      this.ensureWritable();
+      this.syncAccessHandle.flush();
+    }
+    /**
+     * Async generator to scan through all records in the file
+     * Each record is decoded and yielded one at a time
+     */
+    *scan() {
       this.ensureOpen();
-      const fileSize = await this.getFileSize();
+      const fileSize = this.getFileSize();
       if (fileSize === 0) {
         return;
       }
       let offset = 0;
       while (offset < fileSize) {
-        const getValueSize = async (readPosition) => {
-          let tempData = await this.#readRange(readPosition, 1);
+        const getValueSize = (readPosition) => {
+          let tempData = this.#readRange(readPosition, 1);
           const type = tempData[0];
           switch (type) {
             case TYPE.NULL:
@@ -922,19 +972,25 @@
             case TYPE.OID:
               return 1 + 12;
             case TYPE.STRING: {
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const length = view.getUint32(0, true);
+              return 1 + 4 + length;
+            }
+            case TYPE.BINARY: {
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const length = view.getUint32(0, true);
               return 1 + 4 + length;
             }
             case TYPE.ARRAY: {
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const size = view.getUint32(0, true);
               return 1 + 4 + size;
             }
             case TYPE.OBJECT: {
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const size = view.getUint32(0, true);
               return 1 + 4 + size;
@@ -943,17 +999,19 @@
               throw new Error(`Unknown type byte: 0x${type.toString(16)}`);
           }
         };
-        const valueSize = await getValueSize(offset);
-        const valueData = await this.#readRange(offset, valueSize);
+        const valueSize = getValueSize(offset);
+        const valueData = this.#readRange(offset, valueSize);
         offset += valueSize;
         yield decode(valueData);
       }
     }
     async delete() {
-      this.ensureWritable();
+      if (this.isOpen) {
+        throw new Error(`File is open. Call close() first`);
+      }
+      this.root = this.root || await navigator.storage.getDirectory();
       try {
         await this.root.removeEntry(this.filename);
-        await this.close();
       } catch (error) {
         if (error.name === "NotFoundError") {
           return;
@@ -965,9 +1023,9 @@
       if (!navigator.storage || !navigator.storage.getDirectory) {
         throw new Error("Origin Private File System (OPFS) is not supported in this browser");
       }
-      const root = await navigator.storage.getDirectory();
+      this.root = this.root || await navigator.storage.getDirectory();
       try {
-        await root.getFileHandle(this.filename);
+        await this.root.getFileHandle(this.filename);
         return true;
       } catch (error) {
         if (error.name === "NotFoundError") {
@@ -1303,6 +1361,7 @@
     CURSOR_NOT_FOUND: 43,
     // Collection errors
     COLLECTION_IS_EMPTY: 26,
+    CANNOT_DO_EXCLUSION_ON_FIELD_ID_IN_INCLUSION_PROJECTION: 31254,
     // Not implemented (custom code)
     NOT_IMPLEMENTED: 999,
     OPERATION_NOT_SUPPORTED: 998
@@ -1777,7 +1836,7 @@
     tailable() {
       throw new NotImplementedError("tailable");
     }
-    async toArray() {
+    toArray() {
       const results = [];
       while (this.hasNext()) {
         results.push(this.next());
@@ -1907,7 +1966,7 @@
     tailable() {
       throw "Not Implemented";
     }
-    async toArray() {
+    toArray() {
       const results = [];
       while (this.hasNext()) {
         results.push(this.next());
@@ -2087,10 +2146,10 @@
       const exists = await this.file.exists();
       if (exists) {
         await this.file.open("rw");
-        await this._loadMetadata();
+        this._loadMetadata();
       } else {
         await this.file.open("rw");
-        await this._initializeNewTree();
+        this._initializeNewTree();
       }
       this.isOpen = true;
     }
@@ -2099,7 +2158,6 @@
      */
     async close() {
       if (this.isOpen) {
-        await this._saveMetadata();
         await this.file.close();
         this.isOpen = false;
       }
@@ -2107,18 +2165,18 @@
     /**
      * Initialize a new empty tree
      */
-    async _initializeNewTree() {
+    _initializeNewTree() {
       const rootNode = new NodeData(0, true, [], [], [], null);
       this.nextNodeId = 1;
       this._size = 0;
-      const rootPointer = await this._saveNode(rootNode);
+      const rootPointer = this._saveNode(rootNode);
       this.rootPointer = rootPointer;
-      await this._saveMetadata();
+      this._saveMetadata();
     }
     /**
      * Save metadata to file
      */
-    async _saveMetadata() {
+    _saveMetadata() {
       const metadata = {
         version: 1,
         maxEntries: this.order,
@@ -2130,19 +2188,19 @@
         nextId: this.nextNodeId
         // Renamed to match RTree size
       };
-      await this.file.append(metadata);
+      this.file.append(metadata);
     }
     /**
      * Load metadata from file
      */
-    async _loadMetadata() {
-      const fileSize = await this.file.getFileSize();
+    _loadMetadata() {
+      const fileSize = this.file.getFileSize();
       const METADATA_SIZE = 135;
       if (fileSize < METADATA_SIZE) {
         throw new Error("Invalid tree file");
       }
       const metadataOffset = fileSize - METADATA_SIZE;
-      const metadata = await this.file.read(metadataOffset);
+      const metadata = this.file.read(metadataOffset);
       if (!metadata || typeof metadata.maxEntries === "undefined") {
         throw new Error(`Failed to read metadata: missing required fields`);
       }
@@ -2155,19 +2213,19 @@
     /**
      * Save a node to disk
      */
-    async _saveNode(node) {
-      const offset = await this.file.getFileSize();
-      await this.file.append(node);
+    _saveNode(node) {
+      const offset = this.file.getFileSize();
+      this.file.append(node);
       return new Pointer(offset);
     }
     /**
      * Load a node from disk
      */
-    async _loadNode(pointer) {
+    _loadNode(pointer) {
       if (!(pointer instanceof Pointer)) {
         throw new Error("Expected Pointer object");
       }
-      const data = await this.file.read(pointer);
+      const data = this.file.read(pointer);
       return new NodeData(
         data.id,
         data.isLeaf,
@@ -2180,20 +2238,20 @@
     /**
      * Load root node
      */
-    async _loadRoot() {
-      return await this._loadNode(this.rootPointer);
+    _loadRoot() {
+      return this._loadNode(this.rootPointer);
     }
     /**
      * Search for a key
      */
-    async search(key) {
-      const root = await this._loadRoot();
+    search(key) {
+      const root = this._loadRoot();
       return this._searchNode(root, key);
     }
     /**
      * Internal search
      */
-    async _searchNode(node, key) {
+    _searchNode(node, key) {
       if (node.isLeaf) {
         for (let i = 0; i < node.keys.length; i++) {
           if (key === node.keys[i]) {
@@ -2206,22 +2264,22 @@
         while (i < node.keys.length && key >= node.keys[i]) {
           i++;
         }
-        const child = await this._loadNode(node.children[i]);
+        const child = this._loadNode(node.children[i]);
         return this._searchNode(child, key);
       }
     }
     /**
      * Insert a key-value pair
      */
-    async add(key, value) {
-      const root = await this._loadRoot();
-      const result = await this._addToNode(root, key, value);
+    add(key, value) {
+      const root = this._loadRoot();
+      const result = this._addToNode(root, key, value);
       let newRoot;
       if (result.newNode) {
         newRoot = result.newNode;
       } else {
-        const leftPointer = await this._saveNode(result.left);
-        const rightPointer = await this._saveNode(result.right);
+        const leftPointer = this._saveNode(result.left);
+        const rightPointer = this._saveNode(result.right);
         newRoot = new NodeData(
           this.nextNodeId++,
           false,
@@ -2231,14 +2289,15 @@
           null
         );
       }
-      const rootPointer = await this._saveNode(newRoot);
+      const rootPointer = this._saveNode(newRoot);
       this.rootPointer = rootPointer;
       this._size++;
+      this._saveMetadata();
     }
     /**
      * Internal add
      */
-    async _addToNode(node, key, value) {
+    _addToNode(node, key, value) {
       if (node.isLeaf) {
         const keys = [...node.keys];
         const values = [...node.values];
@@ -2280,17 +2339,17 @@
         while (childIdx < keys.length && key >= keys[childIdx]) {
           childIdx++;
         }
-        const childNode = await this._loadNode(children[childIdx]);
-        const result = await this._addToNode(childNode, key, value);
+        const childNode = this._loadNode(children[childIdx]);
+        const result = this._addToNode(childNode, key, value);
         if (result.newNode) {
-          const newChildPointer = await this._saveNode(result.newNode);
+          const newChildPointer = this._saveNode(result.newNode);
           children[childIdx] = newChildPointer;
           return {
             newNode: new NodeData(node.id, false, keys, [], children, null)
           };
         } else {
-          const leftPointer = await this._saveNode(result.left);
-          const rightPointer = await this._saveNode(result.right);
+          const leftPointer = this._saveNode(result.left);
+          const rightPointer = this._saveNode(result.right);
           keys.splice(childIdx, 0, result.splitKey);
           children.splice(childIdx, 1, leftPointer, rightPointer);
           if (keys.length < this.order) {
@@ -2318,24 +2377,25 @@
     /**
      * Delete a key
      */
-    async delete(key) {
-      const root = await this._loadRoot();
-      const newRoot = await this._deleteFromNode(root, key);
+    delete(key) {
+      const root = this._loadRoot();
+      const newRoot = this._deleteFromNode(root, key);
       if (!newRoot) {
         return;
       }
       let finalRoot = newRoot;
       if (finalRoot.keys.length === 0 && !finalRoot.isLeaf && finalRoot.children.length > 0) {
-        finalRoot = await this._loadNode(finalRoot.children[0]);
+        finalRoot = this._loadNode(finalRoot.children[0]);
       }
-      const rootPointer = await this._saveNode(finalRoot);
+      const rootPointer = this._saveNode(finalRoot);
       this.rootPointer = rootPointer;
       this._size--;
+      this._saveMetadata();
     }
     /**
      * Internal delete
      */
-    async _deleteFromNode(node, key) {
+    _deleteFromNode(node, key) {
       if (node.isLeaf) {
         const keyIndex = node.keys.indexOf(key);
         if (keyIndex === -1) {
@@ -2351,13 +2411,13 @@
         while (i < node.keys.length && key >= node.keys[i]) {
           i++;
         }
-        const childNode = await this._loadNode(node.children[i]);
-        const newChild = await this._deleteFromNode(childNode, key);
+        const childNode = this._loadNode(node.children[i]);
+        const newChild = this._deleteFromNode(childNode, key);
         if (!newChild) {
           return null;
         }
         const newChildren = [...node.children];
-        const newChildPointer = await this._saveNode(newChild);
+        const newChildPointer = this._saveNode(newChild);
         newChildren[i] = newChildPointer;
         return new NodeData(node.id, false, [...node.keys], [], newChildren, null);
       }
@@ -2365,16 +2425,16 @@
     /**
      * Get all entries as array
      */
-    async toArray() {
+    toArray() {
       const result = [];
-      await this._collectAllEntries(await this._loadRoot(), result);
+      this._collectAllEntries(this._loadRoot(), result);
       return result;
     }
     /**
      * Collect all entries in sorted order by traversing tree
      * @private
      */
-    async _collectAllEntries(node, result) {
+    _collectAllEntries(node, result) {
       if (node.isLeaf) {
         for (let i = 0; i < node.keys.length; i++) {
           result.push({
@@ -2384,8 +2444,8 @@
         }
       } else {
         for (const childPointer of node.children) {
-          const child = await this._loadNode(childPointer);
-          await this._collectAllEntries(child, result);
+          const child = this._loadNode(childPointer);
+          this._collectAllEntries(child, result);
         }
       }
     }
@@ -2404,16 +2464,16 @@
     /**
      * Range search
      */
-    async rangeSearch(minKey, maxKey) {
+    rangeSearch(minKey, maxKey) {
       const result = [];
-      await this._rangeSearchNode(await this._loadRoot(), minKey, maxKey, result);
+      this._rangeSearchNode(this._loadRoot(), minKey, maxKey, result);
       return result;
     }
     /**
      * Range search helper that traverses tree
      * @private
      */
-    async _rangeSearchNode(node, minKey, maxKey, result) {
+    _rangeSearchNode(node, minKey, maxKey, result) {
       if (node.isLeaf) {
         for (let i = 0; i < node.keys.length; i++) {
           if (node.keys[i] >= minKey && node.keys[i] <= maxKey) {
@@ -2425,20 +2485,20 @@
         }
       } else {
         for (const childPointer of node.children) {
-          const child = await this._loadNode(childPointer);
-          await this._rangeSearchNode(child, minKey, maxKey, result);
+          const child = this._loadNode(childPointer);
+          this._rangeSearchNode(child, minKey, maxKey, result);
         }
       }
     }
     /**
      * Get tree height
      */
-    async getHeight() {
+    getHeight() {
       let height = 0;
-      let current = await this._loadRoot();
+      let current = this._loadRoot();
       while (!current.isLeaf) {
         height++;
-        current = await this._loadNode(current.children[0]);
+        current = this._loadNode(current.children[0]);
       }
       return height;
     }
@@ -2455,13 +2515,12 @@
       if (!destinationFilename) {
         throw new Error("Destination filename is required for compaction");
       }
-      await this._saveMetadata();
       const oldSize = await this.file.getFileSize();
-      const entries = await this.toArray();
+      const entries = this.toArray();
       const newTree = new BPlusTree(destinationFilename, this.order);
       await newTree.open();
       for (const entry of entries) {
-        await newTree.add(entry.key, entry.value);
+        newTree.add(entry.key, entry.value);
       }
       await newTree.close();
       const tempFile = new BJsonFile(destinationFilename);
@@ -4411,98 +4470,6 @@
     }
     return false;
   }
-  class Timestamp {
-    constructor(low, high) {
-      if (arguments.length === 0) {
-        this.low = 0;
-        this.high = Math.floor(Date.now() / 1e3);
-      } else if (arguments.length === 1) {
-        if (typeof low === "object" && low !== null) {
-          this.low = low.low || 0;
-          this.high = low.high || 0;
-        } else {
-          this.low = 0;
-          this.high = low;
-        }
-      } else {
-        this.low = low >>> 0;
-        this.high = high >>> 0;
-      }
-    }
-    /**
-     * Returns the timestamp in a comparable form
-     */
-    valueOf() {
-      return this.high * 4294967296 + this.low;
-    }
-    /**
-     * Returns the timestamp as a string
-     */
-    toString() {
-      return `Timestamp(${this.high}, ${this.low})`;
-    }
-    /**
-     * Returns the timestamp as a JSON object
-     */
-    toJSON() {
-      return {
-        $timestamp: {
-          t: this.high,
-          i: this.low
-        }
-      };
-    }
-    /**
-     * Custom inspect for Node.js console.log
-     */
-    inspect() {
-      return this.toString();
-    }
-    /**
-     * Compares this Timestamp with another for equality
-     */
-    equals(other) {
-      if (!other) return false;
-      if (other instanceof Timestamp) {
-        return this.low === other.low && this.high === other.high;
-      }
-      if (typeof other === "object" && other.low !== void 0 && other.high !== void 0) {
-        return this.low === other.low && this.high === other.high;
-      }
-      return false;
-    }
-    /**
-     * Get the seconds part of the timestamp
-     */
-    getHighBits() {
-      return this.high;
-    }
-    /**
-     * Get the increment part of the timestamp
-     */
-    getLowBits() {
-      return this.low;
-    }
-    /**
-     * Returns a Date object representing the timestamp
-     */
-    toDate() {
-      return new Date(this.high * 1e3);
-    }
-    /**
-     * Creates a Timestamp from a Date object
-     */
-    static fromDate(date) {
-      const seconds = Math.floor(date.getTime() / 1e3);
-      return new Timestamp(0, seconds);
-    }
-    /**
-     * Creates a Timestamp for the current time
-     */
-    static now() {
-      return new Timestamp();
-    }
-  }
   function extractFilteredPositionalIdentifier(pathSegment) {
     const match = pathSegment.match(/^\$\[([^\]]+)\]$/);
     return match ? match[1] : null;
@@ -4707,6 +4674,9 @@
           var field = replacePositionalOperator(fields[j], positionalMatchInfo);
           var amount = value[fields[j]];
           if (hasFilteredPositionalOperator(field)) {
+            if (!userArrayFilters) {
+              throw new Error("arrayFilters option is required when using filtered positional operator $[<identifier>]");
+            }
             const parsedPath = parseFieldPath(field);
             applyToFilteredArrayElements(doc, parsedPath, amount, "$inc", userArrayFilters);
           } else if (hasAllPositional(field)) {
@@ -4725,6 +4695,9 @@
           var field = replacePositionalOperator(fields[j], positionalMatchInfo);
           var amount = value[fields[j]];
           if (hasFilteredPositionalOperator(field)) {
+            if (!userArrayFilters) {
+              throw new Error("arrayFilters option is required when using filtered positional operator $[<identifier>]");
+            }
             const parsedPath = parseFieldPath(field);
             applyToFilteredArrayElements(doc, parsedPath, amount, "$mul", userArrayFilters);
           } else if (hasAllPositional(field)) {
@@ -4756,6 +4729,9 @@
         for (var j = 0; j < fields.length; j++) {
           var field = replacePositionalOperator(fields[j], positionalMatchInfo);
           if (hasFilteredPositionalOperator(field)) {
+            if (!userArrayFilters) {
+              throw new Error("arrayFilters option is required when using filtered positional operator $[<identifier>]");
+            }
             const parsedPath = parseFieldPath(field);
             applyToFilteredArrayElements(doc, parsedPath, value[fields[j]], "$set", userArrayFilters);
           } else {
@@ -4774,6 +4750,9 @@
           var field = replacePositionalOperator(fields[j], positionalMatchInfo);
           var amount = value[fields[j]];
           if (hasFilteredPositionalOperator(field)) {
+            if (!userArrayFilters) {
+              throw new Error("arrayFilters option is required when using filtered positional operator $[<identifier>]");
+            }
             const parsedPath = parseFieldPath(field);
             applyToFilteredArrayElements(doc, parsedPath, amount, "$min", userArrayFilters);
           } else if (hasAllPositional(field)) {
@@ -4791,6 +4770,9 @@
           var field = replacePositionalOperator(fields[j], positionalMatchInfo);
           var amount = value[fields[j]];
           if (hasFilteredPositionalOperator(field)) {
+            if (!userArrayFilters) {
+              throw new Error("arrayFilters option is required when using filtered positional operator $[<identifier>]");
+            }
             const parsedPath = parseFieldPath(field);
             applyToFilteredArrayElements(doc, parsedPath, amount, "$max", userArrayFilters);
           } else if (hasAllPositional(field)) {
@@ -4809,8 +4791,6 @@
           var typeSpec = value[fields[j]];
           if (typeSpec === true || typeof typeSpec === "object" && typeSpec.$type === "date") {
             setProp(doc, field, /* @__PURE__ */ new Date());
-          } else if (typeof typeSpec === "object" && typeSpec.$type === "timestamp") {
-            setProp(doc, field, new Timestamp());
           } else {
             setProp(doc, field, /* @__PURE__ */ new Date());
           }
@@ -4976,8 +4956,8 @@
       }
     }
   }
-  function createDocFromUpdate(query, updates, idGenerator) {
-    var newDoc = { _id: idGenerator() };
+  function createDocFromUpdate(query, updates, id) {
+    var newDoc = { _id: id };
     var onlyFields = true;
     var updateKeys = Object.keys(updates);
     for (var i = 0; i < updateKeys.length; i++) {
@@ -5051,20 +5031,6 @@
         name: this.name,
         key: this.keys
       };
-    }
-    /**
-     * Serialize index state for storage
-     * @returns {Object} Serializable index state
-     */
-    serialize() {
-      throw new Error("serialize() must be implemented by subclass");
-    }
-    /**
-     * Restore index state from serialized data
-     * @param {Object} data - Serialized index state
-     */
-    deserialize(data) {
-      throw new Error("deserialize() must be implemented by subclass");
     }
   }
   class RegularCollectionIndex extends Index {
@@ -5352,8 +5318,55 @@
       if (this.isOpen) {
         return;
       }
-      await this.textIndex.open();
-      this.isOpen = true;
+      try {
+        await this.textIndex.open();
+        this.isOpen = true;
+      } catch (error) {
+        if (error.code === "ENOENT" || error.message && (error.message.includes("Failed to read metadata") || error.message.includes("missing required fields") || error.message.includes("Unknown type byte") || error.message.includes("Invalid") || error.message.includes("file too small"))) {
+          await this._deleteIndexFiles();
+          await this._ensureDirectoryForFile(this.storage + "-terms.bjson");
+          this.textIndex = new TextIndex({ baseFilename: this.storage });
+          await this.textIndex.open();
+          this.isOpen = true;
+        } else {
+          throw error;
+        }
+      }
+    }
+    async _deleteIndexFiles() {
+      const suffixes = ["-terms.bjson", "-documents.bjson", "-lengths.bjson"];
+      for (const suffix of suffixes) {
+        await this._deleteFile(this.storage + suffix);
+      }
+    }
+    async _deleteFile(filePath) {
+      if (!filePath) return;
+      try {
+        const pathParts = filePath.split("/").filter(Boolean);
+        const filename = pathParts.pop();
+        let dir = await globalThis.navigator.storage.getDirectory();
+        for (const part of pathParts) {
+          dir = await dir.getDirectoryHandle(part, { create: false });
+        }
+        await dir.removeEntry(filename);
+      } catch (error) {
+      }
+    }
+    async _ensureDirectoryForFile(filePath) {
+      if (!filePath) return;
+      const pathParts = filePath.split("/").filter(Boolean);
+      pathParts.pop();
+      if (pathParts.length === 0) return;
+      try {
+        let dir = await globalThis.navigator.storage.getDirectory();
+        for (const part of pathParts) {
+          dir = await dir.getDirectoryHandle(part, { create: true });
+        }
+      } catch (error) {
+        if (error.code !== "EEXIST") {
+          throw error;
+        }
+      }
     }
     /**
      * Close the index files
@@ -5429,6 +5442,7 @@
     /**
      * Clear all data from the index
      */
+    // TODO: Recreate the index empty or delete
     async clear() {
       if (this.isOpen) {
         await this.close();
@@ -5505,7 +5519,7 @@
     /**
      * Update the bounding box to contain all children
      */
-    async updateBBox() {
+    updateBBox() {
       if (this.children.length === 0) {
         this.bbox = null;
         return;
@@ -5517,7 +5531,7 @@
         if (this.isLeaf) {
           bbox = child.bbox;
         } else {
-          const childNode = await this.rtree._loadNode(child);
+          const childNode = this.rtree._loadNode(child);
           bbox = childNode.bbox;
         }
         if (bbox) {
@@ -5528,7 +5542,7 @@
         }
       }
       this.bbox = { minLat, maxLat, minLng, maxLng };
-      await this.rtree._saveNode(this);
+      this.rtree._saveNode(this);
     }
     /**
      * Convert node to plain object for serialization
@@ -5563,10 +5577,10 @@
       const exists = await this.file.exists();
       if (exists) {
         await this.file.open("rw");
-        await this._loadFromFile();
+        this._loadFromFile();
       } else {
         await this.file.open("rw");
-        await this._initializeNewTree();
+        this._initializeNewTree();
       }
       this.isOpen = true;
     }
@@ -5575,7 +5589,7 @@
      */
     async close() {
       if (this.isOpen) {
-        await this._writeMetadata();
+        this._writeMetadata();
         await this.file.close();
         this.isOpen = false;
       }
@@ -5583,7 +5597,7 @@
     /**
      * Initialize a new empty tree
      */
-    async _initializeNewTree() {
+    _initializeNewTree() {
       const rootNode = new RTreeNode(this, {
         id: 0,
         isLeaf: true,
@@ -5592,13 +5606,13 @@
       });
       this.nextId = 1;
       this._size = 0;
-      this.rootPointer = await this._saveNode(rootNode);
-      await this._writeMetadata();
+      this.rootPointer = this._saveNode(rootNode);
+      this._writeMetadata();
     }
     /**
      * Write metadata record to file
      */
-    async _writeMetadata() {
+    _writeMetadata() {
       const metadata = {
         version: 1,
         maxEntries: this.maxEntries,
@@ -5607,19 +5621,19 @@
         rootPointer: this.rootPointer,
         nextId: this.nextId
       };
-      await this.file.append(metadata);
+      this.file.append(metadata);
     }
     /**
      * Load tree from existing file
      */
-    async _loadFromFile() {
+    _loadFromFile() {
       const METADATA_SIZE = 135;
-      const fileSize = await this.file.getFileSize();
+      const fileSize = this.file.getFileSize();
       if (fileSize < METADATA_SIZE) {
         throw new Error("Invalid R-tree file format: file too small for metadata");
       }
       const metadataOffset = fileSize - METADATA_SIZE;
-      const metadata = await this.file.read(metadataOffset);
+      const metadata = this.file.read(metadataOffset);
       this.maxEntries = metadata.maxEntries;
       this.minEntries = metadata.minEntries;
       this._size = metadata.size;
@@ -5629,35 +5643,38 @@
     /**
      * Save a node to disk and return its Pointer
      */
-    async _saveNode(node) {
+    _saveNode(node) {
       const nodeData = node.toJSON();
-      const offset = await this.file.getFileSize();
-      await this.file.append(nodeData);
+      const offset = this.file.getFileSize();
+      this.file.append(nodeData);
       return new Pointer(offset);
     }
     /**
      * Load a node from disk by Pointer
      */
-    async _loadNode(pointer) {
+    _loadNode(pointer) {
       if (!(pointer instanceof Pointer)) {
         throw new Error("Expected Pointer object");
       }
       const offset = pointer.valueOf();
-      const nodeData = await this.file.read(offset);
+      const nodeData = this.file.read(offset);
       return new RTreeNode(this, nodeData);
     }
     /**
      * Load the root node
      */
-    async _loadRoot() {
-      return await this._loadNode(this.rootPointer);
+    _loadRoot() {
+      return this._loadNode(this.rootPointer);
     }
     /**
      * Insert a point into the R-tree with an ObjectId
      */
-    async insert(lat, lng, objectId) {
+    insert(lat, lng, objectId) {
       if (!this.isOpen) {
         throw new Error("R-tree file must be opened before use");
+      }
+      if (!(objectId instanceof ObjectId)) {
+        throw new Error("objectId must be an instance of ObjectId to insert into rtree");
       }
       const bbox = {
         minLat: lat,
@@ -5666,8 +5683,8 @@
         maxLng: lng
       };
       const entry = { bbox, lat, lng, objectId };
-      const root = await this._loadRoot();
-      const result = await this._insert(entry, root, 1);
+      const root = this._loadRoot();
+      const result = this._insert(entry, root, 1);
       if (result.split) {
         const newRoot = new RTreeNode(this, {
           id: this.nextId++,
@@ -5675,31 +5692,31 @@
           children: result.pointers,
           bbox: null
         });
-        await newRoot.updateBBox();
-        this.rootPointer = await this._saveNode(newRoot);
+        newRoot.updateBBox();
+        this.rootPointer = this._saveNode(newRoot);
       } else {
         this.rootPointer = result.pointer;
       }
       this._size++;
-      await this._writeMetadata();
+      this._writeMetadata();
     }
     /**
      * Internal insert method - returns splitPointers if split occurred, else returns updated node pointer
      */
-    async _insert(entry, node, level) {
+    _insert(entry, node, level) {
       if (node.isLeaf) {
         node.children.push(entry);
-        await node.updateBBox();
+        node.updateBBox();
         if (node.children.length > this.maxEntries) {
-          const [pointer1, pointer2] = await this._split(node);
+          const [pointer1, pointer2] = this._split(node);
           return { split: true, pointers: [pointer1, pointer2] };
         }
-        const pointer = await this._saveNode(node);
+        const pointer = this._saveNode(node);
         return { split: false, pointer };
       } else {
-        const targetPointer = await this._chooseSubtree(entry.bbox, node);
-        const targetNode = await this._loadNode(targetPointer);
-        const result = await this._insert(entry, targetNode, level + 1);
+        const targetPointer = this._chooseSubtree(entry.bbox, node);
+        const targetNode = this._loadNode(targetPointer);
+        const result = this._insert(entry, targetNode, level + 1);
         if (result.split) {
           let childIndex = -1;
           for (let i = 0; i < node.children.length; i++) {
@@ -5715,9 +5732,9 @@
             node.children.push(result.pointers[0]);
             node.children.push(result.pointers[1]);
           }
-          await node.updateBBox();
+          node.updateBBox();
           if (node.children.length > this.maxEntries) {
-            const [pointer1, pointer2] = await this._split(node);
+            const [pointer1, pointer2] = this._split(node);
             return { split: true, pointers: [pointer1, pointer2] };
           }
         } else {
@@ -5731,16 +5748,16 @@
           if (childIndex !== -1) {
             node.children[childIndex] = result.pointer;
           }
-          await node.updateBBox();
+          node.updateBBox();
         }
-        const pointer = await this._saveNode(node);
+        const pointer = this._saveNode(node);
         return { split: false, pointer };
       }
     }
     /**
      * Choose the best subtree to insert an entry
      */
-    async _chooseSubtree(bbox, node) {
+    _chooseSubtree(bbox, node) {
       let minEnlargement = Infinity;
       let minArea = Infinity;
       let targetPointer = null;
@@ -5748,7 +5765,7 @@
         if (!(childPointer instanceof Pointer)) {
           throw new Error(`Expected Pointer in _chooseSubtree, got: ${typeof childPointer}`);
         }
-        const childNode = await this._loadNode(childPointer);
+        const childNode = this._loadNode(childPointer);
         const enl = enlargement(childNode.bbox, bbox);
         const ar = area(childNode.bbox);
         if (enl < minEnlargement || enl === minEnlargement && ar < minArea) {
@@ -5762,7 +5779,7 @@
     /**
      * Split an overflowing node
      */
-    async _split(node) {
+    _split(node) {
       const children = node.children;
       const isLeaf = node.isLeaf;
       let maxDist = -Infinity;
@@ -5774,8 +5791,8 @@
             bbox1 = children[i].bbox;
             bbox2 = children[j].bbox;
           } else {
-            const node12 = await this._loadNode(children[i]);
-            const node22 = await this._loadNode(children[j]);
+            const node12 = this._loadNode(children[i]);
+            const node22 = this._loadNode(children[j]);
             bbox1 = node12.bbox;
             bbox2 = node22.bbox;
           }
@@ -5806,11 +5823,11 @@
         if (isLeaf) {
           bbox = child.bbox;
         } else {
-          const childNode = await this._loadNode(child);
+          const childNode = this._loadNode(child);
           bbox = childNode.bbox;
         }
-        await node1.updateBBox();
-        await node2.updateBBox();
+        node1.updateBBox();
+        node2.updateBBox();
         const enl1 = node1.bbox ? enlargement(node1.bbox, bbox) : 0;
         const enl2 = node2.bbox ? enlargement(node2.bbox, bbox) : 0;
         if (enl1 < enl2) {
@@ -5825,28 +5842,28 @@
           }
         }
       }
-      await node1.updateBBox();
-      await node2.updateBBox();
-      const pointer1 = await this._saveNode(node1);
-      const pointer2 = await this._saveNode(node2);
+      node1.updateBBox();
+      node2.updateBBox();
+      const pointer1 = this._saveNode(node1);
+      const pointer2 = this._saveNode(node2);
       return [pointer1, pointer2];
     }
     /**
      * Search for points within a bounding box, returning entries with coords
      */
-    async searchBBox(bbox) {
+    searchBBox(bbox) {
       if (!this.isOpen) {
         throw new Error("R-tree file must be opened before use");
       }
       const results = [];
-      const root = await this._loadRoot();
-      await this._searchBBox(bbox, root, results);
+      const root = this._loadRoot();
+      this._searchBBox(bbox, root, results);
       return results;
     }
     /**
      * Internal bounding box search
      */
-    async _searchBBox(bbox, node, results) {
+    _searchBBox(bbox, node, results) {
       if (!node.bbox || !intersects(bbox, node.bbox)) {
         return;
       }
@@ -5862,19 +5879,19 @@
         }
       } else {
         for (const childPointer of node.children) {
-          const childNode = await this._loadNode(childPointer);
-          await this._searchBBox(bbox, childNode, results);
+          const childNode = this._loadNode(childPointer);
+          this._searchBBox(bbox, childNode, results);
         }
       }
     }
     /**
      * Search for points within a radius of a location, returning ObjectIds with distances
      */
-    async searchRadius(lat, lng, radiusKm) {
+    searchRadius(lat, lng, radiusKm) {
       const bbox = radiusToBoundingBox(lat, lng, radiusKm);
-      const root = await this._loadRoot();
+      const root = this._loadRoot();
       const entries = [];
-      await this._searchBBoxEntries(bbox, root, entries);
+      this._searchBBoxEntries(bbox, root, entries);
       const results = [];
       for (const entry of entries) {
         const dist = haversineDistance(lat, lng, entry.lat, entry.lng);
@@ -5892,7 +5909,7 @@
     /**
      * Internal bounding box search that returns full entries (used by radius search)
      */
-    async _searchBBoxEntries(bbox, node, results) {
+    _searchBBoxEntries(bbox, node, results) {
       if (!node.bbox || !intersects(bbox, node.bbox)) {
         return;
       }
@@ -5904,20 +5921,23 @@
         }
       } else {
         for (const childPointer of node.children) {
-          const childNode = await this._loadNode(childPointer);
-          await this._searchBBoxEntries(bbox, childNode, results);
+          const childNode = this._loadNode(childPointer);
+          this._searchBBoxEntries(bbox, childNode, results);
         }
       }
     }
     /**
      * Remove an entry from the R-tree by ObjectId
      */
-    async remove(objectId) {
+    remove(objectId) {
       if (!this.isOpen) {
         throw new Error("R-tree file must be opened before use");
       }
-      const root = await this._loadRoot();
-      const result = await this._remove(objectId, root);
+      if (!(objectId instanceof ObjectId)) {
+        throw new Error("objectId must be an instance of ObjectId to remove from rtree");
+      }
+      const root = this._loadRoot();
+      const result = this._remove(objectId, root);
       if (!result.found) {
         return false;
       }
@@ -5929,7 +5949,7 @@
             children: [],
             bbox: null
           });
-          this.rootPointer = await this._saveNode(newRoot);
+          this.rootPointer = this._saveNode(newRoot);
         } else if (result.children.length === 1 && !result.isLeaf) {
           this.rootPointer = result.children[0];
         } else {
@@ -5939,21 +5959,21 @@
             children: result.children,
             bbox: null
           });
-          await newRoot.updateBBox();
-          this.rootPointer = await this._saveNode(newRoot);
+          newRoot.updateBBox();
+          this.rootPointer = this._saveNode(newRoot);
         }
       } else if (result.pointer) {
         this.rootPointer = result.pointer;
       }
       this._size--;
-      await this._writeMetadata();
+      this._writeMetadata();
       return true;
     }
     /**
      * Internal remove method
      * Returns: { found: boolean, underflow: boolean, pointer: Pointer, children: Array, isLeaf: boolean }
      */
-    async _remove(objectId, node) {
+    _remove(objectId, node) {
       if (node.isLeaf) {
         const initialLength = node.children.length;
         node.children = node.children.filter(
@@ -5962,8 +5982,8 @@
         if (node.children.length === initialLength) {
           return { found: false };
         }
-        await node.updateBBox();
-        const pointer = await this._saveNode(node);
+        node.updateBBox();
+        const pointer = this._saveNode(node);
         const underflow = node.children.length < this.minEntries && node.children.length > 0;
         return {
           found: true,
@@ -5976,11 +5996,11 @@
         let updatedChildren = [...node.children];
         for (let i = 0; i < updatedChildren.length; i++) {
           const childPointer = updatedChildren[i];
-          const childNode = await this._loadNode(childPointer);
-          const result = await this._remove(objectId, childNode);
+          const childNode = this._loadNode(childPointer);
+          const result = this._remove(objectId, childNode);
           if (result.found) {
             if (result.underflow) {
-              const handled = await this._handleUnderflow(node, i, childNode, result);
+              const handled = this._handleUnderflow(node, i, childNode, result);
               if (handled.merged) {
                 updatedChildren = handled.children;
               } else {
@@ -5995,8 +6015,8 @@
               children: updatedChildren,
               bbox: null
             });
-            await updatedNode.updateBBox();
-            const pointer = await this._saveNode(updatedNode);
+            updatedNode.updateBBox();
+            const pointer = this._saveNode(updatedNode);
             const underflow = updatedChildren.length < this.minEntries && updatedChildren.length > 0;
             return {
               found: true,
@@ -6013,16 +6033,16 @@
     /**
      * Handle underflow in a child node by merging or redistributing
      */
-    async _handleUnderflow(parentNode, childIndex, childNode, childResult) {
+    _handleUnderflow(parentNode, childIndex, childNode, childResult) {
       const siblings = [];
       if (childIndex > 0) {
         const prevPointer = parentNode.children[childIndex - 1];
-        const prevNode = await this._loadNode(prevPointer);
+        const prevNode = this._loadNode(prevPointer);
         siblings.push({ index: childIndex - 1, node: prevNode, pointer: prevPointer });
       }
       if (childIndex < parentNode.children.length - 1) {
         const nextPointer = parentNode.children[childIndex + 1];
-        const nextNode = await this._loadNode(nextPointer);
+        const nextNode = this._loadNode(nextPointer);
         siblings.push({ index: childIndex + 1, node: nextNode, pointer: nextPointer });
       }
       for (const sibling of siblings) {
@@ -6040,16 +6060,16 @@
             children: newChild1Children,
             bbox: null
           });
-          await newChild1.updateBBox();
+          newChild1.updateBBox();
           const newChild2 = new RTreeNode(this, {
             id: sibling.node.id,
             isLeaf: sibling.node.isLeaf,
             children: newChild2Children,
             bbox: null
           });
-          await newChild2.updateBBox();
-          const pointer1 = await this._saveNode(newChild1);
-          const pointer2 = await this._saveNode(newChild2);
+          newChild2.updateBBox();
+          const pointer1 = this._saveNode(newChild1);
+          const pointer2 = this._saveNode(newChild2);
           const newChildren = [...parentNode.children];
           const minIndex = Math.min(childIndex, sibling.index);
           const maxIndex = Math.max(childIndex, sibling.index);
@@ -6070,8 +6090,8 @@
           children: mergedChildren,
           bbox: null
         });
-        await mergedNode.updateBBox();
-        const mergedPointer = await this._saveNode(mergedNode);
+        mergedNode.updateBBox();
+        const mergedPointer = this._saveNode(mergedNode);
         const newChildren = parentNode.children.filter(
           (_, i) => i !== childIndex && i !== sibling.index
         );
@@ -6089,10 +6109,11 @@
     /**
      * Clear all entries from the tree
      */
+    // TODO: This method deletes and recreates the underlying file to clear all data.
+    // immutable????
     async clear() {
       await this.close();
       const tempFile = new BJsonFile(this.filename);
-      await tempFile.open("rw");
       await tempFile.delete();
       this.file = new BJsonFile(this.filename);
       await this.open();
@@ -6109,8 +6130,8 @@
       if (!destinationFilename) {
         throw new Error("Destination filename is required for compaction");
       }
-      await this._writeMetadata();
-      const oldSize = await this.file.getFileSize();
+      this._writeMetadata();
+      const oldSize = this.file.getFileSize();
       const dest = new RTree(destinationFilename, this.maxEntries);
       dest.minEntries = this.minEntries;
       dest.nextId = this.nextId;
@@ -6118,12 +6139,12 @@
       await dest.file.open("rw");
       dest.isOpen = true;
       const pointerMap = /* @__PURE__ */ new Map();
-      const cloneNode = async (pointer) => {
+      const cloneNode = (pointer) => {
         const offset = pointer.valueOf();
         if (pointerMap.has(offset)) {
           return pointerMap.get(offset);
         }
-        const sourceNode = await this._loadNode(pointer);
+        const sourceNode = this._loadNode(pointer);
         const clonedChildren = [];
         if (sourceNode.isLeaf) {
           for (const child of sourceNode.children) {
@@ -6131,7 +6152,7 @@
           }
         } else {
           for (const childPointer of sourceNode.children) {
-            const newChildPtr = await cloneNode(childPointer);
+            const newChildPtr = cloneNode(childPointer);
             clonedChildren.push(newChildPtr);
           }
         }
@@ -6141,18 +6162,18 @@
           children: clonedChildren,
           bbox: sourceNode.bbox
         });
-        const newPointer = await dest._saveNode(clonedNode);
+        const newPointer = dest._saveNode(clonedNode);
         pointerMap.set(offset, newPointer);
         return newPointer;
       };
-      const newRootPointer = await cloneNode(this.rootPointer);
+      const newRootPointer = cloneNode(this.rootPointer);
       dest.rootPointer = newRootPointer;
-      await dest._writeMetadata();
+      dest._writeMetadata();
       await dest.file.close();
       dest.isOpen = false;
       const tempFile = new BJsonFile(destinationFilename);
       await tempFile.open("r");
-      const newSize = await tempFile.getFileSize();
+      const newSize = tempFile.getFileSize();
       await tempFile.close();
       return {
         oldSize,
@@ -6162,71 +6183,12 @@
       };
     }
   }
-  class GeospatialCollectionIndex extends Index {
-    constructor(name, keys, storage, options = {}) {
-      super(name, keys, storage, options);
-      this.rtree = new RTree(storage, 9);
+  class GeospatialIndex extends Index {
+    constructor(indexName, keys, storageFile, options = {}) {
+      super(indexName, keys, storageFile, options);
+      this.geoField = Object.keys(keys)[0];
+      this.rtree = new RTree(storageFile, 9);
       this.isOpen = false;
-      this._idMap = /* @__PURE__ */ new Map();
-      this._objectIdMap = /* @__PURE__ */ new Map();
-      this.geoField = null;
-      for (const field in keys) {
-        if (keys[field] === "2dsphere" || keys[field] === "2d") {
-          this.geoField = field;
-          break;
-        }
-      }
-      if (!this.geoField) {
-        throw new Error('Geospatial index must have at least one field with type "2dsphere" or "2d"');
-      }
-    }
-    /**
-     * Normalize a value so it can be stored in the RTree and compared via equals()
-     * @param {*} id - Document identifier
-     * @returns {*} ObjectId-compatible value with equals()/toString()
-     */
-    _normalizeObjectId(id) {
-      if (id instanceof ObjectId) {
-        this._objectIdMap.set(id.toString(), id.toString());
-        return id;
-      }
-      const key = String(id);
-      if (this._idMap.has(key)) {
-        return this._idMap.get(key);
-      }
-      let objectId;
-      try {
-        if (typeof id === "string" && ObjectId.isValid(id)) {
-          objectId = new ObjectId(id);
-        }
-      } catch (e) {
-      }
-      if (!objectId) {
-        objectId = this._createDeterministicObjectId(key);
-      }
-      this._idMap.set(key, objectId);
-      this._objectIdMap.set(objectId.toString(), key);
-      return objectId;
-    }
-    _toDocId(id) {
-      if (id instanceof ObjectId) {
-        const mapped = this._objectIdMap.get(id.toString());
-        return mapped !== void 0 ? mapped : id.toString();
-      }
-      if (id && typeof id === "object" && "objectId" in id) {
-        return this._toDocId(id.objectId);
-      }
-      return String(id);
-    }
-    _createDeterministicObjectId(key) {
-      let hash = 2166136261;
-      for (let i = 0; i < key.length; i++) {
-        hash ^= key.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
-      }
-      const hex = (hash >>> 0).toString(16).padStart(8, "0");
-      const idHex = (hex + hex + hex).slice(0, 24);
-      return new ObjectId(idHex);
     }
     /**
      * Open the index file
@@ -6236,8 +6198,18 @@
       if (this.isOpen) {
         return;
       }
-      await this.rtree.open();
-      this.isOpen = true;
+      try {
+        await this.rtree.open();
+        this.isOpen = true;
+      } catch (error) {
+        if (error.code === "ENOENT" || error.message && (error.message.includes("Invalid R-tree") || error.message.includes("file too small") || error.message.includes("Failed to read metadata") || error.message.includes("Unknown type byte"))) {
+          this.rtree = new RTree(this.storage, 9);
+          await this.rtree.open();
+          this.isOpen = true;
+        } else {
+          throw error;
+        }
+      }
     }
     /**
      * Close the index file
@@ -6303,8 +6275,7 @@
       const geoValue = getProp(doc, this.geoField);
       const coords = this._extractCoordinates(geoValue);
       if (coords) {
-        const objectId = this._normalizeObjectId(doc._id);
-        await this.rtree.insert(coords.lat, coords.lng, objectId);
+        await this.rtree.insert(coords.lat, coords.lng, doc._id);
       }
     }
     /**
@@ -6315,8 +6286,11 @@
       if (!doc._id) {
         return;
       }
-      const objectId = this._normalizeObjectId(doc._id);
-      await this.rtree.remove(objectId);
+      if (!(doc._id instanceof ObjectId)) {
+        console.error(doc);
+        throw new Error("Document _id must be an ObjectId to remove from geospatial index");
+      }
+      await this.rtree.remove(doc._id);
     }
     /**
      * Query the geospatial index
@@ -6324,6 +6298,9 @@
      * @returns {Promise<Array|null>} Array of document IDs or null if query is not a geospatial query
      */
     async query(query) {
+      if (!this.isOpen) {
+        await this.open();
+      }
       if (!query[this.geoField]) {
         return null;
       }
@@ -6341,7 +6318,7 @@
             minLng: minLon,
             maxLng: maxLon
           });
-          return results.map((entry) => this._toDocId(entry.objectId));
+          return results.map((entry) => entry.objectId.toString());
         }
       }
       if (geoQuery.$near) {
@@ -6364,7 +6341,7 @@
         const maxDistanceKm = maxDistanceMeters / 1e3;
         const results = await this.rtree.searchRadius(lat, lng, maxDistanceKm);
         results.sort((a, b) => a.distance - b.distance);
-        return results.map((entry) => this._toDocId(entry.objectId));
+        return results.map((entry) => entry.objectId.toString());
       }
       if (geoQuery.$nearSphere) {
         const nearQuery = geoQuery.$nearSphere;
@@ -6386,7 +6363,7 @@
         const maxDistanceKm = maxDistanceMeters / 1e3;
         const results = await this.rtree.searchRadius(lat, lng, maxDistanceKm);
         results.sort((a, b) => a.distance - b.distance);
-        return results.map((entry) => this._toDocId(entry.objectId));
+        return results.map((entry) => entry.objectId.toString());
       }
       if (geoQuery.$geoIntersects) {
         const intersectsQuery = geoQuery.$geoIntersects;
@@ -6408,7 +6385,7 @@
             minLng: lng - epsilon,
             maxLng: lng + epsilon
           });
-          return results.map((entry) => this._toDocId(entry.objectId));
+          return results.map((entry) => entry.objectId.toString());
         } else if (geometry.type === "Polygon") {
           const coordinates = geometry.coordinates;
           if (!coordinates || coordinates.length === 0) {
@@ -6434,28 +6411,30 @@
             maxLng
           });
           const results = candidates.filter((entry) => this._pointInPolygon(entry.lat, entry.lng, ring));
-          return results.map((entry) => this._toDocId(entry.objectId));
+          return results.map((entry) => entry.objectId.toString());
         }
         return null;
       }
       return null;
     }
-    /**
-     * Calculate distance between two points using Haversine formula
-     * @param {number} lat1 - Latitude of first point
-     * @param {number} lng1 - Longitude of first point
-     * @param {number} lat2 - Latitude of second point
-     * @param {number} lng2 - Longitude of second point
-     * @returns {number} Distance in kilometers
-     */
-    _haversineDistance(lat1, lng1, lat2, lng2) {
-      const R = 6371;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLng = (lng2 - lng1) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    }
+    // /**
+    //  * Calculate distance between two points using Haversine formula
+    //  * @param {number} lat1 - Latitude of first point
+    //  * @param {number} lng1 - Longitude of first point
+    //  * @param {number} lat2 - Latitude of second point
+    //  * @param {number} lng2 - Longitude of second point
+    //  * @returns {number} Distance in kilometers
+    //  */
+    // _haversineDistance(lat1, lng1, lat2, lng2) {
+    // 	const R = 6371; // Earth's radius in kilometers
+    // 	const dLat = (lat2 - lat1) * Math.PI / 180;
+    // 	const dLng = (lng2 - lng1) * Math.PI / 180;
+    // 	const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    // 		Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    // 		Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    // 	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    // 	return R * c;
+    // }
     /**
      * Test if a point is inside a polygon using ray casting algorithm
      * @param {number} lat - Point latitude
@@ -6478,11 +6457,9 @@
     /**
      * Clear all data from the index
      */
+    // TODO: dont' delete the file or just clear the RTree contents
     async clear() {
-      if (!this.isOpen) {
-        await this.rtree.open();
-        this.isOpen = true;
-      }
+      await this.close();
       try {
         await this.rtree.file.delete();
       } catch (err) {
@@ -6490,7 +6467,6 @@
           throw err;
         }
       }
-      this.isOpen = false;
       this.rtree = new RTree(this.rtree.filename, 9);
       await this.open();
     }
@@ -6660,7 +6636,7 @@
      */
     _planGeoQuery(query, analysis) {
       for (const [indexName, index] of this.indexes) {
-        if (index instanceof GeospatialCollectionIndex) {
+        if (index instanceof GeospatialIndex) {
           const plan = new QueryPlan();
           plan.type = "index_scan";
           plan.indexes = [indexName];
@@ -6744,7 +6720,7 @@
         return plan;
       }
       for (const [indexName, index] of this.indexes) {
-        if (index instanceof TextCollectionIndex || index instanceof GeospatialCollectionIndex) {
+        if (index instanceof TextCollectionIndex || index instanceof GeospatialIndex) {
           continue;
         }
         if (this._canIndexHandleQuery(index, query)) {
@@ -6763,6 +6739,9 @@
      */
     async _executeIndexScan(scan) {
       const { index, query, textQuery } = scan;
+      if (typeof index.open === "function" && typeof index.isOpen !== "undefined" && !index.isOpen) {
+        await index.open();
+      }
       if (textQuery !== void 0) {
         return await index.search(textQuery);
       }
@@ -7189,51 +7168,128 @@
     }
   }
   class Collection extends eventsExports.EventEmitter {
-    constructor(db, name, storage, idGenerator) {
+    constructor(db, name, options = {}) {
       super();
       this.db = db;
       this.name = name;
-      this.storage = storage;
-      this.idGenerator = idGenerator;
+      this.path = `${this.db.baseFolder}/${this.db.dbName}/${this.name}`;
+      this.documentsPath = `${this.path}/documents.bjson`;
+      this.order = options.bPlusTreeOrder || 50;
+      this.documents = null;
       this.indexes = /* @__PURE__ */ new Map();
-      this.queryPlanner = new QueryPlanner(this.indexes);
+      this._initialized = false;
       this.isCollection = true;
-      this._restoreIndexesFromStorage();
+      this.queryPlanner = new QueryPlanner(this.indexes);
     }
-    _restoreIndexesFromStorage() {
-      if (!this.storage || !this.storage.indexes || typeof this.storage.indexes[Symbol.iterator] !== "function") {
-        return;
+    async _initialize() {
+      if (this._initialized) return;
+      if (!globalThis.navigator || !globalThis.navigator.storage || typeof globalThis.navigator.storage.getDirectory !== "function") {
+        throw new Error("OPFS not available: navigator.storage.getDirectory is missing");
       }
-      for (const [indexName, indexStore] of this.storage.indexes) {
-        const meta = indexStore && typeof indexStore.getAllMeta === "function" ? indexStore.getAllMeta() : null;
-        if (!meta || !meta.type || !meta.baseFilename || !meta.keys) continue;
-        const name = meta.name || indexName;
-        let index;
-        if (meta.type === "text") {
-          index = new TextCollectionIndex(name, meta.keys, meta.baseFilename, meta.options || {});
-        } else if (meta.type === "geospatial") {
-          const storageFile = meta.storage || `${meta.baseFilename}-geo.bjson`;
-          index = new GeospatialCollectionIndex(name, meta.keys, storageFile, meta.options || {});
-        } else {
-          const storageFile = meta.storage || `${meta.baseFilename}.bjson`;
-          index = new RegularCollectionIndex(name, meta.keys, storageFile, meta.options || {});
+      await this._ensureDirectoryForFile(this.documentsPath);
+      this.documents = new BPlusTree(this.documentsPath, this.order);
+      await this.documents.open();
+      await this._loadIndexes();
+      this._initialized = true;
+    }
+    async _ensureDirectoryForFile(filePath) {
+      if (!filePath) return;
+      const pathParts = filePath.split("/").filter(Boolean);
+      pathParts.pop();
+      if (pathParts.length === 0) return;
+      try {
+        let dir = await globalThis.navigator.storage.getDirectory();
+        for (const part of pathParts) {
+          dir = await dir.getDirectoryHandle(part, { create: true });
         }
-        this.indexes.set(name, index);
+      } catch (error) {
+        if (error.code !== "EEXIST") {
+          throw error;
+        }
       }
     }
-    async _ensureIndexOpen(index) {
-      if (index && typeof index.open === "function" && !index.isOpen) {
-        await index.open();
+    async _loadIndexes() {
+      let dirHandle;
+      try {
+        const parts = this.path.split("/").filter(Boolean);
+        let handle = await globalThis.navigator.storage.getDirectory();
+        for (const part of parts) {
+          handle = await handle.getDirectoryHandle(part, { create: false });
+        }
+        dirHandle = handle;
+      } catch (err) {
+        if (err?.name === "NotFoundError" || err?.code === "ENOENT") {
+          return;
+        }
+        throw err;
       }
+      for await (const [entryName, entryHandle] of dirHandle.entries()) {
+        if (entryHandle.kind !== "file") continue;
+        let type;
+        if (entryName.endsWith(".textindex-documents.bjson")) {
+          type = "text";
+        } else if (entryName.endsWith(".rtree.bjson")) {
+          type = "geospatial";
+        } else if (entryName.endsWith(".bplustree.bjson")) {
+          type = "regular";
+        } else {
+          continue;
+        }
+        const indexName = entryName.replace(/\.textindex-documents\.bjson$/, "").replace(/\.rtree\.bjson$/, "").replace(/\.bplustree\.bjson$/, "");
+        if (this.indexes.has(indexName)) continue;
+        const keys = this._parseIndexName(indexName, type);
+        if (!keys) {
+          continue;
+        }
+        let index;
+        if (type === "text") {
+          const storageFile = await this._getIndexPath(indexName, type);
+          index = new TextCollectionIndex(indexName, keys, storageFile, {});
+        } else if (type === "geospatial") {
+          const storageFile = await this._getIndexPath(indexName, type);
+          index = new GeospatialIndex(indexName, keys, storageFile, {});
+        } else {
+          const storageFile = await this._getIndexPath(indexName, type);
+          index = new RegularCollectionIndex(indexName, keys, storageFile, {});
+        }
+        try {
+          await index.open();
+          this.indexes.set(indexName, index);
+        } catch (err) {
+          console.warn(`Failed to open index ${indexName}:`, err);
+        }
+      }
+    }
+    _parseIndexName(indexName, type) {
+      const tokens = indexName.split("_");
+      if (tokens.length < 2 || tokens.length % 2 !== 0) return null;
+      const keys = {};
+      for (let i = 0; i < tokens.length; i += 2) {
+        const field = tokens[i];
+        const dir = tokens[i + 1];
+        if (!field || dir === void 0) return null;
+        if (type === "text" || dir === "text") {
+          keys[field] = "text";
+        } else if (type === "geospatial" || dir === "2dsphere" || dir === "2d") {
+          keys[field] = dir === "2d" ? "2d" : "2dsphere";
+        } else {
+          const num = Number(dir);
+          if (Number.isNaN(num) || num !== 1 && num !== -1) {
+            return null;
+          }
+          keys[field] = num;
+        }
+      }
+      return keys;
     }
     /**
      * Close all indexes
      */
     async close() {
+      if (!this._initialized) return;
+      await this.documents.close();
       for (const [indexName, index] of this.indexes) {
-        if (index && typeof index.close === "function") {
-          await index.close();
-        }
+        await index.close();
       }
     }
     /**
@@ -7270,53 +7326,46 @@
       }
       return false;
     }
-    /**
-     * Build a safe base filename for OPFS-backed index files
-     */
-    _getIndexBaseFilename(indexName) {
+    async _getIndexPath(indexName, type) {
       const sanitize = (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, "_");
-      const dbName = this.db.dbName || this.db.name || "db";
-      return `${sanitize(dbName)}-${sanitize(this.name)}-${sanitize(indexName)}`;
+      const sanitizedIndexName = sanitize(indexName);
+      if (type === "text") {
+        return `${this.path}/${sanitizedIndexName}.textindex`;
+      }
+      if (type === "geospatial") {
+        return `${this.path}/${sanitizedIndexName}.rtree.bjson`;
+      }
+      return `${this.path}/${sanitizedIndexName}.bplustree.bjson`;
     }
     /**
      * Build/rebuild an index
      */
-    async buildIndex(indexName, keys, options = {}) {
+    async _buildIndex(indexName, keys, options = {}) {
+      if (!this._initialized) await this._initialize();
       let index;
-      const baseFilename = this._getIndexBaseFilename(indexName);
       let storageFile;
       let type;
       if (this.isTextIndex(keys)) {
         type = "text";
-        storageFile = baseFilename;
+        storageFile = await this._getIndexPath(indexName, type);
         index = new TextCollectionIndex(indexName, keys, storageFile, options);
       } else if (this.isGeospatialIndex(keys)) {
         type = "geospatial";
-        storageFile = `${baseFilename}-geo.bjson`;
-        index = new GeospatialCollectionIndex(indexName, keys, storageFile, options);
+        storageFile = await this._getIndexPath(indexName, type);
+        index = new GeospatialIndex(indexName, keys, storageFile, options);
       } else {
         type = "regular";
-        storageFile = `${baseFilename}.bjson`;
+        storageFile = await this._getIndexPath(indexName, type);
         index = new RegularCollectionIndex(indexName, keys, storageFile, options);
-      }
-      if (this.storage && typeof this.storage.createIndexStore === "function") {
-        this.storage.createIndexStore(indexName, {
-          name: indexName,
-          keys,
-          type,
-          baseFilename,
-          storage: storageFile,
-          options
-        });
       }
       await index.open();
       if (typeof index.clear === "function") {
         await index.clear();
       }
-      const allDocs = this.storage.getAllDocuments();
-      for (const doc of allDocs) {
-        if (doc) {
-          await index.add(doc);
+      const allDocs = await this.documents.toArray();
+      for (const entry of allDocs) {
+        if (entry && entry.value) {
+          await index.add(entry.value);
         }
       }
       this.indexes.set(indexName, index);
@@ -7350,6 +7399,15 @@
       }
       if (promises.length > 0) {
         await Promise.all(promises);
+      }
+    }
+    /**
+     * Ensure an index is open before using it
+     * @private
+     */
+    async _ensureIndexOpen(index) {
+      if (index && typeof index.open === "function" && !index.isOpen) {
+        await index.open();
       }
     }
     /**
@@ -7398,7 +7456,7 @@
       return null;
     }
     // Collection methods
-    aggregate(pipeline) {
+    async aggregate(pipeline) {
       if (!pipeline || !isArray(pipeline)) {
         throw new QueryError("Pipeline must be an array", {
           collection: this.name,
@@ -7406,7 +7464,7 @@
         });
       }
       let results = [];
-      const cursor = this.find({});
+      const cursor = await this.find({});
       while (cursor.hasNext()) {
         results.push(cursor.next());
       }
@@ -7892,16 +7950,15 @@
               code: ErrorCodes.FAILED_TO_PARSE
             });
           }
-          if (this.db[targetCollectionName]) {
-            this.db.dropCollection(targetCollectionName);
+          if (this.db.collections.has(targetCollectionName)) {
+            await this.db.dropCollection(targetCollectionName);
           }
-          this.db.createCollection(targetCollectionName);
           const targetCollection = this.db[targetCollectionName];
           for (let j = 0; j < results.length; j++) {
             const doc = results[j];
             const docId = doc._id;
-            const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
-            targetCollection.storage.set(key, doc);
+            typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
+            await targetCollection.insertOne(doc);
           }
           results = [];
         } else if (stageType === "$merge") {
@@ -7923,26 +7980,19 @@
               code: ErrorCodes.FAILED_TO_PARSE
             });
           }
-          if (!this.db[targetCollectionName]) {
-            this.db.createCollection(targetCollectionName);
-          }
           const targetCollection = this.db[targetCollectionName];
           for (let j = 0; j < results.length; j++) {
             const doc = results[j];
             const matchField = typeof on === "string" ? on : on[0];
             const matchValue = getProp(doc, matchField);
-            const existingCursor = targetCollection.find({ [matchField]: matchValue });
+            const existingCursor = await targetCollection.find({ [matchField]: matchValue });
             const existing = existingCursor.hasNext() ? existingCursor.next() : null;
             if (existing) {
               if (whenMatched === "replace") {
-                const docId = doc._id;
-                const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
-                targetCollection.storage.set(key, doc);
+                await targetCollection.replaceOne({ _id: existing._id }, doc);
               } else if (whenMatched === "merge") {
                 const merged = Object.assign({}, existing, doc);
-                const docId = merged._id;
-                const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
-                targetCollection.storage.set(key, merged);
+                await targetCollection.replaceOne({ _id: existing._id }, merged);
               } else if (whenMatched === "keepExisting") ;
               else if (whenMatched === "fail") {
                 throw new QueryError("$merge failed: duplicate key", {
@@ -7952,9 +8002,7 @@
               }
             } else {
               if (whenNotMatched === "insert") {
-                const docId = doc._id;
-                const key = typeof docId === "object" && docId.toString ? docId.toString() : String(docId);
-                targetCollection.storage.set(key, doc);
+                await targetCollection.insertOne(doc);
               } else if (whenNotMatched === "discard") ;
               else if (whenNotMatched === "fail") {
                 throw new QueryError("$merge failed: document not found", {
@@ -7985,7 +8033,7 @@
             const doc = copy(results[j]);
             const localValue = getProp(doc, stageSpec.localField);
             const matches2 = [];
-            const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+            const foreignCursor = await fromCollection.find({ [stageSpec.foreignField]: localValue });
             while (foreignCursor.hasNext()) {
               matches2.push(foreignCursor.next());
             }
@@ -8028,7 +8076,7 @@
               if (restrictSearchWithMatch) {
                 query = { $and: [query, restrictSearchWithMatch] };
               }
-              const cursor2 = fromCollection.find(query);
+              const cursor2 = await fromCollection.find(query);
               while (cursor2.hasNext()) {
                 const match = cursor2.next();
                 const matchCopy = copy(match);
@@ -8340,19 +8388,18 @@
       }
       return results;
     }
-    bulkWrite() {
+    async bulkWrite() {
       throw new NotImplementedError("bulkWrite", { collection: this.name });
     }
     async count() {
-      return this.storage.size();
+      if (!this._initialized) await this._initialize();
+      const entries = await this.documents.toArray();
+      return entries.length;
     }
     async copyTo(destCollectionName) {
-      if (!this.db[destCollectionName]) {
-        this.db.createCollection(destCollectionName);
-      }
-      const destCol = this.db[destCollectionName];
+      const destCol = this.db.getCollection(destCollectionName);
       let numCopied = 0;
-      const c = this.find({});
+      const c = await this.find({});
       while (c.hasNext()) {
         await destCol.insertOne(c.next());
         numCopied++;
@@ -8360,6 +8407,7 @@
       return numCopied;
     }
     async createIndex(keys, options) {
+      if (!this._initialized) await this._initialize();
       if (!keys || typeof keys !== "object" || Array.isArray(keys)) {
         throw new BadValueError("keys", keys, "createIndex requires a key specification object", {
           collection: this.name
@@ -8382,7 +8430,7 @@
         }
         return indexName;
       }
-      await this.buildIndex(indexName, keys, options);
+      await this._buildIndex(indexName, keys, options);
       return indexName;
     }
     dataSize() {
@@ -8392,7 +8440,7 @@
       const doc = await this.findOne(query);
       if (doc) {
         await this.updateIndexesOnDelete(doc);
-        this.storage.remove(doc._id.toString());
+        await this.documents.delete(doc._id.toString());
         this.emit("delete", { _id: doc._id });
         return { deletedCount: 1 };
       } else {
@@ -8400,7 +8448,7 @@
       }
     }
     async deleteMany(query) {
-      const c = this.find(query);
+      const c = await this.find(query);
       const ids = [];
       const docs = [];
       while (c.hasNext()) {
@@ -8411,14 +8459,14 @@
       const deletedCount = ids.length;
       for (let i = 0; i < ids.length; i++) {
         await this.updateIndexesOnDelete(docs[i]);
-        this.storage.remove(ids[i].toString());
+        await this.documents.delete(ids[i].toString());
         this.emit("delete", { _id: ids[i] });
       }
       return { deletedCount };
     }
     async distinct(field, query) {
       const vals = {};
-      const c = this.find(query);
+      const c = await this.find(query);
       while (c.hasNext()) {
         const d = c.next();
         if (d[field]) {
@@ -8428,25 +8476,66 @@
       return Object.keys(vals);
     }
     async drop() {
-      for (const [indexName, index] of this.indexes) {
-        if (index && typeof index.clear === "function") {
-          await index.clear();
+      if (!this._initialized) await this._initialize();
+      for (const [_, index] of this.indexes) {
+        if (index && typeof index.close === "function") {
+          await index.close();
         }
       }
-      this.storage.clear();
+      if (this.documents && typeof this.documents.close === "function") {
+        await this.documents.close();
+      }
+      const pathParts = this.path.split("/").filter(Boolean);
+      const filename = pathParts.pop();
+      try {
+        let dir = await globalThis.navigator.storage.getDirectory();
+        for (const part of pathParts) {
+          dir = await dir.getDirectoryHandle(part, { create: false });
+        }
+        try {
+          await dir.removeEntry(filename, { recursive: true });
+        } catch (e) {
+          if (e.name === "TypeError" || e.message?.includes("recursive")) {
+            await dir.removeEntry(filename);
+          } else {
+            throw e;
+          }
+        }
+      } catch (error) {
+        if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
+          throw error;
+        }
+      }
+      this.documents = null;
+      this.indexes.clear();
+      this._initialized = false;
+      this.db.collections.delete(this.name);
+      this.emit("drop", { collection: this.name });
+      return { ok: 1 };
     }
-    dropIndex(indexName) {
+    async dropIndex(indexName) {
       if (!this.indexes.has(indexName)) {
         throw new IndexNotFoundError(indexName, { collection: this.name });
       }
-      this.indexes.get(indexName).clear();
+      const index = this.indexes.get(indexName);
+      if (index && typeof index.clear === "function") {
+        await index.clear();
+      }
+      if (index && typeof index.close === "function") {
+        await index.close();
+      }
       this.indexes.delete(indexName);
       return { nIndexesWas: this.indexes.size + 1, ok: 1 };
     }
-    dropIndexes() {
+    async dropIndexes() {
       const count = this.indexes.size;
-      for (const [indexName, index] of this.indexes) {
-        index.clear();
+      for (const [_, index] of this.indexes) {
+        if (index && typeof index.clear === "function") {
+          await index.clear();
+        }
+        if (index && typeof index.close === "function") {
+          await index.close();
+        }
       }
       this.indexes.clear();
       return { nIndexesWas: count, msg: "non-_id indexes dropped", ok: 1 };
@@ -8457,17 +8546,62 @@
     explain() {
       throw new NotImplementedError("explain", { collection: this.name });
     }
-    find(query, projection) {
+    async find(query, projection) {
+      this._validateProjection(projection);
+      return this._findInternal(query, projection);
+    }
+    _validateProjection(projection) {
+      if (!projection || Object.keys(projection).length === 0) return;
+      const keys = Object.keys(projection);
+      let hasInclusion = false;
+      let hasExclusion = false;
+      for (const key of keys) {
+        if (key === "_id") continue;
+        if (projection[key]) hasInclusion = true;
+        else hasExclusion = true;
+        if (hasInclusion && hasExclusion) break;
+      }
+      if (hasInclusion && hasExclusion) {
+        throw new QueryError("Cannot do exclusion on field in inclusion projection", {
+          code: ErrorCodes.CANNOT_DO_EXCLUSION_ON_FIELD_ID_IN_INCLUSION_PROJECTION,
+          collection: this.name
+        });
+      }
+    }
+    async _findInternal(query, projection) {
+      if (!this._initialized) await this._initialize();
       const normalizedQuery = query == void 0 ? {} : query;
       const nearSpec = this._extractNearSpec(normalizedQuery);
-      this.planQuery(normalizedQuery);
       const documents = [];
       const seen = {};
-      const allDocs = this.storage.getAllDocuments();
-      for (const doc of allDocs) {
-        if (!seen[doc._id] && matches(doc, normalizedQuery)) {
-          seen[doc._id] = true;
-          documents.push(doc);
+      if (this.indexes.size > 0) {
+        const queryPlan = await this.planQueryAsync(normalizedQuery);
+        if (queryPlan.useIndex && queryPlan.docIds && queryPlan.docIds.length > 0) {
+          for (const docId of queryPlan.docIds) {
+            if (!seen[docId]) {
+              const doc = await this.documents.search(docId);
+              if (doc && matches(doc, normalizedQuery)) {
+                seen[docId] = true;
+                documents.push(doc);
+              }
+            }
+          }
+        } else {
+          const allDocs = await this.documents.toArray();
+          for (const entry of allDocs) {
+            if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
+              seen[entry.value._id] = true;
+              documents.push(entry.value);
+            }
+          }
+        }
+      } else {
+        const allDocs = await this.documents.toArray();
+        for (const entry of allDocs) {
+          if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
+            seen[entry.value._id] = true;
+            documents.push(entry.value);
+          }
         }
       }
       if (nearSpec) {
@@ -8555,7 +8689,7 @@
       throw new NotImplementedError("findAndModify", { collection: this.name });
     }
     async findOne(query, projection) {
-      const cursor = this.find(query, projection);
+      const cursor = await this.find(query, projection);
       if (cursor.hasNext()) {
         return cursor.next();
       } else {
@@ -8563,21 +8697,21 @@
       }
     }
     async findOneAndDelete(filter, options) {
-      let c = this.find(filter);
+      let c = await this.find(filter);
       if (options && options.sort) c = c.sort(options.sort);
       if (!c.hasNext()) return null;
       const doc = c.next();
-      this.storage.remove(doc._id.toString());
+      await this.documents.delete(doc._id.toString());
       if (options && options.projection) return applyProjection(options.projection, doc);
       else return doc;
     }
     async findOneAndReplace(filter, replacement, options) {
-      let c = this.find(filter);
+      let c = await this.find(filter);
       if (options && options.sort) c = c.sort(options.sort);
       if (!c.hasNext()) return null;
       const doc = c.next();
       replacement._id = doc._id;
-      this.storage.set(doc._id.toString(), replacement);
+      await this.documents.add(doc._id.toString(), replacement);
       if (options && options.returnNewDocument) {
         if (options && options.projection) return applyProjection(options.projection, replacement);
         else return replacement;
@@ -8587,7 +8721,7 @@
       }
     }
     async findOneAndUpdate(filter, update, options) {
-      let c = this.find(filter);
+      let c = await this.find(filter);
       if (options && options.sort) c = c.sort(options.sort);
       if (!c.hasNext()) return null;
       const doc = c.next();
@@ -8596,7 +8730,7 @@
       const positionalMatchInfo = matchInfo.arrayFilters;
       const userArrayFilters = options && options.arrayFilters;
       applyUpdates(update, clone, false, positionalMatchInfo, userArrayFilters);
-      this.storage.set(doc._id.toString(), clone);
+      await this.documents.add(doc._id.toString(), clone);
       if (options && options.returnNewDocument) {
         if (options && options.projection) return applyProjection(options.projection, clone);
         else return clone;
@@ -8620,7 +8754,7 @@
     }
     // non-mongo
     getStore() {
-      return this.storage.getStore();
+      return this.documents;
     }
     group() {
       throw new NotImplementedError("group", { collection: this.name });
@@ -8633,13 +8767,15 @@
       }
     }
     async insertOne(doc) {
-      if (doc._id == void 0) doc._id = this.idGenerator();
-      this.storage.set(doc._id.toString(), doc);
+      if (!this._initialized) await this._initialize();
+      if (doc._id == void 0) doc._id = new ObjectId();
+      await this.documents.add(doc._id.toString(), doc);
       await this.updateIndexesOnInsert(doc);
       this.emit("insert", doc);
       return { insertedId: doc._id };
     }
     async insertMany(docs) {
+      if (!this._initialized) await this._initialize();
       const insertedIds = [];
       for (let i = 0; i < docs.length; i++) {
         const result = await this.insertOne(docs[i]);
@@ -8658,14 +8794,14 @@
     }
     async replaceOne(query, replacement, options) {
       const result = {};
-      const c = this.find(query);
+      const c = await this.find(query);
       result.matchedCount = c.count();
       if (result.matchedCount == 0) {
         result.modifiedCount = 0;
         if (options && options.upsert) {
           const newDoc = replacement;
-          newDoc._id = this.idGenerator();
-          this.storage.set(newDoc._id.toString(), newDoc);
+          newDoc._id = new ObjectId();
+          await this.documents.add(newDoc._id.toString(), newDoc);
           await this.updateIndexesOnInsert(newDoc);
           this.emit("insert", newDoc);
           result.upsertedId = newDoc._id;
@@ -8675,24 +8811,24 @@
         const doc = c.next();
         await this.updateIndexesOnDelete(doc);
         replacement._id = doc._id;
-        this.storage.set(doc._id.toString(), replacement);
+        await this.documents.add(doc._id.toString(), replacement);
         await this.updateIndexesOnInsert(replacement);
         this.emit("replace", replacement);
       }
       return result;
     }
     async remove(query, options) {
-      const c = this.find(query);
+      const c = await this.find(query);
       if (!c.hasNext()) return;
       if (options === true || options && options.justOne) {
         const doc = c.next();
         await this.updateIndexesOnDelete(doc);
-        this.storage.remove(doc._id.toString());
+        await this.documents.delete(doc._id.toString());
       } else {
         while (c.hasNext()) {
           const doc = c.next();
           await this.updateIndexesOnDelete(doc);
-          this.storage.remove(doc._id.toString());
+          await this.documents.delete(doc._id.toString());
         }
       }
     }
@@ -8715,7 +8851,7 @@
       throw new NotImplementedError("totalIndexSize", { collection: this.name });
     }
     async update(query, updates, options) {
-      const c = this.find(query);
+      const c = await this.find(query);
       if (c.hasNext()) {
         if (options && options.multi) {
           while (c.hasNext()) {
@@ -8725,7 +8861,7 @@
             const userArrayFilters = options && options.arrayFilters;
             await this.updateIndexesOnDelete(doc);
             applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-            this.storage.set(doc._id.toString(), doc);
+            await this.documents.add(doc._id.toString(), doc);
             await this.updateIndexesOnInsert(doc);
           }
         } else {
@@ -8735,19 +8871,19 @@
           const userArrayFilters = options && options.arrayFilters;
           await this.updateIndexesOnDelete(doc);
           applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-          this.storage.set(doc._id.toString(), doc);
+          await this.documents.add(doc._id.toString(), doc);
           await this.updateIndexesOnInsert(doc);
         }
       } else {
         if (options && options.upsert) {
-          const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-          this.storage.set(newDoc._id.toString(), newDoc);
+          const newDoc = createDocFromUpdate(query, updates, new ObjectId());
+          await this.documents.add(newDoc._id.toString(), newDoc);
           await this.updateIndexesOnInsert(newDoc);
         }
       }
     }
     async updateOne(query, updates, options) {
-      const c = this.find(query);
+      const c = await this.find(query);
       if (c.hasNext()) {
         const doc = c.next();
         const originalDoc = JSON.parse(JSON.stringify(doc));
@@ -8756,21 +8892,21 @@
         const userArrayFilters = options && options.arrayFilters;
         await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-        this.storage.set(doc._id.toString(), doc);
+        await this.documents.add(doc._id.toString(), doc);
         await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit("update", doc, updateDescription);
       } else {
         if (options && options.upsert) {
-          const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-          this.storage.set(newDoc._id.toString(), newDoc);
+          const newDoc = createDocFromUpdate(query, updates, new ObjectId());
+          await this.documents.add(newDoc._id.toString(), newDoc);
           await this.updateIndexesOnInsert(newDoc);
           this.emit("insert", newDoc);
         }
       }
     }
     async updateMany(query, updates, options) {
-      const c = this.find(query);
+      const c = await this.find(query);
       if (c.hasNext()) {
         while (c.hasNext()) {
           const doc = c.next();
@@ -8780,15 +8916,15 @@
           const userArrayFilters = options && options.arrayFilters;
           await this.updateIndexesOnDelete(doc);
           applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-          this.storage.set(doc._id.toString(), doc);
+          await this.documents.add(doc._id.toString(), doc);
           await this.updateIndexesOnInsert(doc);
           const updateDescription = this._getUpdateDescription(originalDoc, doc);
           this.emit("update", doc, updateDescription);
         }
       } else {
         if (options && options.upsert) {
-          const newDoc = createDocFromUpdate(query, updates, this.idGenerator);
-          this.storage.set(newDoc._id.toString(), newDoc);
+          const newDoc = createDocFromUpdate(query, updates, new ObjectId());
+          await this.documents.add(newDoc._id.toString(), newDoc);
           await this.updateIndexesOnInsert(newDoc);
           this.emit("insert", newDoc);
         }
@@ -8878,232 +9014,14 @@
     }
     return result;
   }
-  class DocumentStore {
-    constructor() {
-      this.data = /* @__PURE__ */ new Map();
-    }
-    clear() {
-      this.data = /* @__PURE__ */ new Map();
-    }
-    keys() {
-      return this.data.keys();
-    }
-    get(index) {
-      return this.data.get(index);
-    }
-    remove(key) {
-      this.data.delete(key);
-    }
-    set(key, value) {
-      this.data.set(key, value);
-    }
-    size() {
-      return this.data.size;
-    }
-  }
-  class IndexStore {
-    constructor(meta) {
-      this._meta = /* @__PURE__ */ new Map();
-      this._data = /* @__PURE__ */ new Map();
-      if (meta) {
-        for (const [key, value] of Object.entries(meta)) {
-          this._meta.set(key, value);
-        }
-      }
-    }
-    /**
-     * Return all metadata as a plain object
-     */
-    getAllMeta() {
-      const meta = {};
-      for (const [key, value] of this._meta) {
-        meta[key] = value;
-      }
-      return meta;
-    }
-    setMeta(key, value) {
-      this._meta.set(key, value);
-    }
-    hasMeta(key) {
-      return this._meta.has(key);
-    }
-    getMeta(key) {
-      return this._meta.get(key);
-    }
-    hasDataMap(name) {
-      return this._data.has(name);
-    }
-    getDataMap(name) {
-      if (!this._data.has(name)) {
-        this._data.set(name, /* @__PURE__ */ new Map());
-      }
-      return this._data.get(name);
-    }
-    // clear() {
-    // 	this._data.clear();
-    // }
-    // keys() {
-    //   return this._data.keys();
-    // }
-    // has(index) {
-    //   return this._data.has(index);
-    // }
-    // get(index) {
-    // 	return this._data.get(index);
-    // }
-    // remove(key) {
-    // 	this._data.delete(key);
-    // }
-    // set(key, value) {
-    // 	this._data.set(key, value);
-    // }
-    // size() {
-    // 	return this._data.size;
-    // }
-  }
-  class CollectionStore {
-    constructor() {
-      this.documents = new DocumentStore();
-      this.indexes = /* @__PURE__ */ new Map();
-    }
-    /**
-     * Clear all documents and indexes
-     */
-    clear() {
-      this.documents.clear();
-      this.indexes.clear();
-    }
-    /**
-     * Get all document keys
-     * @returns {[string]} Array of document keys
-     */
-    documentKeys() {
-      return this.documents.keys();
-    }
-    /**
-     * Get all documents as an array
-     * @returns {Array} Array of all documents
-     */
-    getAllDocuments() {
-      return Array.from(this.documents.data.values());
-    }
-    /**
-     * Get document by ID
-     * @param {string} docId - Document ID
-     * @returns {Object|undefined} Document or undefined
-     */
-    get(key) {
-      if (typeof key !== "string") throw new Error("Document key must be a string");
-      return this.documents.get(key);
-    }
-    /**
-     * 
-     */
-    set(key, value) {
-      if (typeof key !== "string") throw new Error("Document key must be a string");
-      this.documents.set(key, value);
-    }
-    /**
-     * 
-     */
-    remove(key) {
-      if (typeof key !== "string") throw new Error("Document key must be a string");
-      this.documents.remove(key);
-    }
-    /**
-     *
-     */
-    size() {
-      return this.documents.size();
-    }
-    /**
-     * Get entire document store (for export/save)
-     * @returns {Object} Document store object
-     */
-    getStore() {
-      const store = {};
-      for (const key of this.documents.keys()) {
-        store[key] = this.documents.get(key);
-      }
-      return store;
-    }
-    // ==========================================
-    // Index Storage Interface
-    // ==========================================
-    indexesCount() {
-      return this.indexes.size;
-    }
-    indexKeys() {
-      return this.indexes.keys();
-    }
-    /**
-     * Get index data for a specific index
-     * @param {string} indexName - Name of the index
-     * @returns {Object} Index data object (or creates empty one if doesn't exist)
-     */
-    createIndexStore(name, meta) {
-      if (!this.indexes.has(name)) {
-        this.indexes.set(name, new IndexStore(meta));
-      }
-      return this.indexes.get(name);
-    }
-  }
-  class StorageEngine {
-    constructor() {
-      this.collections = /* @__PURE__ */ new Map();
-    }
-    collectionsCount() {
-      return this.collections.size;
-    }
-    /**
-     * 
-     * @returns {[string]} list of collection names
-     */
-    collectionStoreKeys() {
-      return this.collections.keys();
-    }
-    /**
-     * 
-     * @param {*} collectionName 
-     * @returns 
-     */
-    getCollectionStore(collectionName) {
-      return this.collections.get(collectionName);
-    }
-    /**
-     * Create a collection's state
-     * @param {string} collectionName - The collection name
-     * @returns {CollectionStore} The collection store
-     */
-    createCollectionStore(collectionName) {
-      if (this.collections.has(collectionName)) {
-        return this.collections.get(collectionName);
-      }
-      const collectionStore = new CollectionStore();
-      this.collections.set(collectionName, collectionStore);
-      return collectionStore;
-    }
-    /**
-     * Delete a collection
-     * @param {string} collectionName - The collection name
-     */
-    removeCollectionStore(collectionName) {
-      this.collections.delete(collectionName);
-    }
-    /**
-     * Save the entire database state
-     * @returns {Promise<void>}
-     */
-    save() {
-    }
-  }
   class DB {
     constructor(options) {
       this.options = options || {};
+      this.baseFolder = this.options.baseFolder || "/micro-mongo";
       this.dbName = this.options.dbName || "default";
-      this.storageEngine = this.options.storageEngine || new StorageEngine();
-      this._loadExistingCollections();
-      return new Proxy(this, {
+      this.dbFolder = `${this.baseFolder}/${this.dbName}`;
+      this.collections = /* @__PURE__ */ new Map();
+      const proxy = new Proxy(this, {
         get(target, property, receiver) {
           if (property in target) {
             return Reflect.get(target, property, receiver);
@@ -9112,54 +9030,20 @@
             return void 0;
           }
           if (typeof property === "string") {
-            if (Object.prototype.hasOwnProperty.call(target, property)) {
-              return target[property];
-            }
-            target.createCollection(property);
-            return target[property];
+            return target.getCollection(property);
           }
           return void 0;
         }
       });
-    }
-    /**
-     * Log function
-     */
-    _log(msg) {
-      if (this.options && this.options.print) this.options.print(msg);
-      else console.log(msg);
-    }
-    /**
-     * ID generator function
-     */
-    _id() {
-      if (this.options && this.options.id) return this.options.id();
-      else return new ObjectId();
-    }
-    /**
-     * Load existing collections from storage engine
-     * @private
-     */
-    _loadExistingCollections() {
-      for (const collectionName of this.storageEngine.collectionStoreKeys()) {
-        const collectionStore = this.storageEngine.getCollectionStore(collectionName);
-        this[collectionName] = new Collection(
-          this,
-          collectionName,
-          collectionStore,
-          this._id.bind(this)
-        );
-      }
+      this._proxy = proxy;
+      return proxy;
     }
     /**
      * Close all collections
      */
     async close() {
-      for (const key of Object.keys(this)) {
-        const collection = this[key];
-        if (collection && collection.isCollection && typeof collection.close === "function") {
-          await collection.close();
-        }
+      for (const [_, collection] of this.collections) {
+        await collection.close();
       }
     }
     // DB Methods
@@ -9176,48 +9060,42 @@
       throw new NotImplementedError("copyDatabase", { database: this.dbName });
     }
     createCollection(name) {
-      if (!name) return;
-      this[name] = new Collection(
-        this,
-        name,
-        this.storageEngine.createCollectionStore(name),
-        this._id.bind(this)
-      );
-    }
-    /**
-     * Get or create a collection by name (MongoDB-compatible method)
-     * @param {string} name - Collection name
-     * @returns {Collection} The collection instance
-     */
-    collection(name) {
-      if (!name) throw new Error("Collection name is required");
-      if (this[name] && this[name].isCollection) {
-        return this[name];
+      if (!this.collections.has(name)) {
+        this.collections.set(name, new Collection(this, name));
       }
-      this.createCollection(name);
-      return this[name];
+      return { ok: 1 };
     }
     currentOp() {
       throw new NotImplementedError("currentOp", { database: this.dbName });
     }
     async dropCollection(collectionName) {
-      if (this[collectionName]) {
-        if (typeof this[collectionName].drop === "function") {
-          await this[collectionName].drop();
+      if (this.collections.has(collectionName)) {
+        const collection = this.collections.get(collectionName);
+        if (typeof collection.drop === "function") {
+          await collection.drop();
         }
-        this.storageEngine.removeCollectionStore(collectionName);
-        delete this[collectionName];
+        this.collections.delete(collectionName);
       }
     }
     async dropDatabase() {
-      const collectionNames = this.getCollectionNames();
-      for (const name of collectionNames) {
-        if (this[name] && typeof this[name].close === "function") {
-          await this[name].close();
-        }
-        this.storageEngine.removeCollectionStore(name);
-        delete this[name];
+      for (const [_, collection] of this.collections) {
+        await collection.drop();
       }
+      this.collections.clear();
+      const pathParts = this.dbFolder.split("/").filter(Boolean);
+      const dbFolder = pathParts.pop();
+      let dir = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dir = await dir.getDirectoryHandle(part, { create: false });
+      }
+      try {
+        await dir.removeEntry(dbFolder, { recursive: true });
+      } catch (error) {
+        if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
+          throw error;
+        }
+      }
+      return { ok: 1 };
     }
     eval() {
       throw new NotImplementedError("eval", { database: this.dbName });
@@ -9228,20 +9106,22 @@
     fsyncUnlock() {
       throw new NotImplementedError("fsyncUnlock", { database: this.dbName });
     }
-    getCollection() {
-      throw new NotImplementedError("getCollection", { database: this.dbName });
+    getCollection(name) {
+      if (!this.collections.has(name)) {
+        const dbRef = this._proxy || this;
+        this.collections.set(name, new Collection(dbRef, name));
+      }
+      return this.collections.get(name);
+    }
+    // Alias for getCollection for MongoDB API compatibility
+    collection(name) {
+      return this.getCollection(name);
     }
     getCollectionInfos() {
       throw new NotImplementedError("getCollectionInfos", { database: this.dbName });
     }
     getCollectionNames() {
-      const names = [];
-      for (const key in this) {
-        if (this[key] != null && this[key].isCollection) {
-          names.push(key);
-        }
-      }
-      return names;
+      return Array.from(this.collections.keys());
     }
     getLastError() {
       throw new NotImplementedError("getLastError", { database: this.dbName });
@@ -9274,10 +9154,10 @@
       throw new NotImplementedError("getSiblingDB", { database: this.dbName });
     }
     help() {
-      this._log("        help mr                      mapreduce");
-      this._log("        db.foo.find()                list objects in collection foo");
-      this._log("        db.foo.find( { a : 1 } )     list objects in foo where a == 1");
-      this._log("        it                           result of the last line evaluated; use to further iterate");
+      console.log("        help mr                      mapreduce");
+      console.log("        db.foo.find()                list objects in collection foo");
+      console.log("        db.foo.find( { a : 1 } )     list objects in foo where a == 1");
+      console.log("        it                           result of the last line evaluated; use to further iterate");
     }
     hostInfo() {
       throw new NotImplementedError("hostInfo", { database: this.dbName });
@@ -9378,6 +9258,8 @@
       this.emit("open", this);
       return this;
     }
+    // Note that db on real MongoClient is synchronous
+    // This is async as it loads from the file system
     db(name, opts = {}) {
       const dbName = name || this._defaultDb;
       if (!dbName) {
@@ -9391,12 +9273,47 @@
       this._databases.set(dbName, database);
       return database;
     }
+    // async _loadExistingDatabases() {
+    //   const discoveredNames = await this._discoverDatabases();
+    //   console.log('Discovered databases:', discoveredNames);
+    //   const names = new Set(discoveredNames);
+    //   // Ensure default DB from URI is loaded when provided
+    //   if (this._defaultDb) {
+    //     names.add(this._defaultDb);
+    //   }
+    //   for (const dbName of names) {
+    //     if (this._databases.has(dbName)) continue;
+    //     const database = new DB({ ...this.options, dbName });
+    //     this._databases.set(dbName, database);
+    //   }
+    // }
+    // async _discoverDatabases() {
+    //   const dbNames = new Set();
+    //   const baseFolder = this.options.rootPath || '/micro-mongo';
+    //   const hasOPFS = !!(globalThis.navigator && globalThis.navigator.storage && typeof globalThis.navigator.storage.getDirectory === 'function');
+    //   if (!hasOPFS) {
+    //     return Array.from(dbNames);
+    //   }
+    //   try {
+    //     let dir = await globalThis.navigator.storage.getDirectory();
+    //     const parts = baseFolder.split('/').filter(Boolean);
+    //     for (const part of parts) {
+    //       dir = await dir.getDirectoryHandle(part, { create: true });
+    //     }
+    //     for await (const [name, handle] of dir.entries()) {
+    //       if (handle && handle.kind === 'directory') {
+    //         dbNames.add(name);
+    //       }
+    //     }
+    //   } catch (err) {
+    //     console.warn('Failed to discover databases', err);
+    //   }
+    //   return Array.from(dbNames);
+    // }
     async close(force = false) {
       if (!this._isConnected) return;
-      for (const [dbName, database] of this._databases) {
-        if (database && typeof database.close === "function") {
-          await database.close();
-        }
+      for (const [_, database] of this._databases) {
+        await database.close();
       }
       this._databases.clear();
       this._isConnected = false;
@@ -9446,187 +9363,6 @@
       return match ? match[1] : null;
     }
   }
-  class IndexedDbStorageEngine extends StorageEngine {
-    constructor(dbName = "micro-mongo") {
-      super();
-      this.dbName = dbName;
-      this.db = null;
-      this.indexedDBName = `micro-mongo-${dbName}`;
-    }
-    /**
-     * Initialize the IndexedDB connection
-     * @returns {Promise<void>}
-     */
-    async initialize() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(this.indexedDBName, 1);
-        request.onerror = () => {
-          reject(new Error("Failed to open IndexedDB: " + request.error));
-        };
-        request.onsuccess = () => {
-          this.db = request.result;
-          resolve();
-        };
-        request.onupgradeneeded = (event) => {
-          const db = event.target.result;
-          if (!db.objectStoreNames.contains("collections")) {
-            db.createObjectStore("collections", { keyPath: "name" });
-          }
-          if (!db.objectStoreNames.contains("metadata")) {
-            db.createObjectStore("metadata", { keyPath: "key" });
-          }
-        };
-      });
-    }
-    /**
-     * Save the entire database state
-     * @param {Object} dbState - The database state to save
-     * @returns {Promise<void>}
-     */
-    async saveDatabase(dbState) {
-      if (!this.db) {
-        await this.initialize();
-      }
-      const transaction = this.db.transaction(["metadata"], "readwrite");
-      const metadataStore = transaction.objectStore("metadata");
-      await new Promise((resolve, reject) => {
-        const request = metadataStore.put({
-          key: "dbName",
-          value: dbState.name
-        });
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-      for (const collectionName in dbState.collections) {
-        if (dbState.collections.hasOwnProperty(collectionName)) {
-          await this.saveCollection(dbState.name, collectionName, dbState.collections[collectionName]);
-        }
-      }
-    }
-    /**
-     * Load the entire database state
-     * @param {string} dbName - The database name
-     * @returns {Promise<Object|null>} The database state or null if not found
-     */
-    async loadDatabase(dbName) {
-      if (!this.db) {
-        await this.initialize();
-      }
-      const transaction = this.db.transaction(["collections"], "readonly");
-      const collectionsStore = transaction.objectStore("collections");
-      return new Promise((resolve, reject) => {
-        const request = collectionsStore.getAll();
-        request.onsuccess = () => {
-          const collections = {};
-          for (const collectionData of request.result) {
-            collections[collectionData.name] = {
-              documents: collectionData.documents || [],
-              indexes: collectionData.indexes || []
-            };
-          }
-          resolve({
-            name: dbName,
-            collections
-          });
-        };
-        request.onerror = () => reject(request.error);
-      });
-    }
-    /**
-     * Save a single collection's state
-     * @param {string} dbName - The database name
-     * @param {string} collectionName - The collection name
-     * @param {Object} collectionState - The collection state to save
-     * @returns {Promise<void>}
-     */
-    async saveCollection(dbName, collectionName, collectionState) {
-      if (!this.db) {
-        await this.initialize();
-      }
-      const transaction = this.db.transaction(["collections"], "readwrite");
-      const collectionsStore = transaction.objectStore("collections");
-      return new Promise((resolve, reject) => {
-        const request = collectionsStore.put({
-          name: collectionName,
-          documents: collectionState.documents || [],
-          indexes: collectionState.indexes || []
-        });
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    }
-    /**
-     * Load a single collection's state
-     * @param {string} dbName - The database name
-     * @param {string} collectionName - The collection name
-     * @returns {Promise<Object|null>} The collection state or null if not found
-     */
-    async loadCollection(dbName, collectionName) {
-      if (!this.db) {
-        await this.initialize();
-      }
-      const transaction = this.db.transaction(["collections"], "readonly");
-      const collectionsStore = transaction.objectStore("collections");
-      return new Promise((resolve, reject) => {
-        const request = collectionsStore.get(collectionName);
-        request.onsuccess = () => {
-          if (request.result) {
-            resolve({
-              documents: request.result.documents || [],
-              indexes: request.result.indexes || []
-            });
-          } else {
-            resolve(null);
-          }
-        };
-        request.onerror = () => reject(request.error);
-      });
-    }
-    /**
-     * Delete a collection
-     * @param {string} dbName - The database name
-     * @param {string} collectionName - The collection name
-     * @returns {Promise<void>}
-     */
-    async deleteCollection(dbName, collectionName) {
-      if (!this.db) {
-        await this.initialize();
-      }
-      const transaction = this.db.transaction(["collections"], "readwrite");
-      const collectionsStore = transaction.objectStore("collections");
-      return new Promise((resolve, reject) => {
-        const request = collectionsStore.delete(collectionName);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    }
-    /**
-     * Delete the entire database
-     * @param {string} dbName - The database name
-     * @returns {Promise<void>}
-     */
-    async deleteDatabase(dbName) {
-      if (this.db) {
-        this.db.close();
-        this.db = null;
-      }
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.deleteDatabase(this.indexedDBName);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    }
-    /**
-     * Close/cleanup the storage engine
-     * @returns {Promise<void>}
-     */
-    async close() {
-      if (this.db) {
-        this.db.close();
-        this.db = null;
-      }
-    }
-  }
   exports2.BadValueError = BadValueError;
   exports2.BulkWriteError = BulkWriteError;
   exports2.CannotCreateIndexError = CannotCreateIndexError;
@@ -9638,7 +9374,6 @@
   exports2.IndexError = IndexError;
   exports2.IndexExistsError = IndexExistsError;
   exports2.IndexNotFoundError = IndexNotFoundError;
-  exports2.IndexedDbStorageEngine = IndexedDbStorageEngine;
   exports2.InvalidNamespaceError = InvalidNamespaceError;
   exports2.MongoClient = MongoClient;
   exports2.MongoDriverError = MongoDriverError;
@@ -9651,8 +9386,6 @@
   exports2.ObjectId = ObjectId;
   exports2.OperationNotSupportedError = OperationNotSupportedError;
   exports2.QueryError = QueryError;
-  exports2.StorageEngine = StorageEngine;
-  exports2.Timestamp = Timestamp;
   exports2.TypeMismatchError = TypeMismatchError;
   exports2.ValidationError = ValidationError;
   exports2.WriteError = WriteError;

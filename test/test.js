@@ -2241,7 +2241,7 @@ describe("DB", function() {
 				expect(indexes.length).to.equal(1);
 
 				// Drop the index
-				const result = db[textCollectionName].dropIndex('content_text');
+				const result = await db[textCollectionName].dropIndex('content_text');
 				expect(result.ok).to.equal(1);
 
 				indexes = db[textCollectionName].getIndexes();
@@ -2257,7 +2257,7 @@ describe("DB", function() {
 				expect(indexes.length).to.equal(3);
 
 				// Drop all indexes
-				const result = db[textCollectionName].dropIndexes();
+				const result = await db[textCollectionName].dropIndexes();
 				expect(result.ok).to.equal(1);
 
 				indexes = db[textCollectionName].getIndexes();
@@ -2475,7 +2475,7 @@ describe("DB", function() {
 				expect(indexes.length).to.equal(1);
 
 				// Drop the index
-				const result = db[geoCollectionName].dropIndex('location_2dsphere');
+				const result = await db[geoCollectionName].dropIndex('location_2dsphere');
 				expect(result.ok).to.equal(1);
 
 				indexes = db[geoCollectionName].getIndexes();
