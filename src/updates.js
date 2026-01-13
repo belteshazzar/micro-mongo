@@ -359,6 +359,9 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
+					if (!userArrayFilters) {
+						throw new Error('arrayFilters option is required when using filtered positional operator $[<identifier>]');
+					}
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$inc', userArrayFilters);
 				} else if (hasAllPositional(field)) {
@@ -380,6 +383,9 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
+					if (!userArrayFilters) {
+						throw new Error('arrayFilters option is required when using filtered positional operator $[<identifier>]');
+					}
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$mul', userArrayFilters);
 				} else if (hasAllPositional(field)) {
@@ -414,6 +420,9 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
+					if (!userArrayFilters) {
+						throw new Error('arrayFilters option is required when using filtered positional operator $[<identifier>]');
+					}
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, value[fields[j]], '$set', userArrayFilters);
 				} else {
@@ -434,6 +443,9 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
+					if (!userArrayFilters) {
+						throw new Error('arrayFilters option is required when using filtered positional operator $[<identifier>]');
+					}
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$min', userArrayFilters);
 				} else if (hasAllPositional(field)) {
@@ -454,6 +466,9 @@ export function applyUpdates(updates, doc, setOnInsert, positionalMatchInfo, use
 				
 				// Check if this field uses filtered positional operator
 				if (hasFilteredPositionalOperator(field)) {
+					if (!userArrayFilters) {
+						throw new Error('arrayFilters option is required when using filtered positional operator $[<identifier>]');
+					}
 					const parsedPath = parseFieldPath(field);
 					applyToFilteredArrayElements(doc, parsedPath, amount, '$max', userArrayFilters);
 				} else if (hasAllPositional(field)) {

@@ -272,7 +272,7 @@ describe('Filtered Positional Operator with arrayFilters', function() {
 			expect(doc.items).to.deep.equal([]);
 		});
 
-		it.skip('should handle missing arrayFilters option', async function() {
+		it('should handle missing arrayFilters option', async function() {
 			await db[collectionName].insertOne({
 				_id: 1,
 				items: [
@@ -280,17 +280,15 @@ describe('Filtered Positional Operator with arrayFilters', function() {
 				]
 			});
 
-			// Without arrayFilters, $[elem] should be treated as a literal field name
-			// This matches MongoDB behavior where it creates nested structure literally
-			await db[collectionName].updateOne(
-				{ _id: 1 },
-				{ $set: { 'items.$[elem].quantity': 100 } }
-			);
-
-			const doc = await db[collectionName].findOne({ _id: 1 });
-			// Without arrayFilters, the field path should be created literally as a nested object
-			expect(doc.items['$[elem]']).to.be.an('object');
-			expect(doc.items['$[elem]'].quantity).to.equal(100);
+      try {
+        await db[collectionName].updateOne(
+          { _id: 1 },
+          { $set: { 'items.$[elem].quantity': 100 } }
+        );
+        throw new Error('Expected error for missing arrayFilters');
+      } catch (err) {
+        expect(err.message).to.include('arrayFilters option is required when using filtered positional operator $[<identifier>]');
+      }
 		});
 	});
 
