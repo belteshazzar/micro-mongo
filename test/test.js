@@ -24,27 +24,18 @@ if (typeof globalThis.navigator === 'undefined') {
 }
 import {expect} from 'chai';
 import * as mongo from '../main.js'
+import { createMongoClientSetup } from './test-utils.js';
 
 describe("DB no options", function() {
 
-	var client;
-	var db;
-	
-	before(function() {
-	});
-
-	after(function() {
-	});
+	const setup = createMongoClientSetup('testdb');
+	let db;
 
 	beforeEach(async function() {
-		client = await mongo.MongoClient.connect('mongodb://localhost:27017');
-		db = client.db('testdb');
+		await setup.beforeEach();
+		db = setup.db;
 	});
-
-	afterEach(async function() {
-		await client.close();
-		db = null;
-	});
+	afterEach(setup.afterEach);
 
 	it('should have no collections by default', async function() {			
 		expect(db.getCollectionNames().length).to.equal(0);
@@ -76,26 +67,14 @@ describe("DB no options", function() {
 
 describe("DB", function() {
 
-	var client;
-	var db;
-	
-	before(function() {
-	});
-
-	after(function() {
-	});
+	const setup = createMongoClientSetup('testdb');
+	let db;
 
 	beforeEach(async function() {
-		client = await mongo.MongoClient.connect('mongodb://localhost:27017', {
-			print : console.log
-		});
-		db = client.db('testdb');
+		await setup.beforeEach();
+		db = setup.db;
 	});
-
-	afterEach(async function() {
-		await client.close();
-		db = null;
-	});
+	afterEach(setup.afterEach);
 
 	it('should have no collections by default', async function() {			
 		expect(db.getCollectionNames().length).to.equal(0);

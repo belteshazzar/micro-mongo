@@ -1,21 +1,20 @@
 import { describe, it, beforeEach, afterEach } from 'mocha';
 import { expect } from 'chai';
 import { MongoClient } from '../src/MongoClient.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Aggregation Expression Operators', function() {
-	let client, db, collection;
+	const setup = createMongoClientSetup('testdb');
+	let collection;
 
 	beforeEach(async function() {
-		client = await MongoClient.connect('mongodb://localhost:27017');
-		db = client.db('testdb');
+		await setup.beforeEach();
+		const db = setup.db;
 		collection = db.test;
 		await collection.deleteMany({});
 	});
 
-	afterEach(async function() {
-		await client.close();
-		db = null;
-	});
+	afterEach(setup.afterEach);
 
 	// ========================================================================
 	// ARITHMETIC OPERATORS

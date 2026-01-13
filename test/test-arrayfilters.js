@@ -4,16 +4,18 @@
 
 import { DB } from '../src/DB.js';
 import { expect } from 'chai';
+import { createDBSetup } from './test-utils.js';
 
 describe('Filtered Positional Operator with arrayFilters', function() {
-	let db;
-	let collectionName;
+	const setup = createDBSetup();
+	let db, collectionName;
 	let testNum = 0;
 
 	beforeEach(async function() {
+		await setup.beforeEach();
+		db = setup.db;
 		testNum++;
 		collectionName = 'test-arrayfilters-' + testNum;
-		db = new DB();
 		// Drop collection if it exists from previous test
 		try {
 			await db.dropCollection(collectionName);
@@ -23,13 +25,7 @@ describe('Filtered Positional Operator with arrayFilters', function() {
 		db.createCollection(collectionName);
 	});
 
-	afterEach(async function() {
-		try {
-			await db.dropCollection(collectionName);
-		} catch (e) {
-			// Ignore cleanup errors
-		}
-	});
+	afterEach(setup.afterEach);
 
 	describe('Basic $[<identifier>] operator', function() {
 		it('should update matching array elements using $[elem] with arrayFilters', async function() {

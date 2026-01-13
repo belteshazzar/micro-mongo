@@ -3,21 +3,20 @@
  */
 
 import { expect } from 'chai';
-import { MongoClient } from '../main.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('$ Positional Operator', function() {
-	var db;
-	var collectionName = 'testCollection';
+	const setup = createMongoClientSetup('positional-operator-test');
+	const collectionName = 'testCollection';
+	let db;
 
 	beforeEach(async function() {
-		var client = await MongoClient.connect('positional-operator-test');
-		db = client.db('positional-operator-test');
+		await setup.beforeEach();
+		db = setup.db;
 		await db.dropDatabase();
 	});
 
-	afterEach(async function() {
-		await db.dropDatabase();
-	});
+	afterEach(setup.afterEach);
 
 	describe('Basic $ operator functionality', function() {
 		it('should update first matching array element with $set', async function() {

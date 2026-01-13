@@ -2,51 +2,33 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { StorageManager } from 'node-opfs';
 import { expect } from 'chai';
-
-// Get project root directory for .opfs location
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..');
-const opfsDir = path.join(projectRoot, '.opfs');
-
-// Configure node-opfs to use project-local .opfs directory
-const customStorage = new StorageManager(opfsDir);
-if (typeof globalThis.navigator === 'undefined') {
-	globalThis.navigator = {};
-}
-globalThis.navigator.storage = {
-	getDirectory: () => customStorage.getDirectory()
-};
-
 import * as mongo from '../main.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 /**
  * Comprehensive test suite for dot notation support in queries
  * Tests MongoDB-compatible behavior for nested field access
  */
 describe('Dot Notation in Queries', function() {
-	let client, db;
+	const setup = createMongoClientSetup('testdb');
 	const collectionName = 'dotNotationTest';
-
-	before(async function() {
-		client = await mongo.MongoClient.connect('mongodb://localhost:27017');
-		db = client.db('testdb');
-	});
-
-	after(async function() {
-		await client.close();
-	});
+	let collection;
+	let db;
 
 	beforeEach(async function() {
-		if (db[collectionName]) {
-			await db[collectionName].drop();
+		await setup.beforeEach();
+		db = setup.db;
+		collection = db[collectionName];
+		if (collection) {
+			await collection.drop();
 		}
 	});
 
 	afterEach(async function() {
-		if (db[collectionName]) {
-			await db[collectionName].drop();
+		if (collection) {
+			await collection.drop();
 		}
+		await setup.afterEach();
 	});
 
 	describe('Basic Nested Field Access', function() {

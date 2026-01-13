@@ -19,14 +19,16 @@ globalThis.navigator.storage = {
 };
 
 import { MongoClient } from '../main.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Advanced Index Support', function() {
-	let client, db;
+	const setup = createMongoClientSetup('test_db_advanced');
 	const collectionName = 'test_advanced_indexes';
+	let collection, db;
 
 	beforeEach(async function() {
-		client = await new MongoClient().connect();
-		db = await client.db('test_db_advanced');
+		await setup.beforeEach();
+		db = setup.db;
 		
 		// Drop collection if it exists to start fresh
 		try {
@@ -36,13 +38,10 @@ describe('Advanced Index Support', function() {
 		}
 		
 		await db.createCollection(collectionName);
+		collection = db[collectionName];
 	});
 
-	afterEach(async function() {
-		if (client) {
-			await client.close();
-		}
-	});
+	afterEach(setup.afterEach);
 
 	describe('Range Queries on Indexed Fields', function() {
 		it('should use index for $gt queries', async function() {

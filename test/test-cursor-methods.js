@@ -1,13 +1,13 @@
 import { strict as assert } from 'assert';
-import { MongoClient } from '../src/MongoClient.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Cursor Methods', function() {
-	let client, db, collection;
+	const setup = createMongoClientSetup('test');
+	let collection;
 
 	beforeEach(async function() {
-		client = new MongoClient();
-		await client.connect();
-		db = client.db('test');
+		await setup.beforeEach();
+		const db = setup.db;
 		collection = db.collection('cursorTest');
 		
 		// Insert test data
@@ -19,6 +19,8 @@ describe('Cursor Methods', function() {
 			{ _id: 5, name: 'Eve', age: 32 }
 		]);
 	});
+
+	afterEach(setup.afterEach);
 
 	describe('batchSize()', function() {
 		it('should set batch size and return cursor for chaining', async function() {

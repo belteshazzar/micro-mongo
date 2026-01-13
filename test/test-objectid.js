@@ -1,5 +1,6 @@
 import {expect} from 'chai';
 import * as mongo from '../main.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe("ObjectId", function() {
 
@@ -156,18 +157,16 @@ describe("ObjectId", function() {
 
 	describe('Usage in Database Operations', function() {
 
-		let client;
+		const setup = createMongoClientSetup('testdb');
 		let db;
 
 		beforeEach(async function() {
-			client = await mongo.MongoClient.connect('mongodb://localhost:27017');
-			db = client.db('testdb');
+			await setup.beforeEach();
+			db = setup.db;
 			await db['users'].drop();
 		});
 
-		afterEach(async function() {
-			await client.close();
-		});
+		afterEach(setup.afterEach);
 
 		it('should automatically generate ObjectId for _id', async function() {
 			db.createCollection('users');

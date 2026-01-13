@@ -1,24 +1,22 @@
-import { describe, it, beforeEach } from 'mocha';
+import { describe, it, beforeEach, afterEach } from 'mocha';
 import { expect } from 'chai';
 import { MongoClient } from '../src/MongoClient.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Change Streams', () => {
-	let client;
-	let db;
-	let collection;
+	const setup = createMongoClientSetup('test-change-streams');
+	let collection, db, client;
 
 	beforeEach(async () => {
-		client = new MongoClient();
-		await client.connect();
-		db = client.db('test-change-streams');
+		await setup.beforeEach();
+		db = setup.db;
+		client = setup.client;
 		collection = db.collection('users');
 		// Clear any existing data
 		await collection.drop();
 	});
 
-	afterEach(async () => {
-		await client.close();
-	});
+	afterEach(setup.afterEach);
 
 	describe('Collection Watch', () => {
 		it('should emit insert events when documents are inserted', async () => {

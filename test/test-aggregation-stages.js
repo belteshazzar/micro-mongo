@@ -6,23 +6,43 @@
 
 import { expect } from 'chai';
 import { MongoClient } from '../main.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Additional Aggregation Stages', function() {
-	let client, db, collection;
+	const setup = createMongoClientSetup('test-agg-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+	let collection, db;
 
 	beforeEach(async function() {
-		client = await MongoClient.connect();
-		// Use unique DB name with timestamp + random to ensure no collision
-		db = client.db('test-agg-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+		await setup.beforeEach();
+		db = setup.db;
 		// Get or create collection
 		collection = db.users;
 		// Completely clear the collection by deleting all documents
 		await collection.deleteMany({});
+		// Also clear any output or test collections from previous runs
+		try {
+			await db.dropCollection('output_collection');
+		} catch (e) {
+			// Collection might not exist, that's fine
+		}
+		try {
+			await db.dropCollection('existing');
+		} catch (e) {
+			// Collection might not exist, that's fine
+		}
+		try {
+			await db.dropCollection('target');
+		} catch (e) {
+			// Collection might not exist, that's fine
+		}
+		try {
+			await db.dropCollection('orders');
+		} catch (e) {
+			// Collection might not exist, that's fine
+		}
 	});
 
-	afterEach(async function() {
-		await client.close();
-	});
+	afterEach(setup.afterEach);
 
 	describe('$sortByCount', function() {
 		it('should group by field and count occurrences', async function() {
@@ -349,6 +369,15 @@ describe('Additional Aggregation Stages', function() {
 	});
 
 	describe('$merge', function() {
+		beforeEach(async function() {
+			// Clear target collection for each test
+			try {
+				await db.dropCollection('target');
+			} catch (e) {
+				// Collection might not exist, that's fine
+			}
+		});
+
 		it('should merge results into collection', async function() {
 			db.createCollection('target');
 			await db.target.insertOne({ _id: 1, name: 'Alice', age: 30 });
@@ -395,6 +424,8 @@ describe('Additional Aggregation Stages', function() {
 
 		it('should support whenNotMatched: discard', async function() {
 			db.createCollection('target');
+			// Ensure target is empty
+			await db.target.deleteMany({});
 
 			await collection.insertOne({ _id: 1, name: 'Alice' });
 
@@ -413,7 +444,18 @@ describe('Additional Aggregation Stages', function() {
 	});
 
 	describe('$lookup', function() {
-		beforeEach(function() {
+		beforeEach(async function() {
+			// Clear orders and products collections for each test
+			try {
+				await db.dropCollection('orders');
+			} catch (e) {
+				// Collection might not exist, that's fine
+			}
+			try {
+				await db.dropCollection('products');
+			} catch (e) {
+				// Collection might not exist, that's fine
+			}
 			db.createCollection('orders');
 			db.createCollection('products');
 		});
@@ -445,6 +487,10 @@ describe('Additional Aggregation Stages', function() {
 		});
 
 		it('should return empty array for unmatched documents', async function() {
+			// Ensure collections are empty
+			await db.orders.deleteMany({});
+			await db.products.deleteMany({});
+			
 			await db.orders.insertOne({ _id: 1, product_id: 'C', quantity: 5 });
 			await db.products.insertOne({ _id: 'A', name: 'Widget' });
 

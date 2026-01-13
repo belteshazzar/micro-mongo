@@ -21,14 +21,16 @@ globalThis.navigator.storage = {
 };
 
 import { MongoClient } from '../main.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Index Verification Tests', function() {
-	let client, db;
+	const setup = createMongoClientSetup('test_index_verification_db');
 	const collectionName = 'test_index_verification';
+	let collection, db;
 
 	beforeEach(async function() {
-		client = await new MongoClient().connect();
-		db = await client.db('test_index_verification_db');
+		await setup.beforeEach();
+		db = setup.db;
 		
 		// Drop collection if it exists to start fresh
 		try {
@@ -38,13 +40,10 @@ describe('Index Verification Tests', function() {
 		}
 		
 		await db.createCollection(collectionName);
+		collection = db[collectionName];
 	});
 
-	afterEach(async function() {
-		if (client) {
-			await client.close();
-		}
-	});
+	afterEach(setup.afterEach);
 
 	describe('Index File Creation', function() {
 		it('should create index files on disk when createIndex is called', async function() {

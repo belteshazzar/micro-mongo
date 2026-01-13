@@ -1,23 +1,21 @@
 import { strict as assert } from 'assert';
-import { MongoClient } from '../src/MongoClient.js';
+import { createMongoClientSetup } from './test-utils.js';
 
 describe('Advanced Query Operators', function() {
-	let client, db, collection;
+	const setup = createMongoClientSetup('test');
 	const collectionName = 'testQueryOps';
+	let collection;
 
 	beforeEach(async function() {
-		client = new MongoClient();
-		await client.connect();
-		db = client.db('test');
+		await setup.beforeEach();
+		const db = setup.db;
 		collection = db[collectionName];
 		
 		// Clear collection
 		await collection.deleteMany({});
 	});
 
-	afterEach(async function() {
-		await collection.deleteMany({});
-	});
+	afterEach(setup.afterEach);
 
 	describe('$regex with $options', function() {
 		beforeEach(async function() {
