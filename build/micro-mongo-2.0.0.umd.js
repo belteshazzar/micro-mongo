@@ -2431,6 +2431,39 @@
       return result;
     }
     /**
+     * Async iterator for efficiently traversing all entries without loading everything into memory
+     * Enables usage: `for await (const entry of tree) { ... }`
+     * Each entry has shape: { key, value }
+     */
+    async *[Symbol.asyncIterator]() {
+      if (!this.isOpen) {
+        throw new Error("Tree must be open before iteration");
+      }
+      if (this._size === 0) {
+        return;
+      }
+      yield* this._iterateNode(this._loadRoot());
+    }
+    /**
+     * Helper generator to recursively iterate through a node
+     * @private
+     */
+    *_iterateNode(node) {
+      if (node.isLeaf) {
+        for (let i = 0; i < node.keys.length; i++) {
+          yield {
+            key: node.keys[i],
+            value: node.values[i]
+          };
+        }
+      } else {
+        for (const childPointer of node.children) {
+          const child = this._loadNode(childPointer);
+          yield* this._iterateNode(child);
+        }
+      }
+    }
+    /**
      * Collect all entries in sorted order by traversing tree
      * @private
      */
@@ -7362,8 +7395,7 @@
       if (typeof index.clear === "function") {
         await index.clear();
       }
-      const allDocs = await this.documents.toArray();
-      for (const entry of allDocs) {
+      for await (const entry of this.documents) {
         if (entry && entry.value) {
           await index.add(entry.value);
         }
@@ -8393,8 +8425,11 @@
     }
     async count() {
       if (!this._initialized) await this._initialize();
-      const entries = await this.documents.toArray();
-      return entries.length;
+      let count = 0;
+      for await (const _ of this.documents) {
+        count++;
+      }
+      return count;
     }
     async copyTo(destCollectionName) {
       const destCol = this.db.getCollection(destCollectionName);
@@ -8587,8 +8622,7 @@
             }
           }
         } else {
-          const allDocs = await this.documents.toArray();
-          for (const entry of allDocs) {
+          for await (const entry of this.documents) {
             if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
               seen[entry.value._id] = true;
               documents.push(entry.value);
@@ -8596,8 +8630,7 @@
           }
         }
       } else {
-        const allDocs = await this.documents.toArray();
-        for (const entry of allDocs) {
+        for await (const entry of this.documents) {
           if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
             seen[entry.value._id] = true;
             documents.push(entry.value);
