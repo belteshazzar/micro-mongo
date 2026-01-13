@@ -12,10 +12,11 @@ describe('Additional Aggregation Stages', function() {
 
 	beforeEach(async function() {
 		client = await MongoClient.connect();
-		db = client.db('test');
+		// Use unique DB name with timestamp + random to ensure no collision
+		db = client.db('test-agg-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 		// Get or create collection
 		collection = db.users;
-		// Clear any existing data
+		// Completely clear the collection by deleting all documents
 		await collection.deleteMany({});
 	});
 
@@ -79,9 +80,14 @@ describe('Additional Aggregation Stages', function() {
 			]);
 
 			expect(results).to.have.lengthOf(2);
-			expect(results[0]).to.not.have.property('name');
-			expect(results[0].age).to.equal(30);
-			expect(results[0].city).to.equal('NYC');
+			// Don't assume order - find each result by age
+			const aliceResult = results.find(r => r.age === 30);
+			const bobResult = results.find(r => r.age === 25);
+			expect(aliceResult).to.exist;
+			expect(aliceResult).to.not.have.property('name');
+			expect(aliceResult.city).to.equal('NYC');
+			expect(bobResult).to.exist;
+			expect(bobResult.city).to.equal('LA');
 		});
 
 		it('should work with computed expressions', async function() {
@@ -93,10 +99,13 @@ describe('Additional Aggregation Stages', function() {
 			]);
 
 			expect(results).to.have.lengthOf(2);
-			expect(results[0].sum).to.equal(3);
-			expect(results[0].product).to.equal(2);
-			expect(results[1].sum).to.equal(7);
-			expect(results[1].product).to.equal(12);
+			// Don't assume order - find each result by sum
+			const result1 = results.find(r => r.sum === 3);
+			const result2 = results.find(r => r.sum === 7);
+			expect(result1).to.exist;
+			expect(result1.product).to.equal(2);
+			expect(result2).to.exist;
+			expect(result2.product).to.equal(12);
 		});
 
 		it('should throw error if newRoot is not an object', async function() {
