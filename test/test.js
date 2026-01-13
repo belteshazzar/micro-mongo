@@ -1126,9 +1126,11 @@ describe("DB", function() {
 			it('should testUpdate_Op_CurrentDate with dot notation', async function() {
 				await db[collectionName].insert({ test: 'currentDate', value: 5, nested: {} });
 				await db[collectionName].updateOne(
-					{test: 'currentDate', value: 5}
+					{test: 'currentDate', value: 5},
+					{ $currentDate: { 'nested.timestamp': true } }
 				);
 				var doc = await db[collectionName].findOne({test: 'currentDate', value: 5});
+				expect(doc.nested.timestamp).to.be.instanceOf(Date);
 			});
 
 			it('should testUpdate_Op_AddToSet', async function() {
