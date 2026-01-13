@@ -35,6 +35,7 @@ export class Collection extends EventEmitter {
     this.documents = null; // Initialized in async _initialize()
     this.indexes = new Map(); // Index storage - map of index name to index structure
     this._initialized = false;
+    this.isCollection = true; // Flag for ChangeStream to identify collections
 
     this.queryPlanner = new QueryPlanner(this.indexes); // Query planner
   }
@@ -970,12 +971,12 @@ export class Collection extends EventEmitter {
           });
         }
 
-        // Drop and recreate target collection
-        if (this.db[targetCollectionName]) {
+        // Drop target collection if it exists
+        if (this.db.collections.has(targetCollectionName)) {
           await this.db.dropCollection(targetCollectionName);
         }
-        this.db.createCollection(targetCollectionName);
 
+        // Access collection via proxy (will auto-create)
         const targetCollection = this.db[targetCollectionName];
 
         // Insert all results into target collection
@@ -1011,11 +1012,7 @@ export class Collection extends EventEmitter {
           });
         }
 
-        // Create target collection if it doesn't exist
-        if (!this.db[targetCollectionName]) {
-          this.db.createCollection(targetCollectionName);
-        }
-
+        // Access collection via proxy (will auto-create if needed)
         const targetCollection = this.db[targetCollectionName];
 
         // Merge documents

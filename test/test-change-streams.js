@@ -12,6 +12,12 @@ describe('Change Streams', () => {
 		await client.connect();
 		db = client.db('test-change-streams');
 		collection = db.collection('users');
+		// Clear any existing data
+		await collection.drop();
+	});
+
+	afterEach(async () => {
+		await client.close();
 	});
 
 	describe('Collection Watch', () => {

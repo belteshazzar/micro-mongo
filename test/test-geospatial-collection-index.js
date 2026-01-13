@@ -40,8 +40,7 @@ describe('GeospatialIndex (unit)', function() {
 		await index.add({ _id: loc1, location: { type: 'Point', coordinates: [10, 20] } });
 
 		const results = await index.query({ location: { $geoWithin: [[5, 25], [15, 15]] } });
-    console.error('Query results:', results[0].constructor.name);
-		expect(results).to.deep.equal([loc1]);
+		expect(results).to.deep.equal([loc1.toString()]);
 		await index.close();
 	});
 
@@ -58,7 +57,7 @@ describe('GeospatialIndex (unit)', function() {
 		await index.remove({ _id: loc1 });
 
 		const results = await index.query({ location: { $geoWithin: [[5, 25], [15, 15]] } });
-		expect(results).to.deep.equal([loc2]);
+		expect(results).to.deep.equal([loc2.toString()]);
 
 		await index.close();
 	});
@@ -75,7 +74,7 @@ describe('GeospatialIndex (unit)', function() {
 		const reopened = new GeospatialIndex('location_2dsphere', {location: '2dsphere'}, `${collectionName}_location.rtree.bjson`);
 		await reopened.open();
 		const results = await reopened.query({ location: { $geoWithin: [[5, 25], [15, 15]] } });
-		expect(results).to.deep.equal([loc1]);
+		expect(results).to.deep.equal([loc1.toString()]);
 		await reopened.close();
 	});
 

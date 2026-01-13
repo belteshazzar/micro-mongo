@@ -9,13 +9,13 @@ import { NotImplementedError } from './errors.js';
 export class DB {
 	constructor(options) {
 		this.options = options || {};
-    this.baseFolder = options.baseFolder || '/micro-mongo';
+    this.baseFolder = this.options.baseFolder || '/micro-mongo';
 		this.dbName = this.options.dbName || 'default';
 		this.dbFolder = `${this.baseFolder}/${this.dbName}`;
     this.collections = new Map();
 
 		// Return a Proxy to enable dynamic collection creation
-		return new Proxy(this, {
+		const proxy = new Proxy(this, {
 			get(target, property, receiver) {
 				// If property exists on target (including undefined values), return it
 				if (property in target) {
@@ -35,6 +35,11 @@ export class DB {
         return undefined;
 			}
 		});
+		
+		// Store reference to proxy for use in getCollection
+		this._proxy = proxy;
+		
+		return proxy;
 	}
 
 	/**
@@ -61,9 +66,15 @@ export class DB {
 
 	currentOp() { throw new NotImplementedError('currentOp', { database: this.dbName }); }
 
-	async dropCollection(name) {
-    throw new NotImplementedError('dropCollection', { database: this.dbName });
-	}
+	async dropCollection(collectionName) {
+    if (this.collections.has(collectionName)) {
+      const collection = this.collections.get(collectionName);
+      if (typeof collection.drop === 'function') {
+        await collection.drop();
+      }
+      this.collections.delete(collectionName);
+    }
+  }
 
 	async dropDatabase() {
     for (const [_, collection] of this.collections) {
@@ -97,10 +108,17 @@ export class DB {
   getCollection(name) { 
     // For collection names, create the collection if it doesn't exist
     if (!this.collections.has(name)) {
-      this.collections.set(name, new Collection(this, name));
+      // Pass the proxy (if available) so collections can access other collections via db
+      const dbRef = this._proxy || this;
+      this.collections.set(name, new Collection(dbRef, name));
     }
 
     return this.collections.get(name);
+  }
+  
+  // Alias for getCollection for MongoDB API compatibility
+  collection(name) {
+    return this.getCollection(name);
   }
 
   getCollectionInfos() { throw new NotImplementedError('getCollectionInfos', { database: this.dbName }); }

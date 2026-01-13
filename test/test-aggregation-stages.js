@@ -13,8 +13,10 @@ describe('Additional Aggregation Stages', function() {
 	beforeEach(async function() {
 		client = await MongoClient.connect();
 		db = client.db('test');
-		db.createCollection('users');
+		// Get or create collection
 		collection = db.users;
+		// Clear any existing data
+		await collection.deleteMany({});
 	});
 
 	afterEach(async function() {
@@ -33,13 +35,17 @@ describe('Additional Aggregation Stages', function() {
 				{ $sortByCount: '$category' }
 			]);
 
-			expect(results).to.have.lengthOf(3);
-			expect(results[0]._id).to.equal('A');
-			expect(results[0].count).to.equal(3);
-			expect(results[1]._id).to.equal('B');
-			expect(results[1].count).to.equal(1);
-			expect(results[2]._id).to.equal('C');
-			expect(results[2].count).to.equal(1);
+		expect(results).to.have.lengthOf(3);
+		expect(results[0]._id).to.equal('A');
+		expect(results[0].count).to.equal(3);
+		// B and C should both have count 1, but order is not deterministic
+		const remainingResults = results.slice(1);
+		const bResult = remainingResults.find(r => r._id === 'B');
+		const cResult = remainingResults.find(r => r._id === 'C');
+		expect(bResult).to.exist;
+		expect(bResult.count).to.equal(1);
+		expect(cResult).to.exist;
+		expect(cResult.count).to.equal(1);
 		});
 
 		it('should work with expressions', async function() {
@@ -53,10 +59,13 @@ describe('Additional Aggregation Stages', function() {
 			]);
 
 			expect(results).to.have.lengthOf(2);
-			expect(results[0]._id).to.equal('low');
-			expect(results[0].count).to.equal(2);
-			expect(results[1]._id).to.equal('high');
-			expect(results[1].count).to.equal(2);
+		// Both have count 2, so order is non-deterministic
+		const lowResult = results.find(r => r._id === 'low');
+		const highResult = results.find(r => r._id === 'high');
+		expect(lowResult).to.exist;
+		expect(lowResult.count).to.equal(2);
+		expect(highResult).to.exist;
+		expect(highResult.count).to.equal(2);
 		});
 	});
 
