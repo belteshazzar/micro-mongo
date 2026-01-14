@@ -334,10 +334,10 @@ describe('Additional Aggregation Stages', function() {
 			expect(results).to.have.lengthOf(0);
 
 			// Check output collection
-			const outputCursor = await db.output_collection.find({});
+			const outputCursor = db.output_collection.find({});
 			const outputDocs = [];
-			while (outputCursor.hasNext()) {
-				outputDocs.push(outputCursor.next());
+			while (await outputCursor.hasNext()) {
+				outputDocs.push(await outputCursor.next());
 			}
 			expect(outputDocs).to.have.lengthOf(2);
 			expect(outputDocs.map(d => d.name)).to.include('Alice');
@@ -356,10 +356,10 @@ describe('Additional Aggregation Stages', function() {
 				{ $out: 'existing' }
 			]);
 
-			const cursor = await db.existing.find({});
+			const cursor = db.existing.find({});
 			const docs = [];
-			while (cursor.hasNext()) {
-				docs.push(cursor.next());
+			while (await cursor.hasNext()) {
+				docs.push(await cursor.next());
 			}
 			
 			expect(docs).to.have.lengthOf(1);
@@ -393,10 +393,10 @@ describe('Additional Aggregation Stages', function() {
 			expect(results).to.have.lengthOf(0);
 
 			// Check merged collection
-			const cursor = await db.target.find({});
+			const cursor = db.target.find({});
 			const docs = [];
-			while (cursor.hasNext()) {
-				docs.push(cursor.next());
+			while (await cursor.hasNext()) {
+				docs.push(await cursor.next());
 			}
 			
 			expect(docs).to.have.lengthOf(2);
@@ -415,8 +415,8 @@ describe('Additional Aggregation Stages', function() {
 				{ $merge: { into: 'target', whenMatched: 'replace' } }
 			]);
 
-			const cursor = await db.target.find({ _id: 1 });
-			const doc = cursor.next();
+			const cursor = db.target.find({ _id: 1 });
+			const doc = await cursor.next();
 			
 			expect(doc.age).to.equal(31);
 			expect(doc).to.not.have.property('city'); // Replaced, not merged
@@ -433,10 +433,10 @@ describe('Additional Aggregation Stages', function() {
 				{ $merge: { into: 'target', whenNotMatched: 'discard' } }
 			]);
 
-			const cursor = await db.target.find({});
+			const cursor = db.target.find({});
 			const docs = [];
-			while (cursor.hasNext()) {
-				docs.push(cursor.next());
+			while (await cursor.hasNext()) {
+				docs.push(await cursor.next());
 			}
 			
 			expect(docs).to.have.lengthOf(0);

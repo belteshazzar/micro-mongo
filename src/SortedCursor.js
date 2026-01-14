@@ -1,6 +1,8 @@
 /**
  * SortedCursor class for iterating over sorted query results
  */
+import { QueryError } from './errors.js';
+
 export class SortedCursor {
 	constructor(collection, query, cursor, sort) {
 		this.collection = collection;
@@ -18,12 +20,12 @@ export class SortedCursor {
 		if (this._initialized) return;
 		
 		// Ensure parent cursor is initialized
-		await this._cursor._ensureDocuments();
+		await this._cursor._ensureInitialized();
 		
 		this.items = [];
 		// Collect all items from the cursor
-		while (this._cursor.hasNext()) {
-			this.items.push(this._cursor.next());
+		while (await this._cursor.hasNext()) {
+			this.items.push(await this._cursor.next());
 		}
 		
 		// Sort the items
@@ -54,18 +56,13 @@ export class SortedCursor {
 	
 	async forEach(fn) {
 		await this._ensureInitialized();
-		while (this.hasNext()) {
-			await fn(this.next());
+		while (await this.hasNext()) {
+			await fn(await this.next());
 		}
 	}
 	
-	hasNext() {
-		if (!this._initialized) {
-			const { QueryError } = require('./errors.js');
-			throw new QueryError("Cursor not initialized. Use 'await cursor' or 'await cursor.toArray()' before synchronous iteration.", {
-				collection: this.collection.name
-			});
-		}
+	async hasNext() {
+		await this._ensureInitialized();
 		return this.pos < this.items.length;
 	}
 	
@@ -81,8 +78,8 @@ export class SortedCursor {
 	async map(fn) {
 		await this._ensureInitialized();
 		const results = [];
-		while (this.hasNext()) {
-			results.push(fn(this.next()));
+		while (await this.hasNext()) {
+			results.push(await fn(await this.next()));
 		}
 		return results;
 	}
@@ -92,13 +89,8 @@ export class SortedCursor {
 	max() { throw "Not Implemented"; }
 	min() { throw "Not Implemented"; }
 	
-	next() {
-		if (!this._initialized) {
-			const { QueryError } = require('./errors.js');
-			throw new QueryError("Cursor not initialized. Use 'await cursor' or 'await cursor.toArray()' before synchronous iteration.", {
-				collection: this.collection.name
-			});
-		}
+	async next() {
+		await this._ensureInitialized();
 		return this.items[this.pos++];
 	}
 	
@@ -114,7 +106,7 @@ export class SortedCursor {
 	async skip(num) {
 		await this._ensureInitialized();
 		while (num > 0) {
-			this.next();
+			await this.next();
 			num--;
 		}
 		return this;
@@ -131,7 +123,7 @@ export class SortedCursor {
 	async toArray() {
 		await this._ensureInitialized();
 		const results = [];
-		while (this.hasNext()) {
+		while (await this.hasNext()) {
 			results.push(this.next());
 		}
 		return results;
@@ -140,8 +132,8 @@ export class SortedCursor {
 	// Support for async iteration (for await...of)
 	async *[Symbol.asyncIterator]() {
 		await this._ensureInitialized();
-		while (this.hasNext()) {
-			yield this.next();
+		while (await this.hasNext()) {
+			yield await this.next();
 		}
 	}
 }

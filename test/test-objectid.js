@@ -172,7 +172,7 @@ describe("ObjectId", function() {
 			db.createCollection('users');
 			await db.users.insertOne({ name: 'Alice' });
 			
-			const doc = await db.users.findOne({ name: 'Alice' });
+			const doc = db.users.findOne({ name: 'Alice' });
 			expect(doc._id).to.be.instanceOf(mongo.ObjectId);
 			expect(doc._id.toString()).to.have.lengthOf(24);
 		});
@@ -182,7 +182,7 @@ describe("ObjectId", function() {
 			const customId = new mongo.ObjectId();
       await db.users.insertOne({ _id: customId, name: 'Bob' });
 			
-			const doc = await db.users.findOne({ name: 'Bob' });
+			const doc = db.users.findOne({ name: 'Bob' });
 			expect(doc._id.equals(customId)).to.be.true;
 		});
 
@@ -191,7 +191,7 @@ describe("ObjectId", function() {
 			const id = new mongo.ObjectId();
 			await db.users.insertOne({ _id: id, name: 'Charlie' });
 			
-			const doc = await db.users.findOne({ _id: id });
+			const doc = db.users.findOne({ _id: id });
 			expect(doc).to.not.be.null;
 			expect(doc.name).to.equal('Charlie');
 		});
@@ -201,7 +201,7 @@ describe("ObjectId", function() {
 			const id = new mongo.ObjectId();
 			await db.users.insertOne({ _id: id, name: 'David' });
 			
-			const doc = await db.users.findOne({ _id: id.toString() });
+			const doc = db.users.findOne({ _id: id.toString() });
 			expect(doc).to.not.be.null;
 			expect(doc.name).to.equal('David');
 		});
@@ -211,7 +211,7 @@ describe("ObjectId", function() {
 			const id = new mongo.ObjectId();
 			await db.users.insertOne({ _id: id, name: 'Eve' });
 			
-			const doc = await db.users.findOne({ _id: { $eq: id } });
+			const doc = db.users.findOne({ _id: { $eq: id } });
 			expect(doc).to.not.be.null;
 			expect(doc.name).to.equal('Eve');
 		});
@@ -256,7 +256,7 @@ describe("ObjectId", function() {
 				await db.users.insertOne({ _id: id, text: `Message ${i}` });
 			}
 			
-      const cursor = await db.users.find();
+      const cursor = db.users.find();
       const sorted = cursor.sort({ _id: 1 });
       const array = sorted.toArray();
 			expect(array.length).to.equal(3);
@@ -274,7 +274,7 @@ describe("ObjectId", function() {
 			
 			await db.users.updateOne({ _id: id }, { $set: { name: 'Updated' } });
 			
-			const doc = await db.users.findOne({ _id: id });
+			const doc = db.users.findOne({ _id: id });
 			expect(doc.name).to.equal('Updated');
 		});
 
@@ -285,7 +285,7 @@ describe("ObjectId", function() {
 			
 			await db.users.deleteOne({ _id: id });
 			
-			const doc = await db.users.findOne({ _id: id });
+			const doc = db.users.findOne({ _id: id });
 			expect(doc).to.be.null;
 		});
 	});

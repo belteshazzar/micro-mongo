@@ -89,11 +89,11 @@ describe("Browser Tests", function() {
 			
 			// Update
 			await db.users.updateOne({ name: 'Bob' }, { $set: { age: 26 } });
-			const bob = await db.users.findOne({ name: 'Bob' });
+			const bob = db.users.findOne({ name: 'Bob' });
 			
 			// Delete
 			await db.users.deleteOne({ name: 'Alice' });
-			const count = await db.users.count();
+			const count = db.users.count();
 			
 			await client.close();
 			
@@ -125,10 +125,10 @@ describe("Browser Tests", function() {
 			await db.items.insertOne({ _id: customId, name: 'Test Item' });
 			
 			// Query by ObjectId
-			const found = await db.items.findOne({ _id: customId });
+			const found = db.items.findOne({ _id: customId });
 			
 			// Query by hex string
-			const found2 = await db.items.findOne({ _id: customId.toString() });
+			const found2 = db.items.findOne({ _id: customId.toString() });
 			
 			await client.close();
 			
@@ -207,7 +207,7 @@ describe("Browser Tests", function() {
 				{ product: 'Laptop', amount: 999, quantity: 1 }
 			]);
 			
-			const aggregated = await db.sales.aggregate([
+			const aggregated = db.sales.aggregate([
 				{ $group: { 
 					_id: '$product', 
 					totalQuantity: { $sum: '$quantity' }

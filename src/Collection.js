@@ -398,7 +398,7 @@ export class Collection extends EventEmitter {
     // Start with all documents
     let results = [];
     const cursor = this.find({});
-    await cursor._ensureDocuments();
+    await cursor._ensureInitialized();
     // TODO: Optimize by applying $match stages during iteration
     while (await cursor.hasNext()) {
       results.push(await cursor.next());
@@ -1024,8 +1024,8 @@ export class Collection extends EventEmitter {
 
           // Find existing document
           const existingCursor = targetCollection.find({ [matchField]: matchValue });
-          await existingCursor._ensureDocuments();
-          const existing = existingCursor.hasNext() ? existingCursor.next() : null;
+          await existingCursor._ensureInitialized();
+          const existing = await existingCursor.hasNext() ? await existingCursor.next() : null;
 
           if (existing) {
             if (whenMatched === 'replace') {
@@ -1085,9 +1085,9 @@ export class Collection extends EventEmitter {
           // Find matching documents in foreign collection
           const matches = [];
           const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
-          await foreignCursor._ensureDocuments();
-          while (foreignCursor.hasNext()) {
-            matches.push(foreignCursor.next());
+          await foreignCursor._ensureInitialized();
+          while (await foreignCursor.hasNext()) {
+            matches.push(await foreignCursor.next());
           }
 
           doc[stageSpec.as] = matches;
@@ -1144,9 +1144,9 @@ export class Collection extends EventEmitter {
             }
 
             const cursor = fromCollection.find(query);
-            await cursor._ensureDocuments();
-            while (cursor.hasNext()) {
-              const match = cursor.next();
+            await cursor._ensureInitialized();
+            while (await cursor.hasNext()) {
+              const match = await cursor.next();
               const matchCopy = copy(match);
 
               if (depthField) {
@@ -1550,9 +1550,9 @@ export class Collection extends EventEmitter {
     const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
     const c = this.find({});
-    await c._ensureDocuments();
-    while (c.hasNext()) {
-      await destCol.insertOne(c.next());
+    await c._ensureInitialized();
+    while (await c.hasNext()) {
+      await destCol.insertOne(await c.next());
       numCopied++;
     }
 
@@ -1616,11 +1616,11 @@ export class Collection extends EventEmitter {
 
   async deleteMany(query) {
     const c = this.find(query);
-    await c._ensureDocuments();
+    await c._ensureInitialized();
     const ids = [];
     const docs = [];
-    while (c.hasNext()) {
-      const doc = c.next();
+    while (await c.hasNext()) {
+      const doc = await c.next();
       ids.push(doc._id);
       docs.push(doc);
     }
@@ -1636,7 +1636,7 @@ export class Collection extends EventEmitter {
   async distinct(field, query) {
     const vals = {};
     const c = this.find(query);
-    await c._ensureDocuments();
+    await c._ensureInitialized();
     while (await c.hasNext()) {
       const d = await c.next();
       if (d[field]) {
@@ -1915,9 +1915,9 @@ export class Collection extends EventEmitter {
 
   async findOne(query, projection) {
     const cursor = this.find(query, projection);
-    await cursor._ensureDocuments();
-    if (cursor.hasNext()) {
-      return cursor.next();
+    await cursor._ensureInitialized();
+    if (await cursor.hasNext()) {
+      return await cursor.next();
     } else {
       return null;
     }
@@ -1929,10 +1929,10 @@ export class Collection extends EventEmitter {
       c = c.sort(options.sort);
       await c._ensureInitialized();
     } else {
-      await c._ensureDocuments();
+      await c._ensureInitialized();
     }
-    if (!c.hasNext()) return null;
-    const doc = c.next();
+    if (!await c.hasNext()) return null;
+    const doc = await c.next();
     await this.documents.delete(doc._id.toString());
     if (options && options.projection) return applyProjection(options.projection, doc);
     else return doc;
@@ -1944,10 +1944,10 @@ export class Collection extends EventEmitter {
       c = c.sort(options.sort);
       await c._ensureInitialized();
     } else {
-      await c._ensureDocuments();
+      await c._ensureInitialized();
     }
-    if (!c.hasNext()) return null;
-    const doc = c.next();
+    if (!await c.hasNext()) return null;
+    const doc = await c.next();
     replacement._id = doc._id;
     await this.documents.add(doc._id.toString(), replacement);
     if (options && options.returnNewDocument) {
@@ -1965,10 +1965,10 @@ export class Collection extends EventEmitter {
       c = c.sort(options.sort);
       await c._ensureInitialized();
     } else {
-      await c._ensureDocuments();
+      await c._ensureInitialized();
     }
-    if (!c.hasNext()) return null;
-    const doc = c.next();
+    if (!await c.hasNext()) return null;
+    const doc = await c.next();
     const clone = Object.assign({}, doc);
 
     // Get array filter information for positional operator support
@@ -2043,8 +2043,8 @@ export class Collection extends EventEmitter {
     // first
     const result = {};
     const c = this.find(query);
-    await c._ensureDocuments();
-    result.matchedCount = c.count();
+    await c._ensureInitialized();
+    result.matchedCount = await c.count();
     if (result.matchedCount == 0) {
       result.modifiedCount = 0;
       if (options && options.upsert) {
@@ -2069,7 +2069,7 @@ export class Collection extends EventEmitter {
 
   async remove(query, options) {
     const c = this.find(query);
-    await c._ensureDocuments();
+    await c._ensureInitialized();
     if (!await c.hasNext()) return;
     if (options === true || (options && options.justOne)) {
       const doc = await c.next();
@@ -2093,11 +2093,11 @@ export class Collection extends EventEmitter {
 
   async update(query, updates, options) {
     const c = this.find(query);
-    await c._ensureDocuments();
-    if (c.hasNext()) {
+    await c._ensureInitialized();
+    if (await c.hasNext()) {
       if (options && options.multi) {
-        while (c.hasNext()) {
-          const doc = c.next();
+        while (await c.hasNext()) {
+          const doc = await c.next();
 
           // Get array filter information for positional operator support
           const matchInfo = matchWithArrayIndices(doc, query);
@@ -2110,7 +2110,7 @@ export class Collection extends EventEmitter {
           await this.updateIndexesOnInsert(doc);
         }
       } else {
-        const doc = c.next();
+        const doc = await c.next();
 
         // Get array filter information for positional operator support
         const matchInfo = matchWithArrayIndices(doc, query);
@@ -2133,7 +2133,7 @@ export class Collection extends EventEmitter {
 
   async updateOne(query, updates, options) {
     const c = this.find(query);
-    await c._ensureDocuments();
+    await c._ensureInitialized();
     if (await c.hasNext()) {
       const doc = await c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
@@ -2161,7 +2161,7 @@ export class Collection extends EventEmitter {
 
   async updateMany(query, updates, options) {
     const c = this.find(query);
-    await c._ensureDocuments();
+    await c._ensureInitialized();
     if (await c.hasNext()) {
       while (await c.hasNext()) {
         const doc = await c.next();

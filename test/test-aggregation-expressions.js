@@ -30,7 +30,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $add operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { total: { $add: ['$price', '$tax'] } } }
 			]);
 
@@ -41,7 +41,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $multiply operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { subtotal: { $multiply: ['$price', '$quantity'] } } }
 			]);
 
@@ -52,7 +52,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $subtract operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { diff: { $subtract: ['$price', '$tax'] } } }
 			]);
 
@@ -63,7 +63,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $divide operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { unitPrice: { $divide: ['$price', '$quantity'] } } }
 			]);
 
@@ -74,7 +74,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $mod operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { remainder: { $mod: ['$price', 3] } } }
 			]);
 
@@ -85,7 +85,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $pow operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { squared: { $pow: ['$quantity', 2] } } }
 			]);
 
@@ -99,7 +99,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, value: 16 });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { root: { $sqrt: '$value' } } }
 			]);
 
@@ -113,7 +113,7 @@ describe('Aggregation Expression Operators', function() {
 				{ _id: 2, value: 10 }
 			]);
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { absolute: { $abs: '$value' } } }
 			]);
 
@@ -125,7 +125,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, value: 3.7 });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						ceiling: { $ceil: '$value' },
@@ -144,7 +144,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, value: 3.14159 });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { rounded: { $round: ['$value', 2] } } }
 			]);
 
@@ -166,7 +166,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $concat operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						fullName: { $concat: ['$title', ' ', '$firstName', ' ', '$lastName'] }
@@ -181,7 +181,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $toLower and $toUpper operators', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						lower: { $toLower: '$firstName' },
@@ -195,7 +195,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $substr operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						initial: { $substr: ['$firstName', 0, 1] }
@@ -212,7 +212,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, text: 'a,b,c' });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { parts: { $split: ['$text', ','] } } }
 			]);
 
@@ -220,7 +220,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $strLenCP operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { length: { $strLenCP: '$firstName' } } }
 			]);
 
@@ -233,7 +233,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, text: '  hello  ' });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $project: { trimmed: { $trim: { input: '$text' } } } }
 			]);
 
@@ -244,7 +244,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, text: 'hello world hello' });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						replaceOne: { $replaceOne: { input: '$text', find: 'hello', replacement: 'hi' } },
@@ -272,7 +272,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $eq, $ne, $gt, $gte, $lt, $lte operators', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						is25: { $eq: ['$age', 25] },
@@ -294,7 +294,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $and operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						qualified: { $and: [{ $gte: ['$age', 30] }, '$active'] }
@@ -308,7 +308,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $or operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						eligible: { $or: [{ $gte: ['$age', 30] }, '$active'] }
@@ -322,7 +322,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $not operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						notActive: { $not: ['$active'] }
@@ -350,7 +350,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $cond operator (array form)', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						grade: {
@@ -370,7 +370,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $cond operator (object form)', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						grade: {
@@ -390,7 +390,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $ifNull operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						effectiveBonus: { $ifNull: ['$bonus', 0] }
@@ -404,7 +404,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $switch operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						grade: {
@@ -438,7 +438,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support date extraction operators', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						year: { $year: '$timestamp' },
@@ -462,7 +462,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $dateToString operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						formatted: {
@@ -482,7 +482,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, dateString: '2024-03-15' });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						date: { $toDate: '$dateString' }
@@ -509,7 +509,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $arrayElemAt operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						first: { $arrayElemAt: ['$items', 0] },
@@ -528,7 +528,7 @@ describe('Aggregation Expression Operators', function() {
 			await collection.deleteMany({});
 			await collection.insertOne({ _id: 1, arr1: [1, 2], arr2: [3, 4] });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						combined: { $concatArrays: ['$arr1', '$arr2'] }
@@ -540,7 +540,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $filter operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						filtered: {
@@ -559,7 +559,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $map operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						doubled: {
@@ -578,7 +578,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $reduce operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						sum: {
@@ -597,7 +597,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $size operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						count: { $size: '$items' }
@@ -611,7 +611,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $slice operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						firstTwo: { $slice: ['$items', 2] },
@@ -625,7 +625,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $reverseArray operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						reversed: { $reverseArray: '$items' }
@@ -637,7 +637,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $in operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						hasThree: { $in: [3, '$items'] }
@@ -650,7 +650,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $isArray operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						isArray: { $isArray: '$items' }
@@ -679,7 +679,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $type operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						type: { $type: '$value' }
@@ -695,7 +695,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $toInt operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						asInt: { $toInt: '$value' }
@@ -708,7 +708,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $toString operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						asString: { $toString: '$value' }
@@ -722,7 +722,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $toBool operator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						asBool: { $toBool: '$value' }
@@ -745,7 +745,7 @@ describe('Aggregation Expression Operators', function() {
 		it('should support $objectToArray operator', async function() {
 			await collection.insertOne({ _id: 1, obj: { a: 1, b: 2, c: 3 } });
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						array: { $objectToArray: '$obj' }
@@ -769,7 +769,7 @@ describe('Aggregation Expression Operators', function() {
 				]
 			});
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						obj: { $arrayToObject: '$array' }
@@ -787,7 +787,7 @@ describe('Aggregation Expression Operators', function() {
 				obj2: { b: 3, c: 4 }
 			});
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						merged: { $mergeObjects: ['$obj1', '$obj2'] }
@@ -812,7 +812,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $addFields stage', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$addFields: {
 						total: { $multiply: ['$price', '$quantity'] },
@@ -829,7 +829,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $set stage (alias for $addFields)', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$set: {
 						discount: { $multiply: ['$price', 0.1] }
@@ -858,7 +858,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support expressions in group accumulators', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$group: {
 						_id: '$category',
@@ -876,7 +876,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $stdDevPop accumulator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$group: {
 						_id: '$category',
@@ -893,7 +893,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $stdDevSamp accumulator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$group: {
 						_id: '$category',
@@ -910,7 +910,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should support $mergeObjects accumulator', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$group: {
 						_id: '$category',
@@ -940,7 +940,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should handle deeply nested expressions', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						// ((a + b) * c) - (a / b)
@@ -959,7 +959,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should handle expressions with conditionals and arithmetic', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{
 					$project: {
 						result: {
@@ -992,7 +992,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should remove a single field using string syntax', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $unset: 'score' }
 			]);
 
@@ -1005,7 +1005,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should remove multiple fields using array syntax', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $unset: ['city', 'country'] }
 			]);
 
@@ -1018,7 +1018,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should remove fields using object syntax', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $unset: { age: '', score: '' } }
 			]);
 
@@ -1036,7 +1036,7 @@ describe('Aggregation Expression Operators', function() {
 				{ _id: 2, name: 'Bob', address: { city: 'LA', zip: '90001', country: 'USA' } }
 			]);
 
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $unset: 'address.zip' }
 			]);
 
@@ -1047,7 +1047,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should combine with other aggregation stages', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $match: { age: { $gte: 30 } } },
 				{ $unset: ['city', 'country'] },
 				{ $project: { name: 1, age: 1, score: 1 } }
@@ -1062,7 +1062,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should not error when removing non-existent fields', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $unset: 'nonexistent' }
 			]);
 
@@ -1071,7 +1071,7 @@ describe('Aggregation Expression Operators', function() {
 		});
 
 		it('should work with $addFields and $unset together', async function() {
-			const results = await collection.aggregate([
+			const results = collection.aggregate([
 				{ $addFields: { fullName: '$name', total: { $add: ['$age', '$score'] } } },
 				{ $unset: ['name', 'age', 'score'] }
 			]);

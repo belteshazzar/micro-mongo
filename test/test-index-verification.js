@@ -50,7 +50,7 @@ describe('Index Verification Tests', function() {
 			this.timeout(5000);
 			
 			// Create index
-			const indexName = await db[collectionName].createIndex({ age: 1 });
+			const indexName = db[collectionName].createIndex({ age: 1 });
 			
 			// Insert some documents to populate the index
 			await db[collectionName].insertMany([
@@ -173,7 +173,7 @@ describe('Index Verification Tests', function() {
 			
 			// Get query plan
 			const collection = db[collectionName];
-			const queryPlan = await collection.planQueryAsync({ age: { $gt: 28 } });
+			const queryPlan = collection.planQueryAsync({ age: { $gt: 28 } });
 			
 			// Should use index
 			expect(queryPlan.useIndex).to.be.true;
@@ -190,7 +190,7 @@ describe('Index Verification Tests', function() {
 			await db[collectionName].createIndex({ score: 1 });
 			
 			// Insert document
-			const insertResult = await db[collectionName].insertOne({ name: 'Test', score: 50 });
+			const insertResult = db[collectionName].insertOne({ name: 'Test', score: 50 });
 			const docId = insertResult.insertedId;
 			
 			// Query should find it

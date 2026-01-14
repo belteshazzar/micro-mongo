@@ -55,7 +55,7 @@ describe('Simple Find Test', function() {
 	});
 
 	it('should allow awaiting cursor to initialize it', async function() {
-		const cursor = await collection.find({});
+		const cursor = collection.find({});
 		assert(cursor !== null);
 		const hasNext = cursor.hasNext();
 		assert(hasNext === true);
@@ -65,13 +65,13 @@ describe('Simple Find Test', function() {
 	});
 
 	it('should work with toArray()', async function() {
-		const docs = await collection.find({}).toArray();
+		const docs = collection.find({}).toArray();
 		assert(docs.length === 2);
 		assert(docs[0].name === 'Alice' || docs[0].name === 'Bob');
 	});
 
 	it('should work with findOne()', async function() {
-		const doc = await collection.findOne({ name: 'Alice' });
+		const doc = collection.findOne({ name: 'Alice' });
 		assert(doc !== null);
 		assert(doc.name === 'Alice');
 		assert(doc.age === 30);

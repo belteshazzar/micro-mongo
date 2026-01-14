@@ -12,7 +12,7 @@ export class Cursor {
 		this.projection = projection;
 		// Support both Promise<Array> and Array for backward compatibility
 		this._documentsPromise = documentsOrPromise instanceof Promise ? documentsOrPromise : Promise.resolve(documentsOrPromise);
-		this.documents = null; // Will be populated when _ensureDocuments() is called
+		this.documents = null; // Will be populated when _ensureInitialized() is called
 		this._initialized = false;
 		this.SortedCursor = SortedCursor;
 
@@ -45,7 +45,7 @@ export class Cursor {
 	 * Ensure documents are loaded from the promise
 	 * @private
 	 */
-	async _ensureDocuments() {
+	async _ensureInitialized() {
 		if (!this._initialized) {
 			this.documents = await this._documentsPromise;
 			this._initialized = true;
@@ -72,7 +72,7 @@ export class Cursor {
 	
 	async count() {
 		// Return total count without considering skip/limit applied to this cursor
-		await this._ensureDocuments();
+		await this._ensureInitialized();
 		return this.documents.length;
 	}
 	
@@ -102,7 +102,7 @@ export class Cursor {
 	}
 	
 	async forEach(fn) {
-		await this._ensureDocuments();
+		await this._ensureInitialized();
 		while (await this.hasNext()) {
 			await fn(await this.next());
 		}
@@ -111,7 +111,7 @@ export class Cursor {
 	async hasNext() {
 		if (this._closed) return false;
 
-    await this._ensureDocuments();
+    await this._ensureInitialized();
 
     // Apply skip on first access if not yet applied
 		if (this.pos === 0 && this._skip > 0) {
@@ -133,10 +133,10 @@ export class Cursor {
 		return this;
 	}
 	async itcount() {
-		await this._ensureDocuments();
+		await this._ensureInitialized();
 		let count = 0;
-		while (this.hasNext()) {
-			this.next();
+		while (await this.hasNext()) {
+			await this.next();
 			count++;
 		}
 		return count;
@@ -148,10 +148,10 @@ export class Cursor {
 	}
 	
 	async map(fn) {
-		await this._ensureDocuments();
+		await this._ensureInitialized();
 		const results = [];
-		while (this.hasNext()) {
-			results.push(fn(this.next()));
+		while (await this.hasNext()) {
+			results.push(await fn(await this.next()));
 		}
 		return results;
 	}
@@ -277,7 +277,7 @@ export class Cursor {
 	tailable() { throw new NotImplementedError('tailable'); }
 	
 	async toArray() {
-		await this._ensureDocuments();
+		await this._ensureInitialized();
 		const results = [];
 		while (await this.hasNext()) {
 			results.push(await this.next());
@@ -287,7 +287,7 @@ export class Cursor {
 	
 	// Support for async iteration (for await...of)
 	async *[Symbol.asyncIterator]() {
-		await this._ensureDocuments();
+		await this._ensureInitialized();
 		while (await this.hasNext()) {
 			yield await this.next();
 		}
