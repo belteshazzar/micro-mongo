@@ -1725,9 +1725,17 @@ export class Collection extends EventEmitter {
   ensureIndex() { throw new NotImplementedError('ensureIndex', { collection: this.name }); }
   explain() { throw new NotImplementedError('explain', { collection: this.name }); }
 
-  async find(query, projection) {
+  find(query, projection) {
     this._validateProjection(projection);
-    return this._findInternal(query, projection);
+    // Return cursor immediately with promise for documents
+    const documentsPromise = this._findInternal(query, projection);
+    return new Cursor(
+      this,
+      query,
+      projection,
+      documentsPromise,
+      SortedCursor
+    );
   }
 
   _validateProjection(projection) {
@@ -1800,13 +1808,8 @@ export class Collection extends EventEmitter {
       this._sortByNearDistance(documents, nearSpec);
     }
 
-    return new Cursor(
-      this,
-      normalizedQuery,
-      projection,
-      documents,
-      SortedCursor
-    );
+    // Return the documents array directly, not a Cursor
+    return documents;
   }
 
   _extractNearSpec(query) {
