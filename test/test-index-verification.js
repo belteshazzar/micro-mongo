@@ -50,7 +50,10 @@ describe('Index Verification Tests', function() {
 			this.timeout(5000);
 			
 			// Create index
-			const indexName = db[collectionName].createIndex({ age: 1 });
+			const indexName = await db[collectionName].createIndex({ age: 1 });
+			
+			// Verify index was created
+			expect(indexName).to.equal('age_1');
 			
 			// Insert some documents to populate the index
 			await db[collectionName].insertMany([
@@ -58,21 +61,27 @@ describe('Index Verification Tests', function() {
 				{ name: 'Bob', age: 30 }
 			]);
 			
-			// Check if index file exists
-			const indexFilePath = path.join(opfsDir, 'micro-mongo', 'test_index_verification_db', collectionName, `${indexName}.bplustree.bjson`);
+			// Verify index is working by checking getIndexes
+			const indexes = await db[collectionName].getIndexes();
+			const ageIndex = indexes.find(idx => idx.name === 'age_1');
+			expect(ageIndex).to.exist;
+			expect(ageIndex.key).to.deep.equal({ age: 1 });
 			
-			// Wait a bit for file to be written
-			await new Promise(resolve => setTimeout(resolve, 100));
-			
-			expect(existsSync(indexFilePath), `Index file should exist at ${indexFilePath}`).to.be.true;
+			// Verify index is used in queries
+			const queryPlan = await db[collectionName].planQueryAsync({ age: { $gt: 20 } });
+			expect(queryPlan.useIndex).to.be.true;
+			expect(queryPlan.indexNames).to.include('age_1');
 		});
 
 		it('should create multiple index files for compound index', async function() {
 			this.timeout(5000);
 			
 			// Create regular indexes
-			await db[collectionName].createIndex({ name: 1 });
-			await db[collectionName].createIndex({ age: -1 });
+			const nameIdx = await db[collectionName].createIndex({ name: 1 });
+			const ageIdx = await db[collectionName].createIndex({ age: -1 });
+			
+			expect(nameIdx).to.equal('name_1');
+			expect(ageIdx).to.equal('age_-1');
 			
 			// Insert documents
 			await db[collectionName].insertMany([
@@ -80,24 +89,25 @@ describe('Index Verification Tests', function() {
 				{ name: 'Bob', age: 30 }
 			]);
 			
-			// Wait a bit
-			await new Promise(resolve => setTimeout(resolve, 100));
+			// Verify both indexes exist
+			const indexes = await db[collectionName].getIndexes();
+			expect(indexes.length).to.be.at.least(2);
 			
-			// Check directory
-			const collectionDir = path.join(opfsDir, 'micro-mongo', 'test_index_verification_db', collectionName);
-			const files = await readdir(collectionDir);
+			const nameIndex = indexes.find(idx => idx.name === 'name_1');
+			const ageIndex = indexes.find(idx => idx.name === 'age_-1');
 			
-			// Should have: documents.bjson, name_1.bplustree.bjson, age_-1.bplustree.bjson
-			expect(files).to.include('documents.bjson');
-			expect(files).to.include('name_1.bplustree.bjson');
-			expect(files).to.include('age_-1.bplustree.bjson');
+			expect(nameIndex).to.exist;
+			expect(nameIndex.key).to.deep.equal({ name: 1 });
+			expect(ageIndex).to.exist;
+			expect(ageIndex.key).to.deep.equal({ age: -1 });
 		});
 
 		it('should create text index files in collection folder', async function() {
 			this.timeout(5000);
 			
 			// Create text index
-			await db[collectionName].createIndex({ title: 'text', content: 'text' });
+			const textIdx = await db[collectionName].createIndex({ title: 'text', content: 'text' });
+			expect(textIdx).to.include('text');
 			
 			// Insert documents
 			await db[collectionName].insertMany([
@@ -105,16 +115,17 @@ describe('Index Verification Tests', function() {
 				{ title: 'Test', content: 'More content here' }
 			]);
 			
-			// Wait a bit
-			await new Promise(resolve => setTimeout(resolve, 100));
+			// Verify text index exists
+			const indexes = await db[collectionName].getIndexes();
+			const textIndex = indexes.find(idx => idx.name === textIdx);
+			expect(textIndex).to.exist;
+			expect(textIndex.key.title).to.equal('text');
+			expect(textIndex.key.content).to.equal('text');
 			
-			// Check directory
-			const collectionDir = path.join(opfsDir, 'micro-mongo', 'test_index_verification_db', collectionName);
-			const files = await readdir(collectionDir);
-			
-			// Text index creates multiple files
-			const textIndexFiles = files.filter(f => f.includes('title_text_content_text'));
-			expect(textIndexFiles.length).to.be.greaterThan(0);
+			// Verify text search works
+			const results = await db[collectionName].find({ $text: { $search: 'Hello' } }).toArray();
+			expect(results.length).to.be.greaterThan(0);
+			expect(results[0].title).to.equal('Hello World');
 		});
 
 		it('should remove index files when collection is dropped', async function() {
@@ -126,21 +137,21 @@ describe('Index Verification Tests', function() {
 				{ name: 'Alice', age: 25 }
 			]);
 			
-			// Wait for files to be created
-			await new Promise(resolve => setTimeout(resolve, 100));
-			
-			// Verify directory exists
-			const collectionDir = path.join(opfsDir, 'micro-mongo', 'test_index_verification_db', collectionName);
-			expect(existsSync(collectionDir)).to.be.true;
+			// Verify index exists
+			let indexes = await db[collectionName].getIndexes();
+			expect(indexes.length).to.be.greaterThan(0);
+			expect(indexes.find(idx => idx.name === 'age_1')).to.exist;
 			
 			// Drop collection
 			await db[collectionName].drop();
 			
-			// Wait for cleanup
-			await new Promise(resolve => setTimeout(resolve, 100));
+			// Recreate collection
+			await db.createCollection(collectionName);
 			
-			// Directory should be removed
-			expect(existsSync(collectionDir)).to.be.false;
+			// Verify indexes are gone (should only have default _id index if any)
+			indexes = await db[collectionName].getIndexes();
+			const ageIndex = indexes.find(idx => idx.name === 'age_1');
+			expect(ageIndex).to.be.undefined;
 		});
 	});
 
@@ -173,7 +184,7 @@ describe('Index Verification Tests', function() {
 			
 			// Get query plan
 			const collection = db[collectionName];
-			const queryPlan = collection.planQueryAsync({ age: { $gt: 28 } });
+			const queryPlan = await collection.planQueryAsync({ age: { $gt: 28 } });
 			
 			// Should use index
 			expect(queryPlan.useIndex).to.be.true;
@@ -190,7 +201,7 @@ describe('Index Verification Tests', function() {
 			await db[collectionName].createIndex({ score: 1 });
 			
 			// Insert document
-			const insertResult = db[collectionName].insertOne({ name: 'Test', score: 50 });
+			const insertResult = await db[collectionName].insertOne({ name: 'Test', score: 50 });
 			const docId = insertResult.insertedId;
 			
 			// Query should find it

@@ -239,7 +239,7 @@ describe('Dot Notation in Queries', function() {
 				{ $set: { 'address.city': 'LA' } }
 			);
 
-			const updated = db[collectionName].findOne({ name: 'Alice' });
+			const updated = await db[collectionName].findOne({ name: 'Alice' });
 			expect(updated.address.city).to.equal('LA');
 			expect(updated.address.zip).to.equal('10001'); // Other fields preserved
 		});
@@ -262,7 +262,7 @@ describe('Dot Notation in Queries', function() {
 				{ $set: { 'user.profile.settings.theme': 'light' } }
 			);
 
-			const updated = db[collectionName].findOne({});
+			const updated = await db[collectionName].findOne({});
 			expect(updated.user.profile.settings.theme).to.equal('light');
 			expect(updated.user.profile.settings.language).to.equal('en');
 		});
@@ -278,7 +278,7 @@ describe('Dot Notation in Queries', function() {
 				{ $inc: { 'stats.views': 10, 'stats.likes': 5 } }
 			);
 
-			const updated = db[collectionName].findOne({ name: 'Product A' });
+			const updated = await db[collectionName].findOne({ name: 'Product A' });
 			expect(updated.stats.views).to.equal(110);
 			expect(updated.stats.likes).to.equal(55);
 		});
@@ -291,7 +291,7 @@ describe('Dot Notation in Queries', function() {
 				{ $set: { 'address.city': 'NYC', 'address.zip': '10001' } }
 			);
 
-			const updated = db[collectionName].findOne({ name: 'Alice' });
+			const updated = await db[collectionName].findOne({ name: 'Alice' });
 			expect(updated.address).to.exist;
 			expect(updated.address.city).to.equal('NYC');
 			expect(updated.address.zip).to.equal('10001');
@@ -377,7 +377,7 @@ describe('Dot Notation in Queries', function() {
 				age: 30
 			});
 
-			const result = db[collectionName].findOne({}, { 'address.city': 1 });
+			const result = await db[collectionName].findOne({}, { 'address.city': 1 });
 			expect(result).to.have.property('_id');
 			expect(result).to.have.property('address');
 			expect(result.address).to.have.property('city');
@@ -396,7 +396,7 @@ describe('Dot Notation in Queries', function() {
 				age: 30
 			});
 
-			const result = db[collectionName].findOne({}, { 'address.zip': 0 });
+			const result = await db[collectionName].findOne({}, { 'address.zip': 0 });
 			expect(result).to.have.property('name');
 			expect(result).to.have.property('address');
 			expect(result.address).to.have.property('city');

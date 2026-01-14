@@ -111,12 +111,14 @@ describe('Cursor Methods', function() {
 	describe('size()', function() {
 		it('', async function() {
 			const cursor = collection.find({});
+			await cursor.hasNext(); // Load documents first
 			assert.strictEqual(cursor.size(), 5);
 		});
 
 		it('', async function() {
 			const cursor = collection.find({});
 			cursor.limit(3);
+			await cursor.hasNext(); // Load documents first
 			assert.strictEqual(cursor.size(), 3);
 		});
 
@@ -124,7 +126,7 @@ describe('Cursor Methods', function() {
 			const cursor = collection.find({});
 			await cursor.next();
 			await cursor.next();
-			assert.strictEqual(cursor.size(), 3);
+			assert.strictEqual(await cursor.size(), 3);
 		});
 	});
 
@@ -173,6 +175,7 @@ describe('Cursor Methods', function() {
 	describe('objsLeftInBatch()', function() {
 		it('', async function() {
 			const cursor = collection.find({});
+			await cursor.hasNext(); // Load documents first
 			assert.strictEqual(cursor.objsLeftInBatch(), 5);
 			await cursor.next();
 			assert.strictEqual(cursor.objsLeftInBatch(), 4);

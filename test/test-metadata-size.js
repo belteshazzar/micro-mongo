@@ -20,6 +20,7 @@ globalThis.navigator.storage = {
 
 import { BPlusTree } from 'bjson/bplustree';
 import { RTree } from 'bjson/rtree';
+import { ObjectId } from 'bjson';
 
 describe('BPlusTree Metadata Size Verification', function() {
 	before(async function() {
@@ -93,8 +94,8 @@ describe('BPlusTree Metadata Size Verification', function() {
 		await tree.open();
 		
 		// Add some data
-		await tree.insert(10, 20, 'id1');
-		await tree.insert(11, 21, 'id2');
+		await tree.insert(10, 20, new ObjectId());
+		await tree.insert(11, 21, new ObjectId());
 		
 		// Close to ensure metadata is written
 		await tree.close();
@@ -124,7 +125,7 @@ describe('BPlusTree Metadata Size Verification', function() {
 		await rtree.open();
 		
 		await bptree.add('test', 'data');
-		await rtree.insert(10, 20, 'id1');
+		await rtree.insert(10, 20, new ObjectId());
 		
 		await bptree.close();
 		await rtree.close();
