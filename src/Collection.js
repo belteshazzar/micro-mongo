@@ -397,9 +397,11 @@ export class Collection extends EventEmitter {
 
     // Start with all documents
     let results = [];
-    const cursor = await this.find({});
-    while (cursor.hasNext()) {
-      results.push(cursor.next());
+    const cursor = this.find({});
+    await cursor._ensureDocuments();
+    // TODO: Optimize by applying $match stages during iteration
+    while (await cursor.hasNext()) {
+      results.push(await cursor.next());
     }
 
     // Process each stage in the pipeline
@@ -1021,7 +1023,8 @@ export class Collection extends EventEmitter {
           const matchValue = getProp(doc, matchField);
 
           // Find existing document
-          const existingCursor = await targetCollection.find({ [matchField]: matchValue });
+          const existingCursor = targetCollection.find({ [matchField]: matchValue });
+          await existingCursor._ensureDocuments();
           const existing = existingCursor.hasNext() ? existingCursor.next() : null;
 
           if (existing) {
@@ -1081,7 +1084,8 @@ export class Collection extends EventEmitter {
 
           // Find matching documents in foreign collection
           const matches = [];
-          const foreignCursor = await fromCollection.find({ [stageSpec.foreignField]: localValue });
+          const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+          await foreignCursor._ensureDocuments();
           while (foreignCursor.hasNext()) {
             matches.push(foreignCursor.next());
           }
@@ -1139,7 +1143,8 @@ export class Collection extends EventEmitter {
               query = { $and: [query, restrictSearchWithMatch] };
             }
 
-            const cursor = await fromCollection.find(query);
+            const cursor = fromCollection.find(query);
+            await cursor._ensureDocuments();
             while (cursor.hasNext()) {
               const match = cursor.next();
               const matchCopy = copy(match);
@@ -1544,7 +1549,8 @@ export class Collection extends EventEmitter {
   async copyTo(destCollectionName) {
     const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
-    const c = await this.find({});
+    const c = this.find({});
+    await c._ensureDocuments();
     while (c.hasNext()) {
       await destCol.insertOne(c.next());
       numCopied++;
@@ -1609,7 +1615,8 @@ export class Collection extends EventEmitter {
   }
 
   async deleteMany(query) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     const ids = [];
     const docs = [];
     while (c.hasNext()) {
@@ -1620,7 +1627,7 @@ export class Collection extends EventEmitter {
     const deletedCount = ids.length;
     for (let i = 0; i < ids.length; i++) {
       await this.updateIndexesOnDelete(docs[i]);
-      await this.documents.delete(ids[i].toString());
+      this.documents.delete(ids[i].toString());
       this.emit('delete', { _id: ids[i] });
     }
     return { deletedCount: deletedCount };
@@ -1628,9 +1635,10 @@ export class Collection extends EventEmitter {
 
   async distinct(field, query) {
     const vals = {};
-    const c = await this.find(query);
-    while (c.hasNext()) {
-      const d = c.next();
+    const c = this.find(query);
+    await c._ensureDocuments();
+    while (await c.hasNext()) {
+      const d = await c.next();
       if (d[field]) {
         vals[d[field]] = true;
       }
@@ -1725,9 +1733,17 @@ export class Collection extends EventEmitter {
   ensureIndex() { throw new NotImplementedError('ensureIndex', { collection: this.name }); }
   explain() { throw new NotImplementedError('explain', { collection: this.name }); }
 
-  async find(query, projection) {
+  find(query, projection) {
     this._validateProjection(projection);
-    return this._findInternal(query, projection);
+    // Return cursor immediately with promise for documents
+    const documentsPromise = this._findInternal(query, projection);
+    return new Cursor(
+      this,
+      query,
+      projection,
+      documentsPromise,
+      SortedCursor
+    );
   }
 
   _validateProjection(projection) {
@@ -1800,13 +1816,8 @@ export class Collection extends EventEmitter {
       this._sortByNearDistance(documents, nearSpec);
     }
 
-    return new Cursor(
-      this,
-      normalizedQuery,
-      projection,
-      documents,
-      SortedCursor
-    );
+    // Return the documents array directly, not a Cursor
+    return documents;
   }
 
   _extractNearSpec(query) {
@@ -1903,7 +1914,8 @@ export class Collection extends EventEmitter {
   findAndModify() { throw new NotImplementedError('findAndModify', { collection: this.name }); }
 
   async findOne(query, projection) {
-    const cursor = await this.find(query, projection);
+    const cursor = this.find(query, projection);
+    await cursor._ensureDocuments();
     if (cursor.hasNext()) {
       return cursor.next();
     } else {
@@ -1912,8 +1924,13 @@ export class Collection extends EventEmitter {
   }
 
   async findOneAndDelete(filter, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureDocuments();
+    }
     if (!c.hasNext()) return null;
     const doc = c.next();
     await this.documents.delete(doc._id.toString());
@@ -1922,8 +1939,13 @@ export class Collection extends EventEmitter {
   }
 
   async findOneAndReplace(filter, replacement, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureDocuments();
+    }
     if (!c.hasNext()) return null;
     const doc = c.next();
     replacement._id = doc._id;
@@ -1938,8 +1960,13 @@ export class Collection extends EventEmitter {
   }
 
   async findOneAndUpdate(filter, update, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureDocuments();
+    }
     if (!c.hasNext()) return null;
     const doc = c.next();
     const clone = Object.assign({}, doc);
@@ -2015,7 +2042,8 @@ export class Collection extends EventEmitter {
   async replaceOne(query, replacement, options) { // only replace
     // first
     const result = {};
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     result.matchedCount = c.count();
     if (result.matchedCount == 0) {
       result.modifiedCount = 0;
@@ -2029,10 +2057,10 @@ export class Collection extends EventEmitter {
       }
     } else {
       result.modifiedCount = 1;
-      const doc = c.next();
+      const doc = await c.next();
       await this.updateIndexesOnDelete(doc);
       replacement._id = doc._id;
-      await this.documents.add(doc._id.toString(), replacement);
+      this.documents.add(doc._id.toString(), replacement);
       await this.updateIndexesOnInsert(replacement);
       this.emit('replace', replacement);
     }
@@ -2040,17 +2068,18 @@ export class Collection extends EventEmitter {
   }
 
   async remove(query, options) {
-    const c = await this.find(query);
-    if (!c.hasNext()) return;
+    const c = this.find(query);
+    await c._ensureDocuments();
+    if (!await c.hasNext()) return;
     if (options === true || (options && options.justOne)) {
-      const doc = c.next();
+      const doc = await c.next();
       await this.updateIndexesOnDelete(doc);
-      await this.documents.delete(doc._id.toString());
+      this.documents.delete(doc._id.toString());
     } else {
-      while (c.hasNext()) {
-        const doc = c.next();
+      while (await c.hasNext()) {
+        const doc = await c.next();
         await this.updateIndexesOnDelete(doc);
-        await this.documents.delete(doc._id.toString());
+        this.documents.delete(doc._id.toString());
       }
     }
   }
@@ -2063,7 +2092,8 @@ export class Collection extends EventEmitter {
   totalIndexSize() { throw new NotImplementedError('totalIndexSize', { collection: this.name }); }
 
   async update(query, updates, options) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     if (c.hasNext()) {
       if (options && options.multi) {
         while (c.hasNext()) {
@@ -2102,9 +2132,10 @@ export class Collection extends EventEmitter {
   }
 
   async updateOne(query, updates, options) {
-    const c = await this.find(query);
-    if (c.hasNext()) {
-      const doc = c.next();
+    const c = this.find(query);
+    await c._ensureDocuments();
+    if (await c.hasNext()) {
+      const doc = await c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
 
       // Get array filter information for positional operator support
@@ -2114,14 +2145,14 @@ export class Collection extends EventEmitter {
 
       await this.updateIndexesOnDelete(doc);
       applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-      await this.documents.add(doc._id.toString(), doc);
+      this.documents.add(doc._id.toString(), doc);
       await this.updateIndexesOnInsert(doc);
       const updateDescription = this._getUpdateDescription(originalDoc, doc);
       this.emit('update', doc, updateDescription);
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.documents.add(newDoc._id.toString(), newDoc);
+        this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
       }
@@ -2129,10 +2160,11 @@ export class Collection extends EventEmitter {
   }
 
   async updateMany(query, updates, options) {
-    const c = await this.find(query);
-    if (c.hasNext()) {
-      while (c.hasNext()) {
-        const doc = c.next();
+    const c = this.find(query);
+    await c._ensureDocuments();
+    if (await c.hasNext()) {
+      while (await c.hasNext()) {
+        const doc = await c.next();
         const originalDoc = JSON.parse(JSON.stringify(doc));
 
         // Get array filter information for positional operator support
@@ -2142,7 +2174,7 @@ export class Collection extends EventEmitter {
 
         await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-        await this.documents.add(doc._id.toString(), doc);
+        this.documents.add(doc._id.toString(), doc);
         await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit('update', doc, updateDescription);
@@ -2150,7 +2182,7 @@ export class Collection extends EventEmitter {
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.documents.add(newDoc._id.toString(), newDoc);
+        this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
       }

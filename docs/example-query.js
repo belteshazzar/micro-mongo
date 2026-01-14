@@ -2,7 +2,7 @@
  * Example usage of micro-mongo with MongoClient (similar to MongoDB driver)
  */
 
-import { MongoClient, ObjectId } from './main.js';
+import { MongoClient, ObjectId } from '../main.js';
 import { StorageManager } from 'node-opfs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -75,9 +75,9 @@ async function main() {
   console.timeEnd('inserts');
 
   console.time('queries');
-  console.log((await (await db.posts.find({})).toArray()).length);
-  console.log((await (await db.posts.find({ $text: { $search: "post" } })).toArray()).length);
-  console.log((await (await db.posts.find({ likes: { $gt: 2 } })).toArray()).length);
+  console.log((await db.posts.find({}).toArray()).length);
+  console.log((await db.posts.find({ $text: { $search: "post" } }).toArray()).length);
+  console.log((await db.posts.find({ likes: { $gt: 2 } }).toArray()).length);
   console.timeEnd('queries');
 
   await client.close();

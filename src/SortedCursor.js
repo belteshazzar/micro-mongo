@@ -7,55 +7,79 @@ export class SortedCursor {
 		this.query = query;
 		this.sortSpec = sort;
 		this.pos = 0;
-		this.items = [];
+		this._cursor = cursor;
+		this._sort = sort;
+		this._initialized = false;
+		// Items will be populated lazily when first accessed
+		this.items = null;
+	}
+
+	async _ensureInitialized() {
+		if (this._initialized) return;
 		
+		// Ensure parent cursor is initialized
+		await this._cursor._ensureDocuments();
+		
+		this.items = [];
 		// Collect all items from the cursor
-		while (cursor.hasNext()) {
-			this.items.push(cursor.next());
+		while (this._cursor.hasNext()) {
+			this.items.push(this._cursor.next());
 		}
 		
 		// Sort the items
-		const sortKeys = Object.keys(sort);
+		const sortKeys = Object.keys(this._sort);
 		this.items.sort(function(a, b) {
 			for (let i = 0; i < sortKeys.length; i++) {
-				if (a[sortKeys[i]] == undefined && b[sortKeys[i]] != undefined) return -1 * sort[sortKeys[i]];
-				if (a[sortKeys[i]] != undefined && b[sortKeys[i]] == undefined) return 1 * sort[sortKeys[i]];
-				if (a[sortKeys[i]] < b[sortKeys[i]]) return -1 * sort[sortKeys[i]];
-				if (a[sortKeys[i]] > b[sortKeys[i]]) return 1 * sort[sortKeys[i]];
+				if (a[sortKeys[i]] == undefined && b[sortKeys[i]] != undefined) return -1 * this._sort[sortKeys[i]];
+				if (a[sortKeys[i]] != undefined && b[sortKeys[i]] == undefined) return 1 * this._sort[sortKeys[i]];
+				if (a[sortKeys[i]] < b[sortKeys[i]]) return -1 * this._sort[sortKeys[i]];
+				if (a[sortKeys[i]] > b[sortKeys[i]]) return 1 * this._sort[sortKeys[i]];
 			}
 			return 0;
-		});
+		}.bind(this));
+		
+		this._initialized = true;
 	}
 
 	batchSize() { throw "Not Implemented"; }
 	close() { throw "Not Implemented"; }
 	comment() { throw "Not Implemented"; }
 	
-	count() {
+	async count() {
+		await this._ensureInitialized();
 		return this.items.length;
 	}
 	
 	explain() { throw "Not Implemented"; }
 	
 	async forEach(fn) {
+		await this._ensureInitialized();
 		while (this.hasNext()) {
 			await fn(this.next());
 		}
 	}
 	
 	hasNext() {
+		if (!this._initialized) {
+			const { QueryError } = require('./errors.js');
+			throw new QueryError("Cursor not initialized. Use 'await cursor' or 'await cursor.toArray()' before synchronous iteration.", {
+				collection: this.collection.name
+			});
+		}
 		return this.pos < this.items.length;
 	}
 	
 	hint() { throw "Not Implemented"; }
 	itcount() { throw "Not Implemented"; }
 	
-	limit(max) {
+	async limit(max) {
+		await this._ensureInitialized();
 		this.items = this.items.slice(0, max);
 		return this;
 	}
 	
-	map(fn) {
+	async map(fn) {
+		await this._ensureInitialized();
 		const results = [];
 		while (this.hasNext()) {
 			results.push(fn(this.next()));
@@ -69,6 +93,12 @@ export class SortedCursor {
 	min() { throw "Not Implemented"; }
 	
 	next() {
+		if (!this._initialized) {
+			const { QueryError } = require('./errors.js');
+			throw new QueryError("Cursor not initialized. Use 'await cursor' or 'await cursor.toArray()' before synchronous iteration.", {
+				collection: this.collection.name
+			});
+		}
 		return this.items[this.pos++];
 	}
 	
@@ -81,7 +111,8 @@ export class SortedCursor {
 	showRecordId() { throw "Not Implemented"; }
 	size() { throw "Not Implemented"; }
 	
-	skip(num) {
+	async skip(num) {
+		await this._ensureInitialized();
 		while (num > 0) {
 			this.next();
 			num--;
@@ -97,7 +128,8 @@ export class SortedCursor {
 	
 	tailable() { throw "Not Implemented"; }
 	
-	toArray() {
+	async toArray() {
+		await this._ensureInitialized();
 		const results = [];
 		while (this.hasNext()) {
 			results.push(this.next());
@@ -107,6 +139,7 @@ export class SortedCursor {
 	
 	// Support for async iteration (for await...of)
 	async *[Symbol.asyncIterator]() {
+		await this._ensureInitialized();
 		while (this.hasNext()) {
 			yield this.next();
 		}

@@ -3,14 +3,17 @@ import { NotImplementedError, QueryError, ErrorCodes } from './errors.js';
 
 /**
  * Cursor class for iterating over query results
- * Now a simple iterator over pre-filtered documents
+ * Supports both synchronous iteration (after await) and async methods
  */
 export class Cursor {
-	constructor(collection, query, projection, documents, SortedCursor) {
+	constructor(collection, query, projection, documentsOrPromise, SortedCursor) {
 		this.collection = collection;
 		this.query = query;
 		this.projection = projection;
-		this.documents = documents; // Pre-filtered array of documents
+		// Support both Promise<Array> and Array for backward compatibility
+		this._documentsPromise = documentsOrPromise instanceof Promise ? documentsOrPromise : Promise.resolve(documentsOrPromise);
+		this.documents = null; // Will be populated when _ensureDocuments() is called
+		this._initialized = false;
 		this.SortedCursor = SortedCursor;
 
 		// Validate projection if provided
@@ -38,6 +41,17 @@ export class Cursor {
 		this._closed = false;
 	}
 
+	/**
+	 * Ensure documents are loaded from the promise
+	 * @private
+	 */
+	async _ensureDocuments() {
+		if (!this._initialized) {
+			this.documents = await this._documentsPromise;
+			this._initialized = true;
+		}
+	}
+
 	batchSize(size) { 
 		// No-op for in-memory database, but return this for chaining
 		this._batchSize = size;
@@ -45,7 +59,10 @@ export class Cursor {
 	}
 	close() {
 		this._closed = true;
-		this.pos = this.documents.length; // Move to end
+		// Move to end when documents are loaded
+		if (this.documents) {
+			this.pos = this.documents.length;
+		}
 		return undefined;
 	}
 	comment(commentString) {
@@ -53,8 +70,9 @@ export class Cursor {
 		return this;
 	}
 	
-	count() {
+	async count() {
 		// Return total count without considering skip/limit applied to this cursor
+		await this._ensureDocuments();
 		return this.documents.length;
 	}
 	
@@ -74,23 +92,31 @@ export class Cursor {
 			},
 			executionStats: verbosity === 'executionStats' || verbosity === 'allPlansExecution' ? {
 				executionSuccess: true,
-				nReturned: this.documents.length,
+				nReturned: this.documents ? this.documents.length : 0,
 				executionTimeMillis: 0,
 				totalKeysExamined: 0,
-				totalDocsExamined: this.documents.length
+				totalDocsExamined: this.documents ? this.documents.length : 0
 			} : undefined,
 			ok: 1
 		};
 	}
 	
 	async forEach(fn) {
-		while (this.hasNext()) {
-			await fn(this.next());
+		await this._ensureDocuments();
+		while (await this.hasNext()) {
+			await fn(await this.next());
 		}
 	}
 	
-	hasNext() {
+	async hasNext() {
 		if (this._closed) return false;
+
+    await this._ensureDocuments();
+
+    // Apply skip on first access if not yet applied
+		if (this.pos === 0 && this._skip > 0) {
+			this.pos = Math.min(this._skip, this.documents.length);
+		}
 		// Calculate effective max position: skip + limit or total docs
 		let effectiveMax;
 		if (this._limit > 0) {
@@ -106,7 +132,8 @@ export class Cursor {
 		this._hint = index;
 		return this;
 	}
-	itcount() {
+	async itcount() {
+		await this._ensureDocuments();
 		let count = 0;
 		while (this.hasNext()) {
 			this.next();
@@ -120,7 +147,8 @@ export class Cursor {
 		return this;
 	}
 	
-	map(fn) {
+	async map(fn) {
+		await this._ensureDocuments();
 		const results = [];
 		while (this.hasNext()) {
 			results.push(fn(this.next()));
@@ -149,8 +177,8 @@ export class Cursor {
 		return this;
 	}
 	
-	next() {
-		if (!this.hasNext()) {
+	async next() {
+		if (!await this.hasNext()) {
 			throw new QueryError("Error: error hasNext: false", { 
 				collection: this.collection.name 
 			});
@@ -170,6 +198,8 @@ export class Cursor {
 	objsLeftInBatch() {
 		// Return number of objects left in current batch
 		// For in-memory, this is same as remaining documents
+		// Note: This is synchronous but may return 0 if documents not yet loaded
+		if (!this.documents) return 0;
 		return this.size();
 	}
 	pretty() {
@@ -199,6 +229,8 @@ export class Cursor {
 	}
 	size() {
 		// Return count considering skip and limit
+		// Note: This is synchronous but may return 0 if documents not yet loaded
+		if (!this.documents) return 0;
 		const remaining = this.documents.length - this.pos;
 		if (this._limit > 0) {
 			// Calculate how many docs left based on skip+limit boundary
@@ -212,7 +244,10 @@ export class Cursor {
 		this._skip = num;
 		// Move initial position to skip point
 		if (this.pos === 0) {
-			this.pos = Math.min(num, this.documents.length);
+			// Note: If documents not yet loaded, this will be applied when hasNext() is called
+			if (this.documents) {
+				this.pos = Math.min(num, this.documents.length);
+			}
 		}
 		return this;
 	}
@@ -241,18 +276,20 @@ export class Cursor {
 	
 	tailable() { throw new NotImplementedError('tailable'); }
 	
-	toArray() {
+	async toArray() {
+		await this._ensureDocuments();
 		const results = [];
-		while (this.hasNext()) {
-			results.push(this.next());
+		while (await this.hasNext()) {
+			results.push(await this.next());
 		}
 		return results;
 	}
 	
 	// Support for async iteration (for await...of)
 	async *[Symbol.asyncIterator]() {
-		while (this.hasNext()) {
-			yield this.next();
+		await this._ensureDocuments();
+		while (await this.hasNext()) {
+			yield await this.next();
 		}
 	}
 }

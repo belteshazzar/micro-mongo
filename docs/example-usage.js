@@ -76,22 +76,22 @@ async function main() {
 
   // Query documents (cursor iteration after awaiting find)
   console.log('\nUsers aged 30 or older:');
-  const users = await db.users.find({ age: { $gte: 30 } });
-  while (users.hasNext()) {
-    const user = users.next();
+  const users = db.users.find({ age: { $gte: 30 } });
+  while (await users.hasNext()) {
+    const user = await users.next();
     console.log(`${user.name} (ID: ${user._id.toString()})`);
   }
 
   // Query with toArray() - now async!
   console.log('\nProducts over $50:');
-  const expensiveProducts = await (await db.products.find({ price: { $gt: 50 } })).toArray();
+  const expensiveProducts = await db.products.find({ price: { $gt: 50 } }).toArray();
   expensiveProducts.forEach(p => {
     console.log(`${p.name}: $${p.price} (ID: ${p._id})`);
   });
 
   // Async iterator support (for await...of)
   console.log('\nAll users (using async iteration):');
-  for await (const user of await db.users.find({})) {
+  for await (const user of db.users.find({})) {
     console.log(`${user.name} - ${user.age} years old`);
   }
 
