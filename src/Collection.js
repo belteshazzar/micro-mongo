@@ -1022,7 +1022,8 @@ export class Collection extends EventEmitter {
           const matchValue = getProp(doc, matchField);
 
           // Find existing document
-          const existingCursor = await targetCollection.find({ [matchField]: matchValue });
+          const existingCursor = targetCollection.find({ [matchField]: matchValue });
+          await existingCursor._ensureDocuments();
           const existing = existingCursor.hasNext() ? existingCursor.next() : null;
 
           if (existing) {
@@ -1082,7 +1083,8 @@ export class Collection extends EventEmitter {
 
           // Find matching documents in foreign collection
           const matches = [];
-          const foreignCursor = await fromCollection.find({ [stageSpec.foreignField]: localValue });
+          const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+          await foreignCursor._ensureDocuments();
           while (foreignCursor.hasNext()) {
             matches.push(foreignCursor.next());
           }
@@ -1140,7 +1142,8 @@ export class Collection extends EventEmitter {
               query = { $and: [query, restrictSearchWithMatch] };
             }
 
-            const cursor = await fromCollection.find(query);
+            const cursor = fromCollection.find(query);
+            await cursor._ensureDocuments();
             while (cursor.hasNext()) {
               const match = cursor.next();
               const matchCopy = copy(match);
@@ -1545,7 +1548,8 @@ export class Collection extends EventEmitter {
   async copyTo(destCollectionName) {
     const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
-    const c = await this.find({});
+    const c = this.find({});
+    await c._ensureDocuments();
     while (c.hasNext()) {
       await destCol.insertOne(c.next());
       numCopied++;
@@ -1610,7 +1614,8 @@ export class Collection extends EventEmitter {
   }
 
   async deleteMany(query) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     const ids = [];
     const docs = [];
     while (c.hasNext()) {
@@ -1629,7 +1634,8 @@ export class Collection extends EventEmitter {
 
   async distinct(field, query) {
     const vals = {};
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     while (c.hasNext()) {
       const d = c.next();
       if (d[field]) {
@@ -1917,8 +1923,13 @@ export class Collection extends EventEmitter {
   }
 
   async findOneAndDelete(filter, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureDocuments();
+    }
     if (!c.hasNext()) return null;
     const doc = c.next();
     await this.documents.delete(doc._id.toString());
@@ -1927,8 +1938,13 @@ export class Collection extends EventEmitter {
   }
 
   async findOneAndReplace(filter, replacement, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureDocuments();
+    }
     if (!c.hasNext()) return null;
     const doc = c.next();
     replacement._id = doc._id;
@@ -1943,8 +1959,13 @@ export class Collection extends EventEmitter {
   }
 
   async findOneAndUpdate(filter, update, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureDocuments();
+    }
     if (!c.hasNext()) return null;
     const doc = c.next();
     const clone = Object.assign({}, doc);
@@ -2020,7 +2041,8 @@ export class Collection extends EventEmitter {
   async replaceOne(query, replacement, options) { // only replace
     // first
     const result = {};
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     result.matchedCount = c.count();
     if (result.matchedCount == 0) {
       result.modifiedCount = 0;
@@ -2045,7 +2067,8 @@ export class Collection extends EventEmitter {
   }
 
   async remove(query, options) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     if (!c.hasNext()) return;
     if (options === true || (options && options.justOne)) {
       const doc = c.next();
@@ -2068,7 +2091,8 @@ export class Collection extends EventEmitter {
   totalIndexSize() { throw new NotImplementedError('totalIndexSize', { collection: this.name }); }
 
   async update(query, updates, options) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     if (c.hasNext()) {
       if (options && options.multi) {
         while (c.hasNext()) {
@@ -2107,7 +2131,8 @@ export class Collection extends EventEmitter {
   }
 
   async updateOne(query, updates, options) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     if (c.hasNext()) {
       const doc = c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
@@ -2134,7 +2159,8 @@ export class Collection extends EventEmitter {
   }
 
   async updateMany(query, updates, options) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureDocuments();
     if (c.hasNext()) {
       while (c.hasNext()) {
         const doc = c.next();
