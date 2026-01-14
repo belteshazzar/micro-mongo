@@ -41,15 +41,6 @@ export class SortedCursor {
 		this._initialized = true;
 	}
 
-	/**
-	 * Make cursor awaitable - when awaited, it loads and sorts documents and returns itself
-	 */
-	then(resolve, reject) {
-		return this._ensureInitialized()
-			.then(() => resolve(this))
-			.catch(reject);
-	}
-
 	batchSize() { throw "Not Implemented"; }
 	close() { throw "Not Implemented"; }
 	comment() { throw "Not Implemented"; }

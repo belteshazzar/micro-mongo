@@ -397,7 +397,8 @@ export class Collection extends EventEmitter {
 
     // Start with all documents
     let results = [];
-    const cursor = await this.find({});
+    const cursor = this.find({});
+    await cursor._ensureDocuments();
     while (cursor.hasNext()) {
       results.push(cursor.next());
     }
@@ -1906,7 +1907,8 @@ export class Collection extends EventEmitter {
   findAndModify() { throw new NotImplementedError('findAndModify', { collection: this.name }); }
 
   async findOne(query, projection) {
-    const cursor = await this.find(query, projection);
+    const cursor = this.find(query, projection);
+    await cursor._ensureDocuments();
     if (cursor.hasNext()) {
       return cursor.next();
     } else {

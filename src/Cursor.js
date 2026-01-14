@@ -52,16 +52,6 @@ export class Cursor {
 		}
 	}
 
-	/**
-	 * Make cursor awaitable - when awaited, it loads documents and returns itself
-	 * This allows: const cursor = await collection.find({});
-	 */
-	then(resolve, reject) {
-		return this._ensureDocuments()
-			.then(() => resolve(this))
-			.catch(reject);
-	}
-
 	batchSize(size) { 
 		// No-op for in-memory database, but return this for chaining
 		this._batchSize = size;
