@@ -399,8 +399,9 @@ export class Collection extends EventEmitter {
     let results = [];
     const cursor = this.find({});
     await cursor._ensureDocuments();
-    while (cursor.hasNext()) {
-      results.push(cursor.next());
+    // TODO: Optimize by applying $match stages during iteration
+    while (await cursor.hasNext()) {
+      results.push(await cursor.next());
     }
 
     // Process each stage in the pipeline
@@ -1626,7 +1627,7 @@ export class Collection extends EventEmitter {
     const deletedCount = ids.length;
     for (let i = 0; i < ids.length; i++) {
       await this.updateIndexesOnDelete(docs[i]);
-      await this.documents.delete(ids[i].toString());
+      this.documents.delete(ids[i].toString());
       this.emit('delete', { _id: ids[i] });
     }
     return { deletedCount: deletedCount };
@@ -1636,8 +1637,8 @@ export class Collection extends EventEmitter {
     const vals = {};
     const c = this.find(query);
     await c._ensureDocuments();
-    while (c.hasNext()) {
-      const d = c.next();
+    while (await c.hasNext()) {
+      const d = await c.next();
       if (d[field]) {
         vals[d[field]] = true;
       }
@@ -2056,10 +2057,10 @@ export class Collection extends EventEmitter {
       }
     } else {
       result.modifiedCount = 1;
-      const doc = c.next();
+      const doc = await c.next();
       await this.updateIndexesOnDelete(doc);
       replacement._id = doc._id;
-      await this.documents.add(doc._id.toString(), replacement);
+      this.documents.add(doc._id.toString(), replacement);
       await this.updateIndexesOnInsert(replacement);
       this.emit('replace', replacement);
     }
@@ -2069,16 +2070,16 @@ export class Collection extends EventEmitter {
   async remove(query, options) {
     const c = this.find(query);
     await c._ensureDocuments();
-    if (!c.hasNext()) return;
+    if (!await c.hasNext()) return;
     if (options === true || (options && options.justOne)) {
-      const doc = c.next();
+      const doc = await c.next();
       await this.updateIndexesOnDelete(doc);
-      await this.documents.delete(doc._id.toString());
+      this.documents.delete(doc._id.toString());
     } else {
-      while (c.hasNext()) {
-        const doc = c.next();
+      while (await c.hasNext()) {
+        const doc = await c.next();
         await this.updateIndexesOnDelete(doc);
-        await this.documents.delete(doc._id.toString());
+        this.documents.delete(doc._id.toString());
       }
     }
   }
@@ -2133,8 +2134,8 @@ export class Collection extends EventEmitter {
   async updateOne(query, updates, options) {
     const c = this.find(query);
     await c._ensureDocuments();
-    if (c.hasNext()) {
-      const doc = c.next();
+    if (await c.hasNext()) {
+      const doc = await c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
 
       // Get array filter information for positional operator support
@@ -2144,14 +2145,14 @@ export class Collection extends EventEmitter {
 
       await this.updateIndexesOnDelete(doc);
       applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-      await this.documents.add(doc._id.toString(), doc);
+      this.documents.add(doc._id.toString(), doc);
       await this.updateIndexesOnInsert(doc);
       const updateDescription = this._getUpdateDescription(originalDoc, doc);
       this.emit('update', doc, updateDescription);
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.documents.add(newDoc._id.toString(), newDoc);
+        this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
       }
@@ -2161,9 +2162,9 @@ export class Collection extends EventEmitter {
   async updateMany(query, updates, options) {
     const c = this.find(query);
     await c._ensureDocuments();
-    if (c.hasNext()) {
-      while (c.hasNext()) {
-        const doc = c.next();
+    if (await c.hasNext()) {
+      while (await c.hasNext()) {
+        const doc = await c.next();
         const originalDoc = JSON.parse(JSON.stringify(doc));
 
         // Get array filter information for positional operator support
@@ -2173,7 +2174,7 @@ export class Collection extends EventEmitter {
 
         await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-        await this.documents.add(doc._id.toString(), doc);
+        this.documents.add(doc._id.toString(), doc);
         await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit('update', doc, updateDescription);
@@ -2181,7 +2182,7 @@ export class Collection extends EventEmitter {
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.documents.add(newDoc._id.toString(), newDoc);
+        this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit('insert', newDoc);
       }

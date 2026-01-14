@@ -103,19 +103,17 @@ export class Cursor {
 	
 	async forEach(fn) {
 		await this._ensureDocuments();
-		while (this.hasNext()) {
-			await fn(this.next());
+		while (await this.hasNext()) {
+			await fn(await this.next());
 		}
 	}
 	
-	hasNext() {
+	async hasNext() {
 		if (this._closed) return false;
-		if (!this._initialized) {
-			throw new QueryError("Cursor not initialized. Use 'await cursor' or 'await cursor.toArray()' before synchronous iteration.", {
-				collection: this.collection.name
-			});
-		}
-		// Apply skip on first access if not yet applied
+
+    await this._ensureDocuments();
+
+    // Apply skip on first access if not yet applied
 		if (this.pos === 0 && this._skip > 0) {
 			this.pos = Math.min(this._skip, this.documents.length);
 		}
@@ -179,8 +177,8 @@ export class Cursor {
 		return this;
 	}
 	
-	next() {
-		if (!this.hasNext()) {
+	async next() {
+		if (!await this.hasNext()) {
 			throw new QueryError("Error: error hasNext: false", { 
 				collection: this.collection.name 
 			});
@@ -281,8 +279,8 @@ export class Cursor {
 	async toArray() {
 		await this._ensureDocuments();
 		const results = [];
-		while (this.hasNext()) {
-			results.push(this.next());
+		while (await this.hasNext()) {
+			results.push(await this.next());
 		}
 		return results;
 	}
@@ -290,8 +288,8 @@ export class Cursor {
 	// Support for async iteration (for await...of)
 	async *[Symbol.asyncIterator]() {
 		await this._ensureDocuments();
-		while (this.hasNext()) {
-			yield this.next();
+		while (await this.hasNext()) {
+			yield await this.next();
 		}
 	}
 }
