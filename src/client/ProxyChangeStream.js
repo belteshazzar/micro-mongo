@@ -9,12 +9,28 @@ export class ProxyChangeStream extends EventEmitter {
     const stream = new ProxyChangeStream({ bridge, streamId });
     
     if (!streamId) {
+      // Determine target type based on what we're watching
+      let target, method;
+      if (database === null || database === undefined) {
+        // Client-level watch (all databases and collections)
+        target = 'client';
+        method = 'watch';
+      } else if (collection === null || collection === undefined) {
+        // Database-level watch
+        target = 'db';
+        method = 'watch';
+      } else {
+        // Collection-level watch
+        target = 'collection';
+        method = 'watch';
+      }
+      
       // Request a change stream from worker asynchronously
       bridge.sendRequest({
-        target: 'collection',
+        target,
         database,
         collection,
-        method: 'watch',
+        method,
         args: [pipeline, options]
       }).then((resp) => {
         if (resp && resp.streamId) {

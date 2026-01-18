@@ -697,11 +697,22 @@ class ProxyChangeStream extends eventsExports.EventEmitter {
   static create({ bridge, database, collection, streamId, pipeline = [], options = {} }) {
     const stream = new ProxyChangeStream({ bridge, streamId });
     if (!streamId) {
+      let target, method;
+      if (database === null || database === void 0) {
+        target = "client";
+        method = "watch";
+      } else if (collection === null || collection === void 0) {
+        target = "db";
+        method = "watch";
+      } else {
+        target = "collection";
+        method = "watch";
+      }
       bridge.sendRequest({
-        target: "collection",
+        target,
         database,
         collection,
-        method: "watch",
+        method,
         args: [pipeline, options]
       }).then((resp) => {
         if (resp && resp.streamId) {
@@ -716,6 +727,8 @@ class ProxyChangeStream extends eventsExports.EventEmitter {
     super();
     this.bridge = bridge;
     this.streamId = streamId;
+    this.closed = false;
+    this._pendingNext = [];
     this._onEvent = this._onEvent.bind(this);
     this.bridge.on("event", this._onEvent);
   }
@@ -734,28 +747,59 @@ class ProxyChangeStream extends eventsExports.EventEmitter {
     this.bridge.off("event", this._onEvent);
   }
   async close() {
-    await this.bridge.sendRequest({
+    if (this.closed) return;
+    this.closed = true;
+    for (const pending of this._pendingNext) {
+      pending.resolve(null);
+    }
+    this._pendingNext = [];
+    this.bridge.sendRequest({
       target: "changestream",
       streamId: this.streamId,
       method: "close"
+    }).catch(() => {
     });
+    this.emit("close");
     this._cleanup();
   }
   async next() {
+    if (this.closed) {
+      return null;
+    }
     return new Promise((resolve, reject) => {
       const onChange = (change) => {
+        this._removePending(pending);
         this.off("change", onChange);
         this.off("error", onError);
+        this.off("close", onClose);
         resolve(change);
       };
       const onError = (error) => {
+        this._removePending(pending);
         this.off("change", onChange);
         this.off("error", onError);
+        this.off("close", onClose);
         reject(error);
       };
+      const onClose = () => {
+        this._removePending(pending);
+        this.off("change", onChange);
+        this.off("error", onError);
+        this.off("close", onClose);
+        resolve(null);
+      };
+      const pending = { resolve, reject };
+      this._pendingNext.push(pending);
       this.on("change", onChange);
       this.on("error", onError);
+      this.on("close", onClose);
     });
+  }
+  _removePending(pending) {
+    const index = this._pendingNext.indexOf(pending);
+    if (index !== -1) {
+      this._pendingNext.splice(index, 1);
+    }
   }
 }
 class ProxyCursor {
@@ -804,6 +848,7 @@ class ProxyCursor {
     }
   }
   async hasNext() {
+    if (this._closed) return false;
     await this._ensureInitialized();
     if (this.buffer.length > 0) return true;
     if (this.exhausted) return false;
@@ -864,7 +909,7 @@ class ProxyCursor {
     this._hint = spec;
     return this;
   }
-  async explain(verbosity = "queryPlanner") {
+  explain(verbosity = "queryPlanner") {
     const result = {
       queryPlanner: {
         plannerVersion: 1,
@@ -899,10 +944,12 @@ class ProxyCursor {
   }
   min(spec) {
     this._min = spec;
+    this._minIndexBounds = spec;
     return this;
   }
   max(spec) {
     this._max = spec;
+    this._maxIndexBounds = spec;
     return this;
   }
   maxTimeMS(ms) {
@@ -996,10 +1043,11 @@ class ProxyCursor {
   }
 }
 class ProxyCollection {
-  constructor({ dbName, name, bridge }) {
+  constructor({ dbName, name, bridge, db }) {
     this.dbName = dbName;
     this.name = name;
     this.bridge = bridge;
+    this._db = db;
     this.indexes = [];
     return new Proxy(this, {
       get: (target, prop, receiver) => {
@@ -1016,6 +1064,9 @@ class ProxyCollection {
     });
   }
   _cursorMethod(method, args = []) {
+    if (method === "find" && args.length >= 2) {
+      this._validateProjection(args[1]);
+    }
     const requestPayload = {
       target: "collection",
       database: this.dbName,
@@ -1034,6 +1085,24 @@ class ProxyCollection {
     }
     return cursor;
   }
+  _validateProjection(projection) {
+    if (!projection || Object.keys(projection).length === 0) return;
+    const keys = Object.keys(projection);
+    let hasInclusion = false;
+    let hasExclusion = false;
+    for (const key of keys) {
+      if (key === "_id") continue;
+      if (projection[key]) hasInclusion = true;
+      else hasExclusion = true;
+      if (hasInclusion && hasExclusion) break;
+    }
+    if (hasInclusion && hasExclusion) {
+      throw new QueryError("Cannot do exclusion on field in inclusion projection", {
+        code: ErrorCodes.CANNOT_DO_EXCLUSION_ON_FIELD_ID_IN_INCLUSION_PROJECTION,
+        collection: this.name
+      });
+    }
+  }
   _call(method, args = []) {
     const promise = this.bridge.sendRequest({
       target: "collection",
@@ -1050,6 +1119,11 @@ class ProxyCollection {
           exhausted: res.exhausted,
           batchSize: res.batchSize
         });
+      }
+      if (method === "copyTo" && args.length > 0) {
+        if (this._db) {
+          this._db.collection(args[0]);
+        }
       }
       if (method === "createIndex") {
         const indexSpec = args[0];
@@ -1112,7 +1186,7 @@ class ProxyDB {
           if (prop === "createCollection") {
             return (...args) => {
               const collName = args[0];
-              target.collection(collName);
+              target.collection(collName, receiver);
               return target._call(String(prop), args);
             };
           }
@@ -1131,16 +1205,18 @@ class ProxyDB {
           }
           return (...args) => target._call(String(prop), args);
         }
-        return target.collection(prop);
+        return target.collection(prop, receiver);
       }
     });
   }
-  collection(name) {
+  collection(name, dbProxy) {
     if (this.collections.has(name)) return this.collections.get(name);
     const col = new ProxyCollection({
       dbName: this.dbName,
       name,
-      bridge: this.bridge
+      bridge: this.bridge,
+      db: dbProxy || this
+      // Pass DB proxy if available, otherwise this
     });
     this.collections.set(name, col);
     return col;
@@ -3250,6 +3326,9 @@ class ChangeStream extends eventsExports.EventEmitter {
     for (const collection of collections) {
       this._watchCollection(collection);
     }
+    if (this.target.constructor.name === "Server") {
+      this._interceptServerDBCreation();
+    }
     if (this.target.constructor.name === "DB") {
       this._interceptDBCollectionCreation();
     }
@@ -3263,6 +3342,18 @@ class ChangeStream extends eventsExports.EventEmitter {
    */
   _getCollectionsToWatch() {
     const collections = [];
+    if (this.target.constructor.name === "Server") {
+      for (const [dbName, db] of this.target.databases) {
+        const collectionNames = db.getCollectionNames();
+        for (const name of collectionNames) {
+          const collection = db[name];
+          if (collection && collection.isCollection) {
+            collections.push(collection);
+          }
+        }
+      }
+      return collections;
+    }
     if (this.target.constructor.name === "MongoClient") {
       this._monitorClient();
       return collections;
@@ -3418,6 +3509,55 @@ class ChangeStream extends eventsExports.EventEmitter {
     this._originalClientMethods = { db: originalDb };
   }
   /**
+   * Intercept DB creation on a Server
+   * @private
+   */
+  _interceptServerDBCreation() {
+    const server = this.target;
+    const originalGetDB = server._getDB.bind(server);
+    const self = this;
+    this._watchedDBs = /* @__PURE__ */ new Map();
+    server._getDB = function(dbName) {
+      const db = originalGetDB(dbName);
+      if (!self._watchedDBs.has(dbName)) {
+        self._watchedDBs.set(dbName, db);
+        const collectionNames = db.getCollectionNames();
+        for (const colName of collectionNames) {
+          const col = db[colName];
+          if (col && col.isCollection && !self._listeners.has(col)) {
+            self._watchCollection(col);
+          }
+        }
+        self._interceptDBCollectionCreationForServer(db);
+      }
+      return db;
+    };
+    this._originalServerMethods = { _getDB: originalGetDB };
+  }
+  /**
+   * Intercept collection creation for a database in server watch mode
+   * @private
+   */
+  _interceptDBCollectionCreationForServer(db) {
+    const originalCollection = db.collection.bind(db);
+    const originalCreateCollection = db.createCollection.bind(db);
+    const self = this;
+    db.collection = function(name) {
+      const col = originalCollection(name);
+      if (col && col.isCollection && !self._listeners.has(col)) {
+        self._watchCollection(col);
+      }
+      return col;
+    };
+    db.createCollection = function(name) {
+      originalCreateCollection(name);
+      const col = db[name];
+      if (col && col.isCollection && !self._listeners.has(col)) {
+        self._watchCollection(col);
+      }
+    };
+  }
+  /**
    * Intercept collection creation for a database in client watch mode
    * @private
    */
@@ -3484,6 +3624,9 @@ class ChangeStream extends eventsExports.EventEmitter {
       collection.off("delete", handlers.delete);
     }
     this._listeners.clear();
+    if (this._originalServerMethods && this.target.constructor.name === "Server") {
+      this.target._getDB = this._originalServerMethods._getDB;
+    }
     if (this._originalDBMethods && this.target.constructor.name === "DB") {
       this.target.collection = this._originalDBMethods.collection;
       this.target.createCollection = this._originalDBMethods.createCollection;
