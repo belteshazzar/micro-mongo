@@ -11,6 +11,15 @@ import { QueryPlanner } from './QueryPlanner.js';
 import { evaluateExpression } from './aggregationExpressions.js';
 import { ChangeStream } from './ChangeStream.js';
 import {
+  acquireVersionedPath,
+  buildVersionedPath,
+  createSyncAccessHandle,
+  DEFAULT_COMPACTION_MIN_BYTES,
+  getCurrentVersion,
+  promoteVersion,
+  releaseVersionedPath
+} from './opfsVersioning.js';
+import {
   NotImplementedError,
   QueryError,
   BadValueError,
@@ -31,6 +40,9 @@ export class Collection extends EventEmitter {
     this.name = name;
     this.path = `${this.db.baseFolder}/${this.db.dbName}/${this.name}`
     this.documentsPath = `${this.path}/documents.bjson`;
+    this.documentsVersionedPath = null;
+    this.documentsVersion = 0;
+    this._releaseDocuments = null;
     this.order = options.bPlusTreeOrder || 50; // B+ tree order
     this.documents = null; // Initialized in async _initialize()
     this.indexes = new Map(); // Index storage - map of index name to index structure
@@ -47,8 +59,13 @@ export class Collection extends EventEmitter {
       throw new Error('OPFS not available: navigator.storage.getDirectory is missing');
     }
 
+    const { version, path: versionedPath } = await acquireVersionedPath(this.documentsPath);
+    this.documentsVersion = version;
+    this.documentsVersionedPath = versionedPath;
+    this._releaseDocuments = () => releaseVersionedPath(this.documentsPath, version);
+
     // Ensure directory exists and get directory handle
-    let dirHandle = await this._ensureDirectoryForFile(this.documentsPath);
+    let dirHandle = await this._ensureDirectoryForFile(this.documentsVersionedPath);
     
     // If no directory parts, use root directory
     if (!dirHandle) {
@@ -56,11 +73,11 @@ export class Collection extends EventEmitter {
     }
     
     // Get file name from path - safely extract just the filename
-    const pathParts = this.documentsPath.split('/').filter(Boolean);
+    const pathParts = this.documentsVersionedPath.split('/').filter(Boolean);
     const filename = pathParts[pathParts.length - 1];
     
     if (!filename) {
-      throw new Error(`Invalid documents path: ${this.documentsPath}`);
+      throw new Error(`Invalid documents path: ${this.documentsVersionedPath}`);
     }
     
     // Get file handle and create sync access handle using native OPFS
@@ -124,18 +141,21 @@ export class Collection extends EventEmitter {
     for await (const [entryName, entryHandle] of dirHandle.entries()) {
       if (entryHandle.kind !== 'file') continue;
 
+      const versionSuffixPattern = /\.v\d+(?=-|$)/; // Strip ".vN" suffixes before "-" or end of filename.
+      const normalizedName = entryName.replace(versionSuffixPattern, '');
+
       let type;
-      if (entryName.endsWith('.textindex-documents.bjson')) {
+      if (normalizedName.endsWith('.textindex-documents.bjson')) {
         type = 'text';
-      } else if (entryName.endsWith('.rtree.bjson')) {
+      } else if (normalizedName.endsWith('.rtree.bjson')) {
         type = 'geospatial';
-      } else if (entryName.endsWith('.bplustree.bjson')) {
+      } else if (normalizedName.endsWith('.bplustree.bjson')) {
         type = 'regular';
       } else {
         continue; // Not an index file we understand
       }
 
-      const indexName = entryName
+      const indexName = normalizedName
         .replace(/\.textindex-documents\.bjson$/, '')
         .replace(/\.rtree\.bjson$/, '')
         .replace(/\.bplustree\.bjson$/, '');
@@ -205,10 +225,29 @@ export class Collection extends EventEmitter {
   async close() {
     if (!this._initialized) return;
 
-    await this.documents.close();
     for (const [indexName, index] of this.indexes) {
         await index.close();
     }
+    await this._maybeCompactDocuments();
+    await this.documents.close();
+    if (this._releaseDocuments) {
+      await this._releaseDocuments();
+      this._releaseDocuments = null;
+    }
+  }
+
+  async _maybeCompactDocuments() {
+    if (!this.documents || !this.documents.file) return;
+    const currentVersion = await getCurrentVersion(this.documentsPath);
+    if (currentVersion !== this.documentsVersion) return;
+    const fileSize = this.documents.file.getFileSize();
+    if (!fileSize || fileSize < DEFAULT_COMPACTION_MIN_BYTES) return;
+
+    const nextVersion = currentVersion + 1;
+    const compactPath = buildVersionedPath(this.documentsPath, nextVersion);
+    const destSyncHandle = await createSyncAccessHandle(compactPath, { reset: true });
+    await this.documents.compact(destSyncHandle);
+    await promoteVersion(this.documentsPath, nextVersion, currentVersion);
   }
 
   /**
@@ -1679,6 +1718,10 @@ export class Collection extends EventEmitter {
     // Close the documents B+ tree
     if (this.documents && typeof this.documents.close === 'function') {
       await this.documents.close();
+    }
+    if (this._releaseDocuments) {
+      await this._releaseDocuments();
+      this._releaseDocuments = null;
     }
 
     // Remove the entire collection directory recursively

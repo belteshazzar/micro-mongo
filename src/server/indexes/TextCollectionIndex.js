@@ -2,6 +2,17 @@ import { Index } from './Index.js';
 import { TextIndex } from 'bjson/textindex';
 import { BPlusTree } from 'bjson/bplustree';
 import { getProp } from '../../utils.js';
+import {
+	acquireVersionedPath,
+	buildVersionedPath,
+	createSyncAccessHandle,
+	DEFAULT_COMPACTION_MIN_BYTES,
+	getCurrentVersion,
+	promoteVersion,
+	releaseVersionedPath
+} from '../opfsVersioning.js';
+
+const TEXT_INDEX_SUFFIXES = ['-terms.bjson', '-documents.bjson', '-lengths.bjson'];
 
 /**
  * Text index implementation
@@ -11,6 +22,9 @@ export class TextCollectionIndex extends Index {
 	constructor(name, keys, storage, options = {}) {
 		super(name, keys, storage);
 		this.storageBasePath = storage;
+		this.storageVersion = 0;
+		this.versionedBasePath = null;
+		this._releaseStorage = null;
 		this.textIndex = null;
 		this.syncHandles = [];
 		this.isOpen = false;
@@ -35,10 +49,15 @@ export class TextCollectionIndex extends Index {
 			return;
 		}
 		try {
+			const { version, path: versionedBasePath } = await acquireVersionedPath(this.storageBasePath);
+			this.storageVersion = version;
+			this.versionedBasePath = versionedBasePath;
+			this._releaseStorage = () => releaseVersionedPath(this.storageBasePath, version, { suffixes: TEXT_INDEX_SUFFIXES });
+
 			// Create three BPlusTree instances for the TextIndex
-			const indexTree = await this._createBPlusTree(this.storageBasePath + '-terms.bjson');
-			const docTermsTree = await this._createBPlusTree(this.storageBasePath + '-documents.bjson');
-			const lengthsTree = await this._createBPlusTree(this.storageBasePath + '-lengths.bjson');
+			const indexTree = await this._createBPlusTree(this._getActiveBasePath() + '-terms.bjson');
+			const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + '-documents.bjson');
+			const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + '-lengths.bjson');
 			
 			this.textIndex = new TextIndex({
 				order: 16,
@@ -64,12 +83,12 @@ export class TextCollectionIndex extends Index {
 				
 				// Delete corrupted files and ensure directory exists
 				await this._deleteIndexFiles();
-				await this._ensureDirectoryForFile(this.storageBasePath + '-terms.bjson');
+				await this._ensureDirectoryForFile(this._getActiveBasePath() + '-terms.bjson');
 				
 				// Create fresh TextIndex for new/corrupted files
-				const indexTree = await this._createBPlusTree(this.storageBasePath + '-terms.bjson');
-				const docTermsTree = await this._createBPlusTree(this.storageBasePath + '-documents.bjson');
-				const lengthsTree = await this._createBPlusTree(this.storageBasePath + '-lengths.bjson');
+				const indexTree = await this._createBPlusTree(this._getActiveBasePath() + '-terms.bjson');
+				const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + '-documents.bjson');
+				const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + '-lengths.bjson');
 				
 				this.textIndex = new TextIndex({
 					order: 16,
@@ -125,11 +144,14 @@ export class TextCollectionIndex extends Index {
 		this.syncHandles = [];
 	}
 	
-	async _deleteIndexFiles() {
+	_getActiveBasePath() {
+		return this.versionedBasePath || this.storageBasePath;
+	}
+
+	async _deleteIndexFiles(basePath = this._getActiveBasePath()) {
 		// TextIndex creates multiple files: -terms.bjson, -documents.bjson, -lengths.bjson
-		const suffixes = ['-terms.bjson', '-documents.bjson', '-lengths.bjson'];
-		for (const suffix of suffixes) {
-			await this._deleteFile(this.storageBasePath + suffix);
+		for (const suffix of TEXT_INDEX_SUFFIXES) {
+			await this._deleteFile(basePath + suffix);
 		}
 	}
 
@@ -179,16 +201,55 @@ export class TextCollectionIndex extends Index {
 	 */
 	async close() {
 		if (this.isOpen) {
-			try {
-				await this.textIndex.close();
-			} catch (error) {
-				// Ignore errors from already-closed files
-				if (!error.message || !error.message.includes('File is not open')) {
-					throw error;
+			await this._maybeCompact();
+			if (this.textIndex?.isOpen) {
+				try {
+					await this.textIndex.close();
+				} catch (error) {
+					// Ignore errors from already-closed files
+					if (!error.message || !error.message.includes('File is not open')) {
+						throw error;
+					}
 				}
 			}
 			this.isOpen = false;
 		}
+		if (this._releaseStorage) {
+			await this._releaseStorage();
+			this._releaseStorage = null;
+		}
+	}
+
+	async _maybeCompact() {
+		if (!this.textIndex?.index?.file || !this.textIndex?.documentTerms?.file || !this.textIndex?.documentLengths?.file) {
+			return false;
+		}
+		const currentVersion = await getCurrentVersion(this.storageBasePath);
+		if (currentVersion !== this.storageVersion) return false;
+
+		const totalSize = this.textIndex.index.file.getFileSize()
+			+ this.textIndex.documentTerms.file.getFileSize()
+			+ this.textIndex.documentLengths.file.getFileSize();
+		if (!totalSize || totalSize < DEFAULT_COMPACTION_MIN_BYTES) return false;
+
+		const nextVersion = currentVersion + 1;
+		const compactBase = buildVersionedPath(this.storageBasePath, nextVersion);
+		const indexHandle = await createSyncAccessHandle(`${compactBase}-terms.bjson`, { reset: true });
+		const docTermsHandle = await createSyncAccessHandle(`${compactBase}-documents.bjson`, { reset: true });
+		const lengthsHandle = await createSyncAccessHandle(`${compactBase}-lengths.bjson`, { reset: true });
+		const indexTree = new BPlusTree(indexHandle, 16);
+		const docTermsTree = new BPlusTree(docTermsHandle, 16);
+		const lengthsTree = new BPlusTree(lengthsHandle, 16);
+
+		await this.textIndex.compact({
+			index: indexTree,
+			documentTerms: docTermsTree,
+			documentLengths: lengthsTree
+		});
+		// Note: textIndex.compact() closes the underlying trees and leaves the index in a closed state.
+		await promoteVersion(this.storageBasePath, nextVersion, currentVersion, { suffixes: TEXT_INDEX_SUFFIXES });
+		await this._closeSyncHandles();
+		return true;
 	}
 
 	/**
@@ -263,9 +324,12 @@ export class TextCollectionIndex extends Index {
 		if (this.isOpen) {
 			await this.close();
 		}
+
+		const currentVersion = await getCurrentVersion(this.storageBasePath);
+		const basePath = buildVersionedPath(this.storageBasePath, currentVersion);
 		
 		// Delete old files
-		await this._deleteIndexFiles();
+		await this._deleteIndexFiles(basePath);
 		
 		// Reopen (will create new files)
 		await this.open();
