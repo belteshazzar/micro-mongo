@@ -2,12 +2,15 @@ import { EventEmitter } from 'events';
 import { ObjectId } from 'bjson';
 
 /**
- * Serialize ObjectId instances for worker communication
+ * Serialize ObjectId and Date instances for worker communication
  */
 function serializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
   if (obj instanceof ObjectId) {
     return { __objectId: obj.toString() };
+  }
+  if (obj instanceof Date) {
+    return { __date: obj.toISOString() };
   }
   if (Array.isArray(obj)) {
     return obj.map(serializePayload);
@@ -23,12 +26,15 @@ function serializePayload(obj) {
 }
 
 /**
- * Deserialize ObjectId instances from worker communication
+ * Deserialize ObjectId and Date instances from worker communication
  */
 function deserializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'object' && obj.__objectId) {
     return new ObjectId(obj.__objectId);
+  }
+  if (typeof obj === 'object' && obj.__date) {
+    return new Date(obj.__date);
   }
   if (Array.isArray(obj)) {
     return obj.map(deserializePayload);
@@ -139,6 +145,7 @@ export class WorkerBridge extends EventEmitter {
         if (data.error?.name) error.name = data.error.name;
         if (data.error?.stack) error.stack = data.error.stack;
         if (data.error?.code) error.code = data.error.code;
+        if (data.error?.$err) error.$err = data.error.$err;
         pending.reject(error);
       }
       return;

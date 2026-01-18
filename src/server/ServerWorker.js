@@ -2,12 +2,15 @@ import { Server } from './Server.js';
 import { ObjectId } from 'bjson';
 
 /**
- * Serialize ObjectId instances for worker communication
+ * Serialize ObjectId and Date instances for worker communication
  */
 function serializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
   if (obj instanceof ObjectId) {
     return { __objectId: obj.toString() };
+  }
+  if (obj instanceof Date) {
+    return { __date: obj.toISOString() };
   }
   if (Array.isArray(obj)) {
     return obj.map(serializePayload);
@@ -23,12 +26,15 @@ function serializePayload(obj) {
 }
 
 /**
- * Deserialize ObjectId instances from worker communication
+ * Deserialize ObjectId and Date instances from worker communication
  */
 function deserializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'object' && obj.__objectId) {
     return new ObjectId(obj.__objectId);
+  }
+  if (typeof obj === 'object' && obj.__date) {
+    return new Date(obj.__date);
   }
   if (Array.isArray(obj)) {
     return obj.map(deserializePayload);
@@ -119,7 +125,9 @@ async function handleMessage(message, post) {
       error: {
         name: error?.name,
         message: error?.message,
-        stack: error?.stack
+        stack: error?.stack,
+        code: error?.code,
+        $err: error?.$err
       }
     });
   }

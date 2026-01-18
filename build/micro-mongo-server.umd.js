@@ -856,7 +856,7 @@
     async close() {
       this._closed = true;
       await this._closeRemote();
-      return this;
+      return false;
     }
     isClosed() {
       return this._closed || false;
@@ -870,35 +870,26 @@
       return this;
     }
     async explain(verbosity = "queryPlanner") {
-      await this._ensureInitialized();
-      try {
-        return await this.bridge.sendRequest({
-          target: "cursor",
-          cursorId: this.cursorId,
-          method: "explain",
-          args: [verbosity]
-        });
-      } catch (err) {
-        return {
-          queryPlanner: {
-            plannerVersion: 1,
-            namespace: `unknown`,
-            indexFilterSet: false,
-            parsedQuery: {},
-            winningPlan: {
-              stage: "COLLSCAN"
-            }
-          },
-          ...verbosity === "executionStats" && {
-            executionStats: {
-              executionSuccess: true,
-              nReturned: 0,
-              executionTimeMillis: 0
-            }
-          },
-          ok: 1
+      const result = {
+        queryPlanner: {
+          plannerVersion: 1,
+          namespace: `unknown`,
+          indexFilterSet: false,
+          parsedQuery: {},
+          winningPlan: {
+            stage: "COLLSCAN"
+          }
+        },
+        ok: 1
+      };
+      if (verbosity === "executionStats" || verbosity === "allPlansExecution") {
+        result.executionStats = {
+          executionSuccess: true,
+          nReturned: 0,
+          executionTimeMillis: 0
         };
       }
+      return result;
     }
     async itcount() {
       let count = 0;
@@ -908,16 +899,8 @@
       }
       return count;
     }
-    async size() {
-      await this._ensureInitialized();
-      let count = this.buffer.length;
-      const tempBuffer = [...this.buffer];
-      while (!this.exhausted) {
-        await this._getMore();
-        count += this.buffer.length;
-      }
-      this.buffer = tempBuffer;
-      return count;
+    size() {
+      return this.buffer.length;
     }
     min(spec) {
       this._min = spec;
@@ -3611,6 +3594,9 @@
     if (obj instanceof ObjectId) {
       return { __objectId: obj.toString() };
     }
+    if (obj instanceof Date) {
+      return { __date: obj.toISOString() };
+    }
     if (Array.isArray(obj)) {
       return obj.map(serializePayload);
     }
@@ -3627,6 +3613,9 @@
     if (obj === null || obj === void 0) return obj;
     if (typeof obj === "object" && obj.__objectId) {
       return new ObjectId(obj.__objectId);
+    }
+    if (typeof obj === "object" && obj.__date) {
+      return new Date(obj.__date);
     }
     if (Array.isArray(obj)) {
       return obj.map(deserializePayload);
@@ -3717,6 +3706,7 @@
           if (data.error?.name) error.name = data.error.name;
           if (data.error?.stack) error.stack = data.error.stack;
           if (data.error?.code) error.code = data.error.code;
+          if (data.error?.$err) error.$err = data.error.$err;
           pending.reject(error);
         }
         return;
