@@ -90,10 +90,11 @@
   </div>
 
   <script type="module">
-    import { MongoClient, ObjectId } from './build/micro-mongo-2.0.0.js';
+    import { MongoClient, ObjectId, WorkerBridge } from './build/micro-mongo-2.0.0.js';
 
     window.MongoClient = MongoClient;
     window.ObjectId = ObjectId;
+    window.WorkerBridge = WorkerBridge;
 
     const output = document.getElementById('output');
 
@@ -117,139 +118,188 @@
       output.style.display = 'none';
     };
 
-    window.runBasicTest = function() {
+    window.runBasicTest = async function() {
       clearOutput();
       
-      // Create web worker
-      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
-      
-      // Handle messages from worker
-      worker.onmessage = function(e) {
-        const { type, message, label, data, level } = e.data;
+      try {
+        log('Creating worker bridge...', 'info');
+        const bridge = await WorkerBridge.create();
         
-        switch (type) {
-          case 'log':
-            log(message, level);
-            break;
-          case 'logObject':
-            logObject(label, data);
-            break;
-          case 'error':
-            log(`Error: ${message}`, 'error');
-            worker.terminate();
-            break;
-          case 'complete':
-            worker.terminate();
-            break;
-        }
-      };
-      
-      worker.onerror = function(error) {
-        log(`Worker Error: ${error.message}`, 'error');
-        worker.terminate();
-      };
-      
-      // Start the test
-      worker.postMessage({ action: 'runBasicTest' });
+        log('Connecting to database...', 'info');
+        const client = new MongoClient('mongodb://localhost/testdb', { workerBridge: bridge });
+        await client.connect();
+        const db = client.db();
+        
+        log('Running basic CRUD operations...', 'info');
+        
+        // Insert
+        await db.users.insertOne({ name: 'Alice', age: 30 });
+        await db.users.insertOne({ name: 'Bob', age: 25 });
+        await db.users.insertOne({ name: 'Charlie', age: 35 });
+        log('✓ Inserted 3 documents', 'success');
+        
+        // Find all
+        const users = await (await db.users.find({})).toArray();
+        logObject('All users', users);
+        
+        // Update
+        await db.users.updateOne({ name: 'Bob' }, { $set: { age: 26 } });
+        log('✓ Updated Bob\'s age', 'success');
+        
+        // Find updated
+        const bob = await db.users.findOne({ name: 'Bob' });
+        logObject('Updated Bob', bob);
+        
+        // Delete
+        await db.users.deleteOne({ name: 'Charlie' });
+        log('✓ Deleted Charlie', 'success');
+        
+        // Count
+        const count = await db.users.count();
+        log(`Final count: ${count} users`, 'success');
+        
+        await client.close();
+        await bridge.terminate();
+        
+        log('✓ Test completed successfully!', 'success');
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        console.error(error);
+      }
     };
 
-    window.runObjectIdTest = function() {
+    window.runObjectIdTest = async function() {
       clearOutput();
       
-      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
-      
-      worker.onmessage = function(e) {
-        const { type, message, label, data, level } = e.data;
+      try {
+        log('Testing ObjectId functionality...', 'info');
         
-        switch (type) {
-          case 'log':
-            log(message, level);
-            break;
-          case 'logObject':
-            logObject(label, data);
-            break;
-          case 'error':
-            log(`Error: ${message}`, 'error');
-            worker.terminate();
-            break;
-          case 'complete':
-            worker.terminate();
-            break;
-        }
-      };
-      
-      worker.onerror = function(error) {
-        log(`Worker Error: ${error.message}`, 'error');
-        worker.terminate();
-      };
-      
-      worker.postMessage({ action: 'runObjectIdTest' });
+        const bridge = await WorkerBridge.create();
+        const client = new MongoClient('mongodb://localhost/testdb', { workerBridge: bridge });
+        await client.connect();
+        const db = client.db();
+        
+        // Create custom ObjectId
+        const customId = new ObjectId();
+        log(`Generated ObjectId: ${customId.toString()}`, 'info');
+        log(`Timestamp: ${customId.getTimestamp().toISOString()}`, 'info');
+        
+        // Insert with custom ID
+        await db.items.insertOne({ _id: customId, name: 'Test Item' });
+        
+        // Query by ObjectId
+        const found = await db.items.findOne({ _id: customId });
+        logObject('Found by ObjectId', found);
+        
+        // Query by hex string
+        const found2 = await db.items.findOne({ _id: customId.toString() });
+        logObject('Found by hex string', found2);
+        
+        log('✓ ObjectId tests passed', 'success');
+        
+        await client.close();
+        await bridge.terminate();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        console.error(error);
+      }
     };
 
-    window.runQueryTest = function() {
+    window.runQueryTest = async function() {
       clearOutput();
       
-      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
-      
-      worker.onmessage = function(e) {
-        const { type, message, label, data, level } = e.data;
+      try {
+        log('Testing query operators...', 'info');
         
-        switch (type) {
-          case 'log':
-            log(message, level);
-            break;
-          case 'logObject':
-            logObject(label, data);
-            break;
-          case 'error':
-            log(`Error: ${message}`, 'error');
-            worker.terminate();
-            break;
-          case 'complete':
-            worker.terminate();
-            break;
-        }
-      };
-      
-      worker.onerror = function(error) {
-        log(`Worker Error: ${error.message}`, 'error');
-        worker.terminate();
-      };
-      
-      worker.postMessage({ action: 'runQueryTest' });
+        const bridge = await WorkerBridge.create();
+        const client = new MongoClient('mongodb://localhost/testdb', { workerBridge: bridge });
+        await client.connect();
+        const db = client.db();
+        
+        // Insert test data
+        await db.products.insertMany([
+          { name: 'Laptop', price: 999, category: 'electronics' },
+          { name: 'Mouse', price: 25, category: 'electronics' },
+          { name: 'Keyboard', price: 75, category: 'electronics' },
+          { name: 'Desk', price: 300, category: 'furniture' },
+          { name: 'Chair', price: 150, category: 'furniture' }
+        ]);
+        log('✓ Inserted 5 products', 'success');
+        
+        // Test $gt
+        const expensive = await (await db.products.find({ price: { $gt: 100 } })).toArray();
+        logObject('Products > $100', expensive);
+        
+        // Test $in
+        const electronics = await (await db.products.find({ 
+          category: { $in: ['electronics'] } 
+        })).toArray();
+        logObject('Electronics', electronics);
+        
+        // Test $and
+        const result = await (await db.products.find({ 
+          $and: [
+            { price: { $gte: 50 } },
+            { price: { $lte: 200 } }
+          ]
+        })).toArray();
+        logObject('Price between $50 and $200', result);
+        
+        log('✓ Query tests passed', 'success');
+        
+        await client.close();
+        await bridge.terminate();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        console.error(error);
+      }
     };
 
-    window.runAggregationTest = function() {
+    window.runAggregationTest = async function() {
       clearOutput();
       
-      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
-      
-      worker.onmessage = function(e) {
-        const { type, message, label, data, level } = e.data;
+      try {
+        log('Testing aggregation pipeline...', 'info');
         
-        switch (type) {
-          case 'log':
-            log(message, level);
-            break;
-          case 'logObject':
-            logObject(label, data);
-            break;
-          case 'error':
-            log(`Error: ${message}`, 'error');
-            worker.terminate();
-            break;
-          case 'complete':
-            worker.terminate();
-            break;
-        }
-      };
-      
-      worker.onerror = function(error) {
-        log(`Worker Error: ${error.message}`, 'error');
-        worker.terminate();
-      };
-      
-      worker.postMessage({ action: 'runAggregationTest' });
+        const bridge = await WorkerBridge.create();
+        const client = new MongoClient('mongodb://localhost/testdb', { workerBridge: bridge });
+        await client.connect();
+        const db = client.db();
+        
+        // Insert test data
+        await db.orders.insertMany([
+          { customer: 'Alice', amount: 100, status: 'completed' },
+          { customer: 'Bob', amount: 150, status: 'completed' },
+          { customer: 'Alice', amount: 200, status: 'completed' },
+          { customer: 'Charlie', amount: 50, status: 'pending' }
+        ]);
+        log('✓ Inserted 4 orders', 'success');
+        
+        // Test $group aggregation
+        const aggregatePromise = db.orders.aggregate([
+          { $match: { status: 'completed' } },
+          { 
+            $group: { 
+              _id: '$customer',
+              totalAmount: { $sum: '$amount' },
+              orderCount: { $sum: 1 }
+            }
+          },
+          { $sort: { totalAmount: -1 } }
+        ]);
+        const aggregateCursor = await aggregatePromise;
+        const result = await aggregateCursor.toArray();
+        
+        logObject('Customer totals', result);
+        
+        log('✓ Aggregation tests passed', 'success');
+        
+        await client.close();
+        await bridge.terminate();
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        console.error(error);
+      }
     };
 
     // Auto-run basic test on load

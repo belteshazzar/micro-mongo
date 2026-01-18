@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { DB } from './DB.js';
 import { ChangeStream } from './ChangeStream.js';
+import { ProxyDB } from './ProxyDB.js';
 
 export class MongoClient extends EventEmitter {
   constructor(uri = 'mongodb://localhost:27017', options = {}) {
@@ -10,6 +11,14 @@ export class MongoClient extends EventEmitter {
     this._isConnected = false;
     this._defaultDb = this._parseDefaultDbName(uri);
     this._databases = new Map(); // Track database instances
+    
+    // workerBridge is required
+    if (!options.workerBridge) {
+      throw new Error('workerBridge is required. Create one with: const bridge = await WorkerBridge.create()');
+    }
+    
+    this._bridge = options.workerBridge;
+    this._ownsBridge = false; // Never own the bridge - user manages lifecycle
   }
 
   static async connect(uri, options = {}) {
@@ -26,7 +35,6 @@ export class MongoClient extends EventEmitter {
   }
 
   // Note that db on real MongoClient is synchronous
-  // This is async as it loads from the file system
   db(name, opts = {}) {
     // Use default from URI if no name provided
     const dbName = name || this._defaultDb;
@@ -38,11 +46,26 @@ export class MongoClient extends EventEmitter {
     if (this._databases.has(dbName)) {
       return this._databases.get(dbName);
     }
-    
-    const dbOptions = { ...this.options, ...opts, dbName };
-    const database = new DB(dbOptions);
+
+    // Always use ProxyDB with worker
+    const database = new ProxyDB({
+      dbName,
+      bridge: this._bridge,
+      options: { ...this.options, ...opts }
+    });
+
     this._databases.set(dbName, database);
     return database;
+  }
+
+  async close() {
+    if (this._bridge && this._ownsBridge) {
+      // Only terminate if we own the bridge (not shared)
+      await this._bridge.terminate();
+      this._bridge = null;
+    }
+    this._isConnected = false;
+    this.emit('close');
   }
 
   // async _loadExistingDatabases() {
@@ -145,5 +168,27 @@ export class MongoClient extends EventEmitter {
     // Parse mongodb://host:port/dbname format
     const match = uri.match(/\/([^/?]+)/);
     return match ? match[1] : null;
+  }
+
+  _parseUriParams(uri) {
+    // Parse query parameters from URI
+    // e.g., ?useWorker=true becomes { useWorker: true }
+    const params = {};
+    const queryIndex = uri.indexOf('?');
+    if (queryIndex === -1) return params;
+    
+    const queryString = uri.substring(queryIndex + 1);
+    const pairs = queryString.split('&');
+    for (const pair of pairs) {
+      const [key, value] = pair.split('=');
+      if (key) {
+        // Convert string booleans to actual booleans
+        if (value === 'true') params[key] = true;
+        else if (value === 'false') params[key] = false;
+        else if (!isNaN(value)) params[key] = Number(value);
+        else params[key] = decodeURIComponent(value || '');
+      }
+    }
+    return params;
   }
 }

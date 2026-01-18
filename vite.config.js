@@ -17,6 +17,7 @@ export default defineConfig({
     sourcemap: true,
     minify: false, // We'll create separate minified builds
     rollupOptions: {
+      external: ['url', 'worker_threads'],  // Mark Node modules as external
       output: {
         // Provide global variables to use in the UMD build
         globals: {}

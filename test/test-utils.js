@@ -24,7 +24,7 @@
  * });
  */
 export function createMongoClientSetup(dbName = 'testdb') {
-	let _client, _db;
+	let _client, _db, _bridge;
 	
 	return {
 		get client() {
@@ -33,10 +33,16 @@ export function createMongoClientSetup(dbName = 'testdb') {
 		get db() {
 			return _db;
 		},
+		get bridge() {
+			return _bridge;
+		},
 		
 		beforeEach: async () => {
-			const { MongoClient } = await import('../main.js');
-			_client = await MongoClient.connect();
+			const { MongoClient, WorkerBridge } = await import('../main.js');
+			// Create WorkerBridge for all tests to use proxy/worker architecture
+			_bridge = await WorkerBridge.create();
+			_client = new MongoClient('mongodb://localhost/test', { workerBridge: _bridge });
+			await _client.connect();
 			_db = _client.db(dbName);
 			return { client: _client, db: _db };
 		},
@@ -46,6 +52,10 @@ export function createMongoClientSetup(dbName = 'testdb') {
 				await _client.close();
 				_client = null;
 				_db = null;
+			}
+			if (_bridge) {
+				await _bridge.terminate();
+				_bridge = null;
 			}
 		}
 	};
@@ -116,10 +126,13 @@ export function createDBSetup() {
  */
 export function createMongoClientFactory(dbName = 'testdb') {
 	return async () => {
-		const { MongoClient } = await import('../main.js');
-		const client = await MongoClient.connect();
+		const { MongoClient, WorkerBridge } = await import('../main.js');
+		// Create WorkerBridge for all tests to use proxy/worker architecture
+		const bridge = await WorkerBridge.create();
+		const client = new MongoClient('mongodb://localhost/test', { workerBridge: bridge });
+		await client.connect();
 		const db = client.db(dbName);
-		return { client, db };
+		return { client, db, bridge };
 	};
 }
 

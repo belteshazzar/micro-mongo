@@ -6,6 +6,7 @@
 export { MongoClient } from './src/MongoClient.js';
 export { ObjectId } from 'bjson';
 export { ChangeStream } from './src/ChangeStream.js';
+export { WorkerBridge } from './src/WorkerBridge.js';
 
 // Export error classes and codes
 export { 

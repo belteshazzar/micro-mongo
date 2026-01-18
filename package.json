@@ -10,7 +10,7 @@
     "cover": "c8 --reporter=html --reporter=text npm test",
     "build": "npm run build:clean && npm run build:dev && npm run build:min",
     "build:clean": "rm -rf build",
-    "build:dev": "vite build",
+    "build:dev": "vite build && vite build --config vite.worker.config.js",
     "build:min": "vite build --config vite.config.min.js --mode production",
     "dev": "vite",
     "preview": "vite preview"

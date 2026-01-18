@@ -23,15 +23,17 @@ if (typeof globalThis.navigator === 'undefined') {
 	globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient } from '../main.js';
+import { MongoClient, WorkerBridge } from '../main.js';
 import { strict as assert } from 'assert';
 
 describe('Simple Find Test', function() {
-	let client, db, collection;
+	let client, db, collection, bridge;
 
 	beforeEach(async function() {
 		this.timeout(10000);
-		client = await MongoClient.connect();
+		bridge = await WorkerBridge.create();
+		client = new MongoClient('mongodb://localhost/test-simple', { workerBridge: bridge });
+		await client.connect();
 		db = client.db('test-simple');
 		collection = db.collection('testcol');
 		
@@ -44,6 +46,9 @@ describe('Simple Find Test', function() {
 		this.timeout(10000);
 		if (client) {
 			await client.close();
+		}
+		if (bridge) {
+			await bridge.terminate();
 		}
 	});
 
