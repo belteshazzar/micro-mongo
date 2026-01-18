@@ -131,6 +131,10 @@ export class ProxyCollection {
       if (method === 'dropIndexes') {
         this.indexes = [];
       }
+      // If drop (collection), clear all cached indexes
+      if (method === 'drop') {
+        this.indexes = [];
+      }
       return res;
     });
     return promise;
