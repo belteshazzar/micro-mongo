@@ -104,6 +104,8 @@ export class Collection extends EventEmitter {
     //   <name>.rtree.bjson        -> GeospatialIndex
     //   <name>.bplustree.bjson    -> RegularCollectionIndex
 
+    console.log(`[LOAD_INDEXES] Loading indexes for collection at path: ${this.path}`);
+
     // Navigate to the collection directory inside OPFS
     let dirHandle;
     try {
@@ -116,12 +118,16 @@ export class Collection extends EventEmitter {
     } catch (err) {
       // If the collection folder doesn't exist yet, there is nothing to load
       if (err?.name === 'NotFoundError' || err?.code === 'ENOENT') {
+        console.log(`[LOAD_INDEXES] Collection directory doesn't exist, no indexes to load`);
         return;
       }
       throw err;
     }
 
+    console.log(`[LOAD_INDEXES] Found collection directory, scanning for index files...`);
+
     for await (const [entryName, entryHandle] of dirHandle.entries()) {
+      console.log(`[LOAD_INDEXES] Found entry: ${entryName} (kind: ${entryHandle.kind})`);
       if (entryHandle.kind !== 'file') continue;
 
       let type;
@@ -132,6 +138,7 @@ export class Collection extends EventEmitter {
       } else if (entryName.endsWith('.bplustree.bjson')) {
         type = 'regular';
       } else {
+        console.log(`[LOAD_INDEXES] Skipping non-index file: ${entryName}`);
         continue; // Not an index file we understand
       }
 
@@ -140,12 +147,18 @@ export class Collection extends EventEmitter {
         .replace(/\.rtree\.bjson$/, '')
         .replace(/\.bplustree\.bjson$/, '');
 
+      console.log(`[LOAD_INDEXES] Processing index: ${indexName} (type: ${type})`);
+
       // Skip if already loaded (avoid duplicates)
-      if (this.indexes.has(indexName)) continue;
+      if (this.indexes.has(indexName)) {
+        console.log(`[LOAD_INDEXES] Index ${indexName} already loaded, skipping`);
+        continue;
+      }
 
       const keys = this._parseIndexName(indexName, type);
       if (!keys) {
         // Can't recover keys for custom index names; skip to avoid broken indexes
+        console.log(`[LOAD_INDEXES] Could not parse index name: ${indexName}, skipping`);
         continue;
       }
 
@@ -164,11 +177,14 @@ export class Collection extends EventEmitter {
       try {
         await index.open();
         this.indexes.set(indexName, index);
+        console.log(`[LOAD_INDEXES] Successfully loaded index: ${indexName}`);
       } catch (err) {
         // If an index file is corrupted, skip it but don't block collection init
-        console.warn(`Failed to open index ${indexName}:`, err);
+        console.warn(`[LOAD_INDEXES] Failed to open index ${indexName}:`, err);
       }
     }
+
+    console.log(`[LOAD_INDEXES] Finished loading indexes. Total loaded: ${this.indexes.size}`);
   }
 
   _parseIndexName(indexName, type) {
@@ -1669,19 +1685,63 @@ export class Collection extends EventEmitter {
   async drop() {
     if (!this._initialized) await this._initialize();
 
+    console.log(`[DROP] Starting drop of collection ${this.name} at path ${this.path}`);
+    console.log(`[DROP] Indexes to close:`, Array.from(this.indexes.keys()));
+
     // Close all indexes first
-    for (const [_, index] of this.indexes) {
+    for (const [indexName, index] of this.indexes) {
       if (index && typeof index.close === 'function') {
+        console.log(`[DROP] Closing index: ${indexName}`);
         await index.close();
       }
     }
 
     // Close the documents B+ tree
     if (this.documents && typeof this.documents.close === 'function') {
+      console.log(`[DROP] Closing documents B+ tree`);
       await this.documents.close();
     }
 
-    // Remove the entire collection directory recursively
+    // Explicitly delete all files in the collection directory before removing it
+    // This ensures proper cleanup in OPFS environments
+    try {
+      const pathParts = this.path.split('/').filter(Boolean);
+      let collectionDir = await globalThis.navigator.storage.getDirectory();
+      
+      // Navigate to collection directory
+      for (const part of pathParts) {
+        collectionDir = await collectionDir.getDirectoryHandle(part, { create: false });
+      }
+
+      console.log(`[DROP] Found collection directory, listing files...`);
+      // Delete all files in the directory
+      const entriesToDelete = [];
+      for await (const [entryName, entryHandle] of collectionDir.entries()) {
+        console.log(`[DROP] Found file: ${entryName}`);
+        entriesToDelete.push(entryName);
+      }
+      
+      console.log(`[DROP] Deleting ${entriesToDelete.length} files...`);
+      for (const entryName of entriesToDelete) {
+        try {
+          await collectionDir.removeEntry(entryName, { recursive: false });
+          console.log(`[DROP] Deleted: ${entryName}`);
+        } catch (e) {
+          // Continue deleting other files even if one fails
+          console.warn(`[DROP] Failed to delete ${entryName}:`, e);
+        }
+      }
+    } catch (error) {
+      // Directory might not exist yet if collection was never initialized
+      if (error.name !== 'NotFoundError' && error.code !== 'ENOENT') {
+        // Log but don't fail - we'll still try to remove the directory
+        console.warn('[DROP] Error during file cleanup:', error);
+      } else {
+        console.log(`[DROP] Collection directory doesn't exist yet`);
+      }
+    }
+
+    // Now remove the collection directory itself
     const pathParts = this.path.split('/').filter(Boolean);
     const filename = pathParts.pop();
 
@@ -1692,11 +1752,15 @@ export class Collection extends EventEmitter {
       }
       // Try recursive removal first
       try {
+        console.log(`[DROP] Attempting recursive removal of directory: ${filename}`);
         await dir.removeEntry(filename, { recursive: true });
+        console.log(`[DROP] Successfully removed directory with recursive flag`);
       } catch (e) {
-        // If recursive not supported, try non-recursive (for empty directories)
+        // If recursive not supported, try non-recursive (should work now that directory is empty)
         if (e.name === 'TypeError' || e.message?.includes('recursive')) {
+          console.log(`[DROP] Recursive not supported, trying non-recursive removal`);
           await dir.removeEntry(filename);
+          console.log(`[DROP] Successfully removed empty directory`);
         } else {
           throw e;
         }
@@ -1705,6 +1769,8 @@ export class Collection extends EventEmitter {
       // Directory might not exist yet if collection was never initialized
       if (error.name !== 'NotFoundError' && error.code !== 'ENOENT') {
         throw error;
+      } else {
+        console.log(`[DROP] Parent directory doesn't exist`);
       }
     }
 
@@ -1716,6 +1782,7 @@ export class Collection extends EventEmitter {
     // remove from db's collection list
     this.db.collections.delete(this.name);
 
+    console.log(`[DROP] Collection ${this.name} dropped successfully`);
     this.emit('drop', { collection: this.name });
     return { ok: 1 };
   }
