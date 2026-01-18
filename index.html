@@ -90,7 +90,7 @@
   </div>
 
   <script type="module">
-    import { MongoClient, ObjectId } from './build/micro-mongo-1.1.3.js';
+    import { MongoClient, ObjectId } from './build/micro-mongo-2.0.0.js';
 
     window.MongoClient = MongoClient;
     window.ObjectId = ObjectId;
@@ -117,160 +117,139 @@
       output.style.display = 'none';
     };
 
-    window.runBasicTest = async function() {
+    window.runBasicTest = function() {
       clearOutput();
-      log('Running basic CRUD operations...', 'info');
       
-      try {
-        const client = await MongoClient.connect();
-        const db = client.db('testdb');
+      // Create web worker
+      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
+      
+      // Handle messages from worker
+      worker.onmessage = function(e) {
+        const { type, message, label, data, level } = e.data;
         
-        // Insert
-        db.users.insertOne({ name: 'Alice', age: 30 });
-        db.users.insertOne({ name: 'Bob', age: 25 });
-        db.users.insertOne({ name: 'Charlie', age: 35 });
-        
-        log('✓ Inserted 3 documents', 'success');
-        
-        // Find
-        const users = db.users.find().toArray();
-        logObject('All users', users);
-        
-        // Update
-        db.users.updateOne({ name: 'Bob' }, { $set: { age: 26 } });
-        log('✓ Updated Bob\'s age', 'success');
-        
-        // Find updated
-        const bob = db.users.findOne({ name: 'Bob' });
-        logObject('Updated Bob', bob);
-        
-        // Delete
-        db.users.deleteOne({ name: 'Charlie' });
-        log('✓ Deleted Charlie', 'success');
-        
-        // Count
-        const count = db.users.count();
-        log(`Final count: ${count} users`, 'success');
-        
-        await client.close();
-      } catch (error) {
-        log(`Error: ${error.message}`, 'error');
-      }
+        switch (type) {
+          case 'log':
+            log(message, level);
+            break;
+          case 'logObject':
+            logObject(label, data);
+            break;
+          case 'error':
+            log(`Error: ${message}`, 'error');
+            worker.terminate();
+            break;
+          case 'complete':
+            worker.terminate();
+            break;
+        }
+      };
+      
+      worker.onerror = function(error) {
+        log(`Worker Error: ${error.message}`, 'error');
+        worker.terminate();
+      };
+      
+      // Start the test
+      worker.postMessage({ action: 'runBasicTest' });
     };
 
-    window.runObjectIdTest = async function() {
+    window.runObjectIdTest = function() {
       clearOutput();
-      log('Testing ObjectId functionality...', 'info');
       
-      try {
-        const client = await MongoClient.connect();
-        const db = client.db('testdb');
+      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
+      
+      worker.onmessage = function(e) {
+        const { type, message, label, data, level } = e.data;
         
-        // Create custom ObjectId
-        const customId = new ObjectId();
-        log(`Generated ObjectId: ${customId.toString()}`, 'info');
-        log(`Timestamp: ${customId.getTimestamp().toISOString()}`, 'info');
-        
-        // Insert with custom ID
-        db.items.insertOne({ _id: customId, name: 'Test Item' });
-        
-        // Query by ObjectId
-        const found = db.items.findOne({ _id: customId });
-        logObject('Found by ObjectId', found);
-        
-        // Query by hex string
-        const found2 = db.items.findOne({ _id: customId.toString() });
-        logObject('Found by hex string', found2);
-        
-        log('✓ ObjectId tests passed', 'success');
-        
-        await client.close();
-      } catch (error) {
-        log(`Error: ${error.message}`, 'error');
-      }
+        switch (type) {
+          case 'log':
+            log(message, level);
+            break;
+          case 'logObject':
+            logObject(label, data);
+            break;
+          case 'error':
+            log(`Error: ${message}`, 'error');
+            worker.terminate();
+            break;
+          case 'complete':
+            worker.terminate();
+            break;
+        }
+      };
+      
+      worker.onerror = function(error) {
+        log(`Worker Error: ${error.message}`, 'error');
+        worker.terminate();
+      };
+      
+      worker.postMessage({ action: 'runObjectIdTest' });
     };
 
-    window.runQueryTest = async function() {
+    window.runQueryTest = function() {
       clearOutput();
-      log('Testing query operators...', 'info');
       
-      try {
-        const client = await MongoClient.connect();
-        const db = client.db('testdb');
+      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
+      
+      worker.onmessage = function(e) {
+        const { type, message, label, data, level } = e.data;
         
-        // Insert test data
-        db.products.insertMany([
-          { name: 'Laptop', price: 999, category: 'electronics' },
-          { name: 'Mouse', price: 25, category: 'electronics' },
-          { name: 'Keyboard', price: 75, category: 'electronics' },
-          { name: 'Desk', price: 300, category: 'furniture' },
-          { name: 'Chair', price: 150, category: 'furniture' }
-        ]);
-        
-        log('✓ Inserted 5 products', 'success');
-        
-        // Test $gt
-        const expensive = db.products.find({ price: { $gt: 100 } }).toArray();
-        logObject('Products > $100', expensive);
-        
-        // Test $in
-        const electronics = db.products.find({ 
-          category: { $in: ['electronics'] } 
-        }).toArray();
-        logObject('Electronics', electronics);
-        
-        // Test $and
-        const result = db.products.find({ 
-          $and: [
-            { price: { $gte: 50 } },
-            { price: { $lte: 200 } }
-          ]
-        }).toArray();
-        logObject('Price between $50 and $200', result);
-        
-        log('✓ Query tests passed', 'success');
-        
-        await client.close();
-      } catch (error) {
-        log(`Error: ${error.message}`, 'error');
-      }
+        switch (type) {
+          case 'log':
+            log(message, level);
+            break;
+          case 'logObject':
+            logObject(label, data);
+            break;
+          case 'error':
+            log(`Error: ${message}`, 'error');
+            worker.terminate();
+            break;
+          case 'complete':
+            worker.terminate();
+            break;
+        }
+      };
+      
+      worker.onerror = function(error) {
+        log(`Worker Error: ${error.message}`, 'error');
+        worker.terminate();
+      };
+      
+      worker.postMessage({ action: 'runQueryTest' });
     };
 
-    window.runAggregationTest = async function() {
+    window.runAggregationTest = function() {
       clearOutput();
-      log('Testing aggregation pipeline...', 'info');
       
-      try {
-        const client = await MongoClient.connect();
-        const db = client.db('testdb');
+      const worker = new Worker('./basic-test-worker.js', { type: 'module' });
+      
+      worker.onmessage = function(e) {
+        const { type, message, label, data, level } = e.data;
         
-        db.sales.insertMany([
-          { product: 'Laptop', amount: 999, quantity: 2 },
-          { product: 'Mouse', amount: 25, quantity: 10 },
-          { product: 'Laptop', amount: 999, quantity: 1 },
-          { product: 'Keyboard', amount: 75, quantity: 3 }
-        ]);
-        
-        log('✓ Inserted sales data', 'success');
-        
-        // Aggregation pipeline
-        const result = db.sales.aggregate([
-          { $group: { 
-            _id: '$product', 
-            totalQuantity: { $sum: '$quantity' },
-            avgAmount: { $avg: '$amount' }
-          }},
-          { $sort: { totalQuantity: -1 } }
-        ]);
-        
-        logObject('Aggregation result', result);
-        
-        log('✓ Aggregation tests passed', 'success');
-        
-        await client.close();
-      } catch (error) {
-        log(`Error: ${error.message}`, 'error');
-      }
+        switch (type) {
+          case 'log':
+            log(message, level);
+            break;
+          case 'logObject':
+            logObject(label, data);
+            break;
+          case 'error':
+            log(`Error: ${message}`, 'error');
+            worker.terminate();
+            break;
+          case 'complete':
+            worker.terminate();
+            break;
+        }
+      };
+      
+      worker.onerror = function(error) {
+        log(`Worker Error: ${error.message}`, 'error');
+        worker.terminate();
+      };
+      
+      worker.postMessage({ action: 'runAggregationTest' });
     };
 
     // Auto-run basic test on load

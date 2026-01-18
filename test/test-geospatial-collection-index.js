@@ -85,13 +85,13 @@ describe('GeospatialIndex (unit)', function() {
 
     const loc1 = new ObjectId();
 		await index.add({ _id: loc1, location: { type: 'Point', coordinates: [10, 20] } });
-		expect(await index.rtree.file.exists()).to.equal(true);
+		expect(index.isOpen).to.equal(true);
 
 		await index.clear();
 
 		const results = await index.query({ location: { $geoWithin: [[5, 25], [15, 15]] } });
 		expect(results).to.deep.equal([]);
-		expect(await index.rtree.file.exists()).to.equal(true);
+		expect(index.isOpen).to.equal(true);
 
 		await index.close();
 	});

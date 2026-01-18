@@ -47,10 +47,27 @@ export class Collection extends EventEmitter {
       throw new Error('OPFS not available: navigator.storage.getDirectory is missing');
     }
 
-    // Ensure directory exists before opening file
-    await this._ensureDirectoryForFile(this.documentsPath);
-
-    this.documents = new BPlusTree(this.documentsPath, this.order);
+    // Ensure directory exists and get directory handle
+    let dirHandle = await this._ensureDirectoryForFile(this.documentsPath);
+    
+    // If no directory parts, use root directory
+    if (!dirHandle) {
+      dirHandle = await globalThis.navigator.storage.getDirectory();
+    }
+    
+    // Get file name from path - safely extract just the filename
+    const pathParts = this.documentsPath.split('/').filter(Boolean);
+    const filename = pathParts[pathParts.length - 1];
+    
+    if (!filename) {
+      throw new Error(`Invalid documents path: ${this.documentsPath}`);
+    }
+    
+    // Get file handle and create sync access handle using native OPFS
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    
+    this.documents = new BPlusTree(syncHandle, this.order);
     await this.documents.open();
 
     await this._loadIndexes();
@@ -71,6 +88,7 @@ export class Collection extends EventEmitter {
       for (const part of pathParts) {
         dir = await dir.getDirectoryHandle(part, { create: true });
       }
+      return dir; // Return the directory handle
     } catch (error) {
       // Ignore EEXIST - directory already exists
       if (error.code !== 'EEXIST') {

@@ -20,7 +20,7 @@ globalThis.navigator.storage = {
 
 import { BPlusTree } from 'bjson/bplustree';
 import { RTree } from 'bjson/rtree';
-import { ObjectId } from 'bjson';
+import { ObjectId, getFileHandle } from 'bjson';
 
 describe('BPlusTree Metadata Size Verification', function() {
 	before(async function() {
@@ -42,7 +42,12 @@ describe('BPlusTree Metadata Size Verification', function() {
 	});
 
 	it('should verify BPlusTree metadata size', async function() {
-		const tree = new BPlusTree('test-bplustree.bjson', 50);
+		// Get directory handle and create sync access handle
+		const dirHandle = await navigator.storage.getDirectory();
+		const fileHandle = await getFileHandle(dirHandle, 'test-bplustree.bjson', { create: true });
+		const syncHandle = await fileHandle.createSyncAccessHandle();
+		
+		const tree = new BPlusTree(syncHandle, 50);
 		await tree.open();
 		
 		// Add some data
@@ -90,7 +95,12 @@ describe('BPlusTree Metadata Size Verification', function() {
 	});
 
 	it('should verify RTree metadata size', async function() {
-		const tree = new RTree('test-rtree.bjson', 9);
+		// Get directory handle and create sync access handle
+		const dirHandle = await navigator.storage.getDirectory();
+		const fileHandle = await getFileHandle(dirHandle, 'test-rtree.bjson', { create: true });
+		const syncHandle = await fileHandle.createSyncAccessHandle();
+		
+		const tree = new RTree(syncHandle, 9);
 		await tree.open();
 		
 		// Add some data
@@ -117,9 +127,17 @@ describe('BPlusTree Metadata Size Verification', function() {
 	});
 
 	it('should compare metadata structures', async function() {
-		// Create both trees
-		const bptree = new BPlusTree('compare-bplustree.bjson', 50);
-		const rtree = new RTree('compare-rtree.bjson', 9);
+		// Get directory handle
+		const dirHandle = await navigator.storage.getDirectory();
+		
+		// Create both trees with sync handles
+		const bpFileHandle = await getFileHandle(dirHandle, 'compare-bplustree.bjson', { create: true });
+		const bpSyncHandle = await bpFileHandle.createSyncAccessHandle();
+		const bptree = new BPlusTree(bpSyncHandle, 50);
+		
+		const rtFileHandle = await getFileHandle(dirHandle, 'compare-rtree.bjson', { create: true });
+		const rtSyncHandle = await rtFileHandle.createSyncAccessHandle();
+		const rtree = new RTree(rtSyncHandle, 9);
 		
 		await bptree.open();
 		await rtree.open();

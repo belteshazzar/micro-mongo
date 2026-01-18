@@ -9,8 +9,10 @@ import { BPlusTree } from 'bjson/bplustree';
 export class RegularCollectionIndex extends Index {
 	constructor(name, keys, storageFilePath, options = {}) {
 		super(name, keys, storageFilePath, options);
-		// Use OPFS-backed B+ tree for persistent index storage
-		this.data = new BPlusTree(storageFilePath, 50);
+		// Store path for later initialization
+		this.storageFilePath = storageFilePath;
+		this.data = null;
+		this.syncHandle = null;
 		this.isOpen = false;
 	}
 
@@ -23,6 +25,26 @@ export class RegularCollectionIndex extends Index {
 			return;
 		}
 		try {
+			// Parse path to get directory and filename
+			const pathParts = this.storageFilePath.split('/').filter(Boolean);
+			const filename = pathParts.pop();
+			
+			if (!filename) {
+				throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+			}
+			
+			// Navigate to directory
+			let dirHandle = await globalThis.navigator.storage.getDirectory();
+			for (const part of pathParts) {
+				dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+			}
+			
+			// Get file handle and create sync access handle using native OPFS
+			const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+			this.syncHandle = await fileHandle.createSyncAccessHandle();
+			
+			// Create BPlusTree with sync handle
+			this.data = new BPlusTree(this.syncHandle, 50);
 			await this.data.open();
 			this.isOpen = true;
 		} catch (error) {
@@ -30,17 +52,43 @@ export class RegularCollectionIndex extends Index {
 			if (error.message && (error.message.includes('Unknown type byte') || 
 					error.message.includes('Failed to read metadata') ||
 					error.message.includes('Invalid tree file'))) {
-				// Try to delete the corrupted file
-				if (typeof navigator !== 'undefined' && navigator.storage) {
-					const opfsRoot = await navigator.storage.getDirectory();
+				// Close sync handle if open
+				if (this.syncHandle) {
 					try {
-						await opfsRoot.removeEntry(this.storage);
+						await this.syncHandle.close();
 					} catch (e) {
-						// File might not exist, ignore
+						// Ignore close errors
 					}
+					this.syncHandle = null;
 				}
+				
+				// Parse path to get directory and filename
+				const pathParts = this.storageFilePath.split('/').filter(Boolean);
+				const filename = pathParts.pop();
+				
+				if (!filename) {
+					throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+				}
+				
+				// Navigate to directory
+				let dirHandle = await globalThis.navigator.storage.getDirectory();
+				for (const part of pathParts) {
+					dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+				}
+				
+				// Try to delete the corrupted file
+				try {
+					await dirHandle.removeEntry(filename);
+				} catch (e) {
+					// File might not exist, ignore
+				}
+				
+				// Get new file handle and create sync access handle using native OPFS
+				const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+				this.syncHandle = await fileHandle.createSyncAccessHandle();
+				
 				// Create fresh BPlusTree
-				this.data = new BPlusTree(this.storage, 50);
+				this.data = new BPlusTree(this.syncHandle, 50);
 				await this.data.open();
 				this.isOpen = true;
 			} else {
@@ -329,8 +377,25 @@ export class RegularCollectionIndex extends Index {
 		if (this.isOpen) {
 			await this.close();
 		}
-		// BPlusTree will be recreated when we open again
-		this.data = new BPlusTree(this.data.filename, 50);
+		
+		// Parse path to get directory and filename
+		const pathParts = this.storageFilePath.split('/').filter(Boolean);
+		const filename = pathParts.pop();
+		
+		// Navigate to directory
+		let dirHandle = await globalThis.navigator.storage.getDirectory();
+		for (const part of pathParts) {
+			dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+		}
+		
+		// Delete the old file
+		try {
+			await dirHandle.removeEntry(filename);
+		} catch (e) {
+			// File might not exist, ignore
+		}
+		
+		// Recreate with new sync handle
 		await this.open();
 	}
 }

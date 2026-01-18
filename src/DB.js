@@ -9,7 +9,7 @@ import { NotImplementedError } from './errors.js';
 export class DB {
 	constructor(options) {
 		this.options = options || {};
-    this.baseFolder = this.options.baseFolder || '/micro-mongo';
+    this.baseFolder = this.options.baseFolder || 'micro-mongo';
 		this.dbName = this.options.dbName || 'default';
 		this.dbFolder = `${this.baseFolder}/${this.dbName}`;
     this.collections = new Map();

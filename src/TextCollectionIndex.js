@@ -1,5 +1,6 @@
 import { Index } from './Index.js';
 import { TextIndex } from 'bjson/textindex';
+import { BPlusTree } from 'bjson/bplustree';
 import { getProp } from './utils.js';
 
 /**
@@ -9,8 +10,9 @@ import { getProp } from './utils.js';
 export class TextCollectionIndex extends Index {
 	constructor(name, keys, storage, options = {}) {
 		super(name, keys, storage);
-		// Use OPFS-backed TextIndex for persistent full-text search
-		this.textIndex = new TextIndex({ baseFilename: storage });
+		this.storageBasePath = storage;
+		this.textIndex = null;
+		this.syncHandles = [];
 		this.isOpen = false;
 		// Track which fields are indexed
 		this.indexedFields = [];
@@ -33,6 +35,20 @@ export class TextCollectionIndex extends Index {
 			return;
 		}
 		try {
+			// Create three BPlusTree instances for the TextIndex
+			const indexTree = await this._createBPlusTree(this.storageBasePath + '-terms.bjson');
+			const docTermsTree = await this._createBPlusTree(this.storageBasePath + '-documents.bjson');
+			const lengthsTree = await this._createBPlusTree(this.storageBasePath + '-lengths.bjson');
+			
+			this.textIndex = new TextIndex({
+				order: 16,
+				trees: {
+					index: indexTree,
+					documentTerms: docTermsTree,
+					documentLengths: lengthsTree
+				}
+			});
+			
 			await this.textIndex.open();
 			this.isOpen = true;
 		} catch (error) {
@@ -43,12 +59,27 @@ export class TextCollectionIndex extends Index {
 					error.message.includes('Unknown type byte') ||
 					error.message.includes('Invalid') ||
 					error.message.includes('file too small')))) {
+				// Close any open sync handles
+				await this._closeSyncHandles();
+				
 				// Delete corrupted files and ensure directory exists
 				await this._deleteIndexFiles();
-				await this._ensureDirectoryForFile(this.storage + '-terms.bjson');
+				await this._ensureDirectoryForFile(this.storageBasePath + '-terms.bjson');
 				
 				// Create fresh TextIndex for new/corrupted files
-				this.textIndex = new TextIndex({ baseFilename: this.storage });
+				const indexTree = await this._createBPlusTree(this.storageBasePath + '-terms.bjson');
+				const docTermsTree = await this._createBPlusTree(this.storageBasePath + '-documents.bjson');
+				const lengthsTree = await this._createBPlusTree(this.storageBasePath + '-lengths.bjson');
+				
+				this.textIndex = new TextIndex({
+					order: 16,
+					trees: {
+						index: indexTree,
+						documentTerms: docTermsTree,
+						documentLengths: lengthsTree
+					}
+				});
+				
 				await this.textIndex.open();
 				this.isOpen = true;
 			} else {
@@ -57,11 +88,48 @@ export class TextCollectionIndex extends Index {
 		}
 	}
 	
+	async _createBPlusTree(filePath) {
+		// Parse path to get directory and filename
+		const pathParts = filePath.split('/').filter(Boolean);
+		const filename = pathParts.pop();
+		
+		if (!filename) {
+			throw new Error(`Invalid storage path: ${filePath}`);
+		}
+		
+		// Navigate to directory
+		let dirHandle = await globalThis.navigator.storage.getDirectory();
+		for (const part of pathParts) {
+			dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+		}
+		
+		// Get file handle and create sync access handle using native OPFS
+		const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+		const syncHandle = await fileHandle.createSyncAccessHandle();
+		
+		// Store sync handle for cleanup
+		this.syncHandles.push(syncHandle);
+		
+		// Create BPlusTree with sync handle
+		return new BPlusTree(syncHandle, 16);
+	}
+	
+	async _closeSyncHandles() {
+		for (const handle of this.syncHandles) {
+			try {
+				await handle.close();
+			} catch (e) {
+				// Ignore errors
+			}
+		}
+		this.syncHandles = [];
+	}
+	
 	async _deleteIndexFiles() {
 		// TextIndex creates multiple files: -terms.bjson, -documents.bjson, -lengths.bjson
 		const suffixes = ['-terms.bjson', '-documents.bjson', '-lengths.bjson'];
 		for (const suffix of suffixes) {
-			await this._deleteFile(this.storage + suffix);
+			await this._deleteFile(this.storageBasePath + suffix);
 		}
 	}
 
@@ -70,6 +138,10 @@ export class TextCollectionIndex extends Index {
 		try {
 			const pathParts = filePath.split('/').filter(Boolean);
 			const filename = pathParts.pop();
+			
+			if (!filename) {
+				throw new Error(`Invalid storage path: ${filePath}`);
+			}
 			
 			let dir = await globalThis.navigator.storage.getDirectory();
 			for (const part of pathParts) {
@@ -191,7 +263,11 @@ export class TextCollectionIndex extends Index {
 		if (this.isOpen) {
 			await this.close();
 		}
-		this.textIndex = new TextIndex({ baseFilename: this.storage });
+		
+		// Delete old files
+		await this._deleteIndexFiles();
+		
+		// Reopen (will create new files)
 		await this.open();
 	}
 

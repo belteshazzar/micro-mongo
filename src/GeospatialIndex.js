@@ -12,7 +12,9 @@ export class GeospatialIndex extends Index {
     super(indexName, keys, storageFile, options);
 
     this.geoField = Object.keys(keys)[0]; // Assume single geospatial field
-    this.rtree = new RTree(storageFile, 9);
+    this.storageFilePath = storageFile;
+    this.rtree = null;
+    this.syncHandle = null;
 		this.isOpen = false;
 	}
 
@@ -25,6 +27,26 @@ export class GeospatialIndex extends Index {
 			return;
 		}
 		try {
+			// Parse path to get directory and filename
+			const pathParts = this.storageFilePath.split('/').filter(Boolean);
+			const filename = pathParts.pop();
+			
+			if (!filename) {
+				throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+			}
+			
+			// Navigate to directory
+			let dirHandle = await globalThis.navigator.storage.getDirectory();
+			for (const part of pathParts) {
+				dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+			}
+			
+			// Get file handle and create sync access handle using native OPFS
+			const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+			this.syncHandle = await fileHandle.createSyncAccessHandle();
+			
+			// Create RTree with sync handle
+			this.rtree = new RTree(this.syncHandle, 9);
 			await this.rtree.open();
 			this.isOpen = true;
 		} catch (error) {
@@ -34,8 +56,43 @@ export class GeospatialIndex extends Index {
 					error.message.includes('file too small') ||
 					error.message.includes('Failed to read metadata') ||
 					error.message.includes('Unknown type byte')))) {
-				// Create fresh RTree for new/corrupted files
-				this.rtree = new RTree(this.storage, 9);
+				// Close sync handle if open
+				if (this.syncHandle) {
+					try {
+						await this.syncHandle.close();
+					} catch (e) {
+						// Ignore close errors
+					}
+					this.syncHandle = null;
+				}
+				
+				// Parse path to get directory and filename
+				const pathParts = this.storageFilePath.split('/').filter(Boolean);
+				const filename = pathParts.pop();
+				
+				if (!filename) {
+					throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+				}
+				
+				// Navigate to directory
+				let dirHandle = await globalThis.navigator.storage.getDirectory();
+				for (const part of pathParts) {
+					dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+				}
+				
+				// Try to delete the corrupted file
+				try {
+					await dirHandle.removeEntry(filename);
+				} catch (e) {
+					// File might not exist, ignore
+				}
+				
+				// Get new file handle and create sync access handle using native OPFS
+				const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+				this.syncHandle = await fileHandle.createSyncAccessHandle();
+				
+				// Create fresh RTree
+				this.rtree = new RTree(this.syncHandle, 9);
 				await this.rtree.open();
 				this.isOpen = true;
 			} else {
@@ -387,7 +444,18 @@ export class GeospatialIndex extends Index {
 
     // Delete existing on-disk tree to avoid stale entries
 		try {
-			await this.rtree.file.delete();
+			// Parse path to get directory and filename
+			const pathParts = this.storageFilePath.split('/').filter(Boolean);
+			const filename = pathParts.pop();
+			
+			// Navigate to directory
+			let dirHandle = await globalThis.navigator.storage.getDirectory();
+			for (const part of pathParts) {
+				dirHandle = await dirHandle.getDirectoryHandle(part, { create: false });
+			}
+			
+			// Delete the file
+			await dirHandle.removeEntry(filename);
 		} catch (err) {
 			// Ignore if file doesn't exist; rethrow other errors
 			if (!err || err.name !== 'NotFoundError') {
@@ -396,7 +464,6 @@ export class GeospatialIndex extends Index {
 		}
 
     // Recreate the RTree
-		this.rtree = new RTree(this.rtree.filename, 9);
 		await this.open();
 	}
 

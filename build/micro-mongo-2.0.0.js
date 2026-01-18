@@ -803,84 +803,16 @@ function decode(data) {
   return decodeValue();
 }
 class BJsonFile {
-  constructor(filename) {
-    this.filename = filename;
-    this.root = null;
-    this.fileHandle = null;
-    this.syncAccessHandle = null;
-    this.mode = null;
-    this.isOpen = false;
-  }
-  /**
-   * Open the file with specified mode
-   * Note: This must be called from a Web Worker as it uses FileSystemSyncAccessHandle
-   * @param {string} mode - 'r' for read-only, 'rw' for read-write
-   */
-  async open(mode = "r") {
-    if (this.isOpen) {
-      throw new Error(`File is already open in ${this.mode} mode`);
+  constructor(syncAccessHandle) {
+    if (!syncAccessHandle) {
+      throw new Error("FileSystemSyncAccessHandle is required");
     }
-    if (mode !== "r" && mode !== "rw") {
-      throw new Error(`Invalid mode: ${mode}. Use 'r' for read-only or 'rw' for read-write`);
-    }
-    if (!navigator.storage || !navigator.storage.getDirectory) {
-      throw new Error("Origin Private File System (OPFS) is not supported in this browser");
-    }
-    this.root = this.root || await navigator.storage.getDirectory();
-    this.mode = mode;
-    try {
-      if (mode === "r") {
-        this.fileHandle = await this.root.getFileHandle(this.filename);
-      } else {
-        this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
-      }
-      this.syncAccessHandle = await this.fileHandle.createSyncAccessHandle();
-      this.isOpen = true;
-    } catch (error) {
-      if (error.name === "NotFoundError") {
-        throw new Error(`File not found: ${this.filename}`);
-      }
-      if (error.name === "NoModificationAllowedError" || error.message?.includes("createSyncAccessHandle")) {
-        throw new Error("FileSystemSyncAccessHandle is only available in Web Workers. BJsonFile must be used in a Web Worker context.");
-      }
-      throw error;
-    }
-  }
-  /**
-   * Close the file and flush any pending writes
-   */
-  async close() {
-    if (this.syncAccessHandle) {
-      this.syncAccessHandle.flush();
-      await this.syncAccessHandle.close();
-      this.syncAccessHandle = null;
-    }
-    this.isOpen = false;
-    this.mode = null;
-    this.fileHandle = null;
-  }
-  /**
-   * Ensure file is open, throw if not
-   */
-  ensureOpen() {
-    if (!this.isOpen) {
-      throw new Error(`File is not open. Call open('r') or open('rw') first`);
-    }
-  }
-  /**
-   * Ensure file is writable, throw if read-only
-   */
-  ensureWritable() {
-    this.ensureOpen();
-    if (this.mode === "r") {
-      throw new Error(`File is opened in read-only mode. Cannot write or append`);
-    }
+    this.syncAccessHandle = syncAccessHandle;
   }
   /**
    * Read a range of bytes from the file
    */
   #readRange(start, length) {
-    this.ensureOpen();
     const buffer = new Uint8Array(length);
     const bytesRead = this.syncAccessHandle.read(buffer, { at: start });
     if (bytesRead < length) {
@@ -892,7 +824,6 @@ class BJsonFile {
    * Get the current file size
    */
   getFileSize() {
-    this.ensureOpen();
     return this.syncAccessHandle.getSize();
   }
   /**
@@ -900,7 +831,6 @@ class BJsonFile {
    * @param {*} data - Data to encode and write
    */
   write(data) {
-    this.ensureWritable();
     const binaryData = encode(data);
     this.syncAccessHandle.truncate(0);
     this.syncAccessHandle.write(binaryData, { at: 0 });
@@ -911,10 +841,9 @@ class BJsonFile {
    * @returns {*} - Decoded data
    */
   read(pointer = new Pointer(0)) {
-    this.ensureOpen();
     const fileSize = this.getFileSize();
     if (fileSize === 0) {
-      throw new Error(`File is empty: ${this.filename}`);
+      throw new Error("File is empty");
     }
     const pointerValue = pointer.valueOf();
     if (pointerValue < 0 || pointerValue >= fileSize) {
@@ -928,7 +857,6 @@ class BJsonFile {
    * @param {*} data - Data to encode and append
    */
   append(data) {
-    this.ensureWritable();
     const binaryData = encode(data);
     const existingSize = this.getFileSize();
     this.syncAccessHandle.write(binaryData, { at: existingSize });
@@ -937,15 +865,13 @@ class BJsonFile {
    * Explicitly flush any pending writes to disk
    */
   flush() {
-    this.ensureWritable();
     this.syncAccessHandle.flush();
   }
   /**
-   * Async generator to scan through all records in the file
+   * Generator to scan through all records in the file
    * Each record is decoded and yielded one at a time
    */
   *scan() {
-    this.ensureOpen();
     const fileSize = this.getFileSize();
     if (fileSize === 0) {
       return;
@@ -999,35 +925,6 @@ class BJsonFile {
       const valueData = this.#readRange(offset, valueSize);
       offset += valueSize;
       yield decode(valueData);
-    }
-  }
-  async delete() {
-    if (this.isOpen) {
-      throw new Error(`File is open. Call close() first`);
-    }
-    this.root = this.root || await navigator.storage.getDirectory();
-    try {
-      await this.root.removeEntry(this.filename);
-    } catch (error) {
-      if (error.name === "NotFoundError") {
-        return;
-      }
-      throw error;
-    }
-  }
-  async exists() {
-    if (!navigator.storage || !navigator.storage.getDirectory) {
-      throw new Error("Origin Private File System (OPFS) is not supported in this browser");
-    }
-    this.root = this.root || await navigator.storage.getDirectory();
-    try {
-      await this.root.getFileHandle(this.filename);
-      return true;
-    } catch (error) {
-      if (error.name === "NotFoundError") {
-        return false;
-      }
-      throw error;
     }
   }
 }
@@ -1638,11 +1535,13 @@ class MongoNetworkError extends MongoError {
   }
 }
 class Cursor {
-  constructor(collection, query, projection, documents, SortedCursor2) {
+  constructor(collection, query, projection, documentsOrPromise, SortedCursor2) {
     this.collection = collection;
     this.query = query;
     this.projection = projection;
-    this.documents = documents;
+    this._documentsPromise = documentsOrPromise instanceof Promise ? documentsOrPromise : Promise.resolve(documentsOrPromise);
+    this.documents = null;
+    this._initialized = false;
     this.SortedCursor = SortedCursor2;
     if (projection && Object.keys(projection).length > 0) {
       const keys = Object.keys(projection);
@@ -1665,20 +1564,33 @@ class Cursor {
     this._skip = 0;
     this._closed = false;
   }
+  /**
+   * Ensure documents are loaded from the promise
+   * @private
+   */
+  async _ensureInitialized() {
+    if (!this._initialized) {
+      this.documents = await this._documentsPromise;
+      this._initialized = true;
+    }
+  }
   batchSize(size) {
     this._batchSize = size;
     return this;
   }
   close() {
     this._closed = true;
-    this.pos = this.documents.length;
+    if (this.documents) {
+      this.pos = this.documents.length;
+    }
     return void 0;
   }
   comment(commentString) {
     this._comment = commentString;
     return this;
   }
-  count() {
+  async count() {
+    await this._ensureInitialized();
     return this.documents.length;
   }
   explain(verbosity = "queryPlanner") {
@@ -1696,21 +1608,26 @@ class Cursor {
       },
       executionStats: verbosity === "executionStats" || verbosity === "allPlansExecution" ? {
         executionSuccess: true,
-        nReturned: this.documents.length,
+        nReturned: this.documents ? this.documents.length : 0,
         executionTimeMillis: 0,
         totalKeysExamined: 0,
-        totalDocsExamined: this.documents.length
+        totalDocsExamined: this.documents ? this.documents.length : 0
       } : void 0,
       ok: 1
     };
   }
   async forEach(fn) {
-    while (this.hasNext()) {
-      await fn(this.next());
+    await this._ensureInitialized();
+    while (await this.hasNext()) {
+      await fn(await this.next());
     }
   }
-  hasNext() {
+  async hasNext() {
     if (this._closed) return false;
+    await this._ensureInitialized();
+    if (this.pos === 0 && this._skip > 0) {
+      this.pos = Math.min(this._skip, this.documents.length);
+    }
     let effectiveMax;
     if (this._limit > 0) {
       effectiveMax = Math.min(this._skip + this._limit, this.documents.length);
@@ -1723,10 +1640,11 @@ class Cursor {
     this._hint = index;
     return this;
   }
-  itcount() {
+  async itcount() {
+    await this._ensureInitialized();
     let count = 0;
-    while (this.hasNext()) {
-      this.next();
+    while (await this.hasNext()) {
+      await this.next();
       count++;
     }
     return count;
@@ -1735,10 +1653,11 @@ class Cursor {
     this._limit = _max;
     return this;
   }
-  map(fn) {
+  async map(fn) {
+    await this._ensureInitialized();
     const results = [];
-    while (this.hasNext()) {
-      results.push(fn(this.next()));
+    while (await this.hasNext()) {
+      results.push(await fn(await this.next()));
     }
     return results;
   }
@@ -1758,8 +1677,8 @@ class Cursor {
     this._minIndexBounds = indexBounds;
     return this;
   }
-  next() {
-    if (!this.hasNext()) {
+  async next() {
+    if (!await this.hasNext()) {
       throw new QueryError("Error: error hasNext: false", {
         collection: this.collection.name
       });
@@ -1775,6 +1694,7 @@ class Cursor {
     return this;
   }
   objsLeftInBatch() {
+    if (!this.documents) return 0;
     return this.size();
   }
   pretty() {
@@ -1798,6 +1718,7 @@ class Cursor {
     return this;
   }
   size() {
+    if (!this.documents) return 0;
     const remaining = this.documents.length - this.pos;
     if (this._limit > 0) {
       const maxPos = this._skip + this._limit;
@@ -1808,7 +1729,9 @@ class Cursor {
   skip(num) {
     this._skip = num;
     if (this.pos === 0) {
-      this.pos = Math.min(num, this.documents.length);
+      if (this.documents) {
+        this.pos = Math.min(num, this.documents.length);
+      }
     }
     return this;
   }
@@ -1832,17 +1755,19 @@ class Cursor {
   tailable() {
     throw new NotImplementedError("tailable");
   }
-  toArray() {
+  async toArray() {
+    await this._ensureInitialized();
     const results = [];
-    while (this.hasNext()) {
-      results.push(this.next());
+    while (await this.hasNext()) {
+      results.push(await this.next());
     }
     return results;
   }
   // Support for async iteration (for await...of)
   async *[Symbol.asyncIterator]() {
-    while (this.hasNext()) {
-      yield this.next();
+    await this._ensureInitialized();
+    while (await this.hasNext()) {
+      yield await this.next();
     }
   }
 }
@@ -1852,20 +1777,29 @@ class SortedCursor {
     this.query = query;
     this.sortSpec = sort;
     this.pos = 0;
+    this._cursor = cursor;
+    this._sort = sort;
+    this._initialized = false;
+    this.items = null;
+  }
+  async _ensureInitialized() {
+    if (this._initialized) return;
+    await this._cursor._ensureInitialized();
     this.items = [];
-    while (cursor.hasNext()) {
-      this.items.push(cursor.next());
+    while (await this._cursor.hasNext()) {
+      this.items.push(await this._cursor.next());
     }
-    const sortKeys = Object.keys(sort);
-    this.items.sort(function(a, b) {
+    const sortKeys = Object.keys(this._sort);
+    this.items.sort((function(a, b) {
       for (let i = 0; i < sortKeys.length; i++) {
-        if (a[sortKeys[i]] == void 0 && b[sortKeys[i]] != void 0) return -1 * sort[sortKeys[i]];
-        if (a[sortKeys[i]] != void 0 && b[sortKeys[i]] == void 0) return 1 * sort[sortKeys[i]];
-        if (a[sortKeys[i]] < b[sortKeys[i]]) return -1 * sort[sortKeys[i]];
-        if (a[sortKeys[i]] > b[sortKeys[i]]) return 1 * sort[sortKeys[i]];
+        if (a[sortKeys[i]] == void 0 && b[sortKeys[i]] != void 0) return -1 * this._sort[sortKeys[i]];
+        if (a[sortKeys[i]] != void 0 && b[sortKeys[i]] == void 0) return 1 * this._sort[sortKeys[i]];
+        if (a[sortKeys[i]] < b[sortKeys[i]]) return -1 * this._sort[sortKeys[i]];
+        if (a[sortKeys[i]] > b[sortKeys[i]]) return 1 * this._sort[sortKeys[i]];
       }
       return 0;
-    });
+    }).bind(this));
+    this._initialized = true;
   }
   batchSize() {
     throw "Not Implemented";
@@ -1876,18 +1810,21 @@ class SortedCursor {
   comment() {
     throw "Not Implemented";
   }
-  count() {
+  async count() {
+    await this._ensureInitialized();
     return this.items.length;
   }
   explain() {
     throw "Not Implemented";
   }
   async forEach(fn) {
-    while (this.hasNext()) {
-      await fn(this.next());
+    await this._ensureInitialized();
+    while (await this.hasNext()) {
+      await fn(await this.next());
     }
   }
-  hasNext() {
+  async hasNext() {
+    await this._ensureInitialized();
     return this.pos < this.items.length;
   }
   hint() {
@@ -1896,14 +1833,16 @@ class SortedCursor {
   itcount() {
     throw "Not Implemented";
   }
-  limit(max) {
+  async limit(max) {
+    await this._ensureInitialized();
     this.items = this.items.slice(0, max);
     return this;
   }
-  map(fn) {
+  async map(fn) {
+    await this._ensureInitialized();
     const results = [];
-    while (this.hasNext()) {
-      results.push(fn(this.next()));
+    while (await this.hasNext()) {
+      results.push(await fn(await this.next()));
     }
     return results;
   }
@@ -1919,7 +1858,8 @@ class SortedCursor {
   min() {
     throw "Not Implemented";
   }
-  next() {
+  async next() {
+    await this._ensureInitialized();
     return this.items[this.pos++];
   }
   noCursorTimeout() {
@@ -1946,9 +1886,10 @@ class SortedCursor {
   size() {
     throw "Not Implemented";
   }
-  skip(num) {
+  async skip(num) {
+    await this._ensureInitialized();
     while (num > 0) {
-      this.next();
+      await this.next();
       num--;
     }
     return this;
@@ -1962,17 +1903,19 @@ class SortedCursor {
   tailable() {
     throw "Not Implemented";
   }
-  toArray() {
+  async toArray() {
+    await this._ensureInitialized();
     const results = [];
-    while (this.hasNext()) {
+    while (await this.hasNext()) {
       results.push(this.next());
     }
     return results;
   }
   // Support for async iteration (for await...of)
   async *[Symbol.asyncIterator]() {
-    while (this.hasNext()) {
-      yield this.next();
+    await this._ensureInitialized();
+    while (await this.hasNext()) {
+      yield await this.next();
     }
   }
 }
@@ -2116,45 +2059,46 @@ class NodeData {
 class BPlusTree {
   /**
    * Creates a new persistent B+ tree
-   * @param {string} filename - Path to storage file
+   * @param {FileSystemSyncAccessHandle} syncHandle - Sync access handle to storage file
    * @param {number} order - Tree order (default: 3)
    */
-  constructor(filename, order = 3) {
+  constructor(syncHandle, order = 3) {
     if (order < 3) {
       throw new Error("B+ tree order must be at least 3");
     }
-    this.filename = filename;
+    this.file = new BJsonFile(syncHandle);
     this.order = order;
     this.minKeys = Math.ceil(order / 2) - 1;
-    this.file = new BJsonFile(filename);
     this.isOpen = false;
     this.rootPointer = null;
     this.nextNodeId = 0;
     this._size = 0;
   }
   /**
-   * Open the tree file (create if doesn't exist)
+   * Open the tree (load or initialize metadata)
    */
   async open() {
     if (this.isOpen) {
-      throw new Error("Tree file is already open");
+      throw new Error("Tree is already open");
     }
-    const exists = await this.file.exists();
+    const fileSize = this.file.getFileSize();
+    const exists = fileSize > 0;
     if (exists) {
-      await this.file.open("rw");
       this._loadMetadata();
     } else {
-      await this.file.open("rw");
       this._initializeNewTree();
     }
     this.isOpen = true;
   }
   /**
-   * Close the tree file and save metadata
+   * Close the tree and save metadata
    */
   async close() {
     if (this.isOpen) {
-      await this.file.close();
+      if (this.file && this.file.syncAccessHandle) {
+        this.file.flush();
+        await this.file.syncAccessHandle.close();
+      }
       this.isOpen = false;
     }
   }
@@ -2532,35 +2476,31 @@ class BPlusTree {
     return height;
   }
   /**
-   * Compact the tree into a new file by copying only the current live nodes.
+   * Compact the tree by copying all live entries into a new file.
    * Returns size metrics so callers can see how much space was reclaimed.
-   * @param {string} destinationFilename - New file to write the compacted tree into
-   * @returns {Promise<{oldSize:number,newSize:number,bytesSaved:number,newFilename:string}>}
+   * @param {FileSystemSyncAccessHandle} destSyncHandle - Sync handle for destination file
+   * @returns {Promise<{oldSize:number,newSize:number,bytesSaved:number}>}
    */
-  async compact(destinationFilename) {
+  async compact(destSyncHandle) {
     if (!this.isOpen) {
       throw new Error("Tree file is not open");
     }
-    if (!destinationFilename) {
-      throw new Error("Destination filename is required for compaction");
+    if (!destSyncHandle) {
+      throw new Error("Destination sync handle is required for compaction");
     }
-    const oldSize = await this.file.getFileSize();
+    const oldSize = this.file.getFileSize();
     const entries = this.toArray();
-    const newTree = new BPlusTree(destinationFilename, this.order);
+    const newTree = new BPlusTree(destSyncHandle, this.order);
     await newTree.open();
     for (const entry of entries) {
-      newTree.add(entry.key, entry.value);
+      await newTree.add(entry.key, entry.value);
     }
+    const newSize = newTree.file.getFileSize();
     await newTree.close();
-    const tempFile = new BJsonFile(destinationFilename);
-    await tempFile.open("r");
-    const newSize = await tempFile.getFileSize();
-    await tempFile.close();
     return {
       oldSize,
       newSize,
-      bytesSaved: Math.max(0, oldSize - newSize),
-      newFilename: destinationFilename
+      bytesSaved: Math.max(0, oldSize - newSize)
     };
   }
 }
@@ -2686,19 +2626,21 @@ function tokenize(text2) {
 class TextIndex {
   constructor(options = {}) {
     const {
-      baseFilename = `text-index-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       order = 16,
       trees
     } = options;
-    this.baseFilename = baseFilename;
-    this.index = trees?.index || new BPlusTree(`${baseFilename}-terms.bjson`, order);
-    this.documentTerms = trees?.documentTerms || new BPlusTree(`${baseFilename}-documents.bjson`, order);
-    this.documentLengths = trees?.documentLengths || new BPlusTree(`${baseFilename}-lengths.bjson`, order);
+    this.order = order;
+    this.index = trees?.index || null;
+    this.documentTerms = trees?.documentTerms || null;
+    this.documentLengths = trees?.documentLengths || null;
     this.isOpen = false;
   }
   async open() {
     if (this.isOpen) {
       throw new Error("TextIndex is already open");
+    }
+    if (!this.index || !this.documentTerms || !this.documentLengths) {
+      throw new Error("Trees must be initialized before opening");
     }
     await Promise.all([
       this.index.open(),
@@ -2888,36 +2830,29 @@ class TextIndex {
     }
   }
   /**
-   * Compact all internal B+ trees into new files and switch the index to use them.
-   * @param {string} destinationBase - Base filename (without suffixes) for the compacted files
+   * Compact all internal B+ trees using provided destination tree instances.
+   * The destination trees should be freshly created (unopened) with new sync handles.
+   * After compaction completes, the destination sync handles will be closed.
+   * @param {Object} options - Compaction options  
+   * @param {BPlusTree} options.index - Fresh destination tree for index data
+   * @param {BPlusTree} options.documentTerms - Fresh destination tree for document terms
+   * @param {BPlusTree} options.documentLengths - Fresh destination tree for document lengths
    * @returns {Promise<{terms: object, documents: object, lengths: object}>}
    */
-  async compact(destinationBase = `${this.baseFilename}-compact-${Date.now()}`) {
+  async compact({ index: destIndex, documentTerms: destDocTerms, documentLengths: destDocLengths }) {
     this._ensureOpen();
-    if (!destinationBase) {
-      throw new Error("Destination base filename is required for compaction");
+    if (!destIndex || !destDocTerms || !destDocLengths) {
+      throw new Error("Destination trees must be provided for compaction");
     }
-    const termsDest = `${destinationBase}-terms.bjson`;
-    const documentsDest = `${destinationBase}-documents.bjson`;
-    const lengthsDest = `${destinationBase}-lengths.bjson`;
-    const results = await Promise.all([
-      this.index.compact(termsDest),
-      this.documentTerms.compact(documentsDest),
-      this.documentLengths.compact(lengthsDest)
-    ]);
-    const indexOrder = this.index.order;
-    const documentsOrder = this.documentTerms.order;
-    const lengthsOrder = this.documentLengths.order;
+    const termsResult = await this.index.compact(destIndex.file.syncAccessHandle);
+    const documentsResult = await this.documentTerms.compact(destDocTerms.file.syncAccessHandle);
+    const lengthsResult = await this.documentLengths.compact(destDocLengths.file.syncAccessHandle);
     await this.close();
-    this.baseFilename = destinationBase;
-    this.index = new BPlusTree(termsDest, indexOrder);
-    this.documentTerms = new BPlusTree(documentsDest, documentsOrder);
-    this.documentLengths = new BPlusTree(lengthsDest, lengthsOrder);
-    await this.open();
+    this.isOpen = false;
     return {
-      terms: results[0],
-      documents: results[1],
-      lengths: results[2]
+      terms: termsResult,
+      documents: documentsResult,
+      lengths: lengthsResult
     };
   }
 }
@@ -5092,7 +5027,9 @@ class Index {
 class RegularCollectionIndex extends Index {
   constructor(name, keys, storageFilePath, options = {}) {
     super(name, keys, storageFilePath, options);
-    this.data = new BPlusTree(storageFilePath, 50);
+    this.storageFilePath = storageFilePath;
+    this.data = null;
+    this.syncHandle = null;
     this.isOpen = false;
   }
   /**
@@ -5104,18 +5041,45 @@ class RegularCollectionIndex extends Index {
       return;
     }
     try {
+      const pathParts = this.storageFilePath.split("/").filter(Boolean);
+      const filename = pathParts.pop();
+      if (!filename) {
+        throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+      }
+      let dirHandle = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+      }
+      const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+      this.syncHandle = await fileHandle.createSyncAccessHandle();
+      this.data = new BPlusTree(this.syncHandle, 50);
       await this.data.open();
       this.isOpen = true;
     } catch (error) {
       if (error.message && (error.message.includes("Unknown type byte") || error.message.includes("Failed to read metadata") || error.message.includes("Invalid tree file"))) {
-        if (typeof navigator !== "undefined" && navigator.storage) {
-          const opfsRoot = await navigator.storage.getDirectory();
+        if (this.syncHandle) {
           try {
-            await opfsRoot.removeEntry(this.storage);
+            await this.syncHandle.close();
           } catch (e) {
           }
+          this.syncHandle = null;
         }
-        this.data = new BPlusTree(this.storage, 50);
+        const pathParts = this.storageFilePath.split("/").filter(Boolean);
+        const filename = pathParts.pop();
+        if (!filename) {
+          throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+        }
+        let dirHandle = await globalThis.navigator.storage.getDirectory();
+        for (const part of pathParts) {
+          dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+        }
+        try {
+          await dirHandle.removeEntry(filename);
+        } catch (e) {
+        }
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        this.syncHandle = await fileHandle.createSyncAccessHandle();
+        this.data = new BPlusTree(this.syncHandle, 50);
         await this.data.open();
         this.isOpen = true;
       } else {
@@ -5347,14 +5311,25 @@ class RegularCollectionIndex extends Index {
     if (this.isOpen) {
       await this.close();
     }
-    this.data = new BPlusTree(this.data.filename, 50);
+    const pathParts = this.storageFilePath.split("/").filter(Boolean);
+    const filename = pathParts.pop();
+    let dirHandle = await globalThis.navigator.storage.getDirectory();
+    for (const part of pathParts) {
+      dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+    }
+    try {
+      await dirHandle.removeEntry(filename);
+    } catch (e) {
+    }
     await this.open();
   }
 }
 class TextCollectionIndex extends Index {
   constructor(name, keys, storage, options = {}) {
     super(name, keys, storage);
-    this.textIndex = new TextIndex({ baseFilename: storage });
+    this.storageBasePath = storage;
+    this.textIndex = null;
+    this.syncHandles = [];
     this.isOpen = false;
     this.indexedFields = [];
     for (const field in keys) {
@@ -5375,13 +5350,35 @@ class TextCollectionIndex extends Index {
       return;
     }
     try {
+      const indexTree = await this._createBPlusTree(this.storageBasePath + "-terms.bjson");
+      const docTermsTree = await this._createBPlusTree(this.storageBasePath + "-documents.bjson");
+      const lengthsTree = await this._createBPlusTree(this.storageBasePath + "-lengths.bjson");
+      this.textIndex = new TextIndex({
+        order: 16,
+        trees: {
+          index: indexTree,
+          documentTerms: docTermsTree,
+          documentLengths: lengthsTree
+        }
+      });
       await this.textIndex.open();
       this.isOpen = true;
     } catch (error) {
       if (error.code === "ENOENT" || error.message && (error.message.includes("Failed to read metadata") || error.message.includes("missing required fields") || error.message.includes("Unknown type byte") || error.message.includes("Invalid") || error.message.includes("file too small"))) {
+        await this._closeSyncHandles();
         await this._deleteIndexFiles();
-        await this._ensureDirectoryForFile(this.storage + "-terms.bjson");
-        this.textIndex = new TextIndex({ baseFilename: this.storage });
+        await this._ensureDirectoryForFile(this.storageBasePath + "-terms.bjson");
+        const indexTree = await this._createBPlusTree(this.storageBasePath + "-terms.bjson");
+        const docTermsTree = await this._createBPlusTree(this.storageBasePath + "-documents.bjson");
+        const lengthsTree = await this._createBPlusTree(this.storageBasePath + "-lengths.bjson");
+        this.textIndex = new TextIndex({
+          order: 16,
+          trees: {
+            index: indexTree,
+            documentTerms: docTermsTree,
+            documentLengths: lengthsTree
+          }
+        });
         await this.textIndex.open();
         this.isOpen = true;
       } else {
@@ -5389,10 +5386,34 @@ class TextCollectionIndex extends Index {
       }
     }
   }
+  async _createBPlusTree(filePath) {
+    const pathParts = filePath.split("/").filter(Boolean);
+    const filename = pathParts.pop();
+    if (!filename) {
+      throw new Error(`Invalid storage path: ${filePath}`);
+    }
+    let dirHandle = await globalThis.navigator.storage.getDirectory();
+    for (const part of pathParts) {
+      dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+    }
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    this.syncHandles.push(syncHandle);
+    return new BPlusTree(syncHandle, 16);
+  }
+  async _closeSyncHandles() {
+    for (const handle of this.syncHandles) {
+      try {
+        await handle.close();
+      } catch (e) {
+      }
+    }
+    this.syncHandles = [];
+  }
   async _deleteIndexFiles() {
     const suffixes = ["-terms.bjson", "-documents.bjson", "-lengths.bjson"];
     for (const suffix of suffixes) {
-      await this._deleteFile(this.storage + suffix);
+      await this._deleteFile(this.storageBasePath + suffix);
     }
   }
   async _deleteFile(filePath) {
@@ -5400,6 +5421,9 @@ class TextCollectionIndex extends Index {
     try {
       const pathParts = filePath.split("/").filter(Boolean);
       const filename = pathParts.pop();
+      if (!filename) {
+        throw new Error(`Invalid storage path: ${filePath}`);
+      }
       let dir = await globalThis.navigator.storage.getDirectory();
       for (const part of pathParts) {
         dir = await dir.getDirectoryHandle(part, { create: false });
@@ -5503,7 +5527,7 @@ class TextCollectionIndex extends Index {
     if (this.isOpen) {
       await this.close();
     }
-    this.textIndex = new TextIndex({ baseFilename: this.storage });
+    await this._deleteIndexFiles();
     await this.open();
   }
   /**
@@ -5613,40 +5637,41 @@ class RTreeNode {
   }
 }
 class RTree {
-  constructor(filename, maxEntries = 9) {
-    this.filename = filename;
+  constructor(syncHandle, maxEntries = 9) {
+    this.file = new BJsonFile(syncHandle);
     this.maxEntries = maxEntries;
     this.minEntries = Math.max(2, Math.ceil(maxEntries / 2));
     this.rootPointer = null;
     this.nextId = 1;
     this._size = 0;
-    this.file = new BJsonFile(filename);
     this.isOpen = false;
   }
   /**
-   * Open the R-tree file (create if doesn't exist)
+   * Open the R-tree (load or initialize metadata)
    */
   async open() {
     if (this.isOpen) {
-      throw new Error("R-tree file is already open");
+      throw new Error("R-tree is already open");
     }
-    const exists = await this.file.exists();
+    const fileSize = this.file.getFileSize();
+    const exists = fileSize > 0;
     if (exists) {
-      await this.file.open("rw");
       this._loadFromFile();
     } else {
-      await this.file.open("rw");
       this._initializeNewTree();
     }
     this.isOpen = true;
   }
   /**
-   * Close the R-tree file
+   * Close the R-tree
    */
   async close() {
     if (this.isOpen) {
       this._writeMetadata();
-      await this.file.close();
+      if (this.file && this.file.syncAccessHandle) {
+        this.file.flush();
+        await this.file.syncAccessHandle.close();
+      }
       this.isOpen = false;
     }
   }
@@ -6163,37 +6188,39 @@ class RTree {
     return this._size;
   }
   /**
-   * Clear all entries from the tree
+   * Clear all entries from the tree by appending a new empty root node
+   * Preserves the append-only file structure
    */
-  // TODO: This method deletes and recreates the underlying file to clear all data.
-  // immutable????
   async clear() {
-    await this.close();
-    const tempFile = new BJsonFile(this.filename);
-    await tempFile.delete();
-    this.file = new BJsonFile(this.filename);
-    await this.open();
+    const newRoot = new RTreeNode(this, {
+      id: this.nextId++,
+      isLeaf: true,
+      children: [],
+      bbox: null
+    });
+    this.rootPointer = this._saveNode(newRoot);
+    this._size = 0;
+    this._writeMetadata();
   }
   /**
    * Compact the R-tree by copying the current root and all reachable nodes into a new file.
    * Returns size metrics to show reclaimed space.
-   * @param {string} destinationFilename
+   * @param {FileSystemSyncAccessHandle} destSyncHandle - Sync handle for destination file
    */
-  async compact(destinationFilename) {
+  async compact(destSyncHandle) {
     if (!this.isOpen) {
       throw new Error("R-tree file must be opened before use");
     }
-    if (!destinationFilename) {
-      throw new Error("Destination filename is required for compaction");
+    if (!destSyncHandle) {
+      throw new Error("Destination sync handle is required for compaction");
     }
     this._writeMetadata();
     const oldSize = this.file.getFileSize();
-    const dest = new RTree(destinationFilename, this.maxEntries);
+    const dest = new RTree(destSyncHandle, this.maxEntries);
+    await dest.open();
     dest.minEntries = this.minEntries;
     dest.nextId = this.nextId;
     dest._size = this._size;
-    await dest.file.open("rw");
-    dest.isOpen = true;
     const pointerMap = /* @__PURE__ */ new Map();
     const cloneNode = (pointer) => {
       const offset = pointer.valueOf();
@@ -6225,17 +6252,12 @@ class RTree {
     const newRootPointer = cloneNode(this.rootPointer);
     dest.rootPointer = newRootPointer;
     dest._writeMetadata();
-    await dest.file.close();
-    dest.isOpen = false;
-    const tempFile = new BJsonFile(destinationFilename);
-    await tempFile.open("r");
-    const newSize = tempFile.getFileSize();
-    await tempFile.close();
+    const newSize = dest.file.getFileSize();
+    await dest.close();
     return {
       oldSize,
       newSize,
-      bytesSaved: Math.max(0, oldSize - newSize),
-      newFilename: destinationFilename
+      bytesSaved: Math.max(0, oldSize - newSize)
     };
   }
 }
@@ -6243,7 +6265,9 @@ class GeospatialIndex extends Index {
   constructor(indexName, keys, storageFile, options = {}) {
     super(indexName, keys, storageFile, options);
     this.geoField = Object.keys(keys)[0];
-    this.rtree = new RTree(storageFile, 9);
+    this.storageFilePath = storageFile;
+    this.rtree = null;
+    this.syncHandle = null;
     this.isOpen = false;
   }
   /**
@@ -6255,11 +6279,45 @@ class GeospatialIndex extends Index {
       return;
     }
     try {
+      const pathParts = this.storageFilePath.split("/").filter(Boolean);
+      const filename = pathParts.pop();
+      if (!filename) {
+        throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+      }
+      let dirHandle = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+      }
+      const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+      this.syncHandle = await fileHandle.createSyncAccessHandle();
+      this.rtree = new RTree(this.syncHandle, 9);
       await this.rtree.open();
       this.isOpen = true;
     } catch (error) {
       if (error.code === "ENOENT" || error.message && (error.message.includes("Invalid R-tree") || error.message.includes("file too small") || error.message.includes("Failed to read metadata") || error.message.includes("Unknown type byte"))) {
-        this.rtree = new RTree(this.storage, 9);
+        if (this.syncHandle) {
+          try {
+            await this.syncHandle.close();
+          } catch (e) {
+          }
+          this.syncHandle = null;
+        }
+        const pathParts = this.storageFilePath.split("/").filter(Boolean);
+        const filename = pathParts.pop();
+        if (!filename) {
+          throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+        }
+        let dirHandle = await globalThis.navigator.storage.getDirectory();
+        for (const part of pathParts) {
+          dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+        }
+        try {
+          await dirHandle.removeEntry(filename);
+        } catch (e) {
+        }
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        this.syncHandle = await fileHandle.createSyncAccessHandle();
+        this.rtree = new RTree(this.syncHandle, 9);
         await this.rtree.open();
         this.isOpen = true;
       } else {
@@ -6517,13 +6575,18 @@ class GeospatialIndex extends Index {
   async clear() {
     await this.close();
     try {
-      await this.rtree.file.delete();
+      const pathParts = this.storageFilePath.split("/").filter(Boolean);
+      const filename = pathParts.pop();
+      let dirHandle = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dirHandle = await dirHandle.getDirectoryHandle(part, { create: false });
+      }
+      await dirHandle.removeEntry(filename);
     } catch (err) {
       if (!err || err.name !== "NotFoundError") {
         throw err;
       }
     }
-    this.rtree = new RTree(this.rtree.filename, 9);
     await this.open();
   }
   /**
@@ -7242,8 +7305,18 @@ class Collection extends eventsExports.EventEmitter {
     if (!globalThis.navigator || !globalThis.navigator.storage || typeof globalThis.navigator.storage.getDirectory !== "function") {
       throw new Error("OPFS not available: navigator.storage.getDirectory is missing");
     }
-    await this._ensureDirectoryForFile(this.documentsPath);
-    this.documents = new BPlusTree(this.documentsPath, this.order);
+    let dirHandle = await this._ensureDirectoryForFile(this.documentsPath);
+    if (!dirHandle) {
+      dirHandle = await globalThis.navigator.storage.getDirectory();
+    }
+    const pathParts = this.documentsPath.split("/").filter(Boolean);
+    const filename = pathParts[pathParts.length - 1];
+    if (!filename) {
+      throw new Error(`Invalid documents path: ${this.documentsPath}`);
+    }
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    this.documents = new BPlusTree(syncHandle, this.order);
     await this.documents.open();
     await this._loadIndexes();
     this._initialized = true;
@@ -7258,6 +7331,7 @@ class Collection extends eventsExports.EventEmitter {
       for (const part of pathParts) {
         dir = await dir.getDirectoryHandle(part, { create: true });
       }
+      return dir;
     } catch (error) {
       if (error.code !== "EEXIST") {
         throw error;
@@ -7519,9 +7593,10 @@ class Collection extends eventsExports.EventEmitter {
       });
     }
     let results = [];
-    const cursor = await this.find({});
-    while (cursor.hasNext()) {
-      results.push(cursor.next());
+    const cursor = this.find({});
+    await cursor._ensureInitialized();
+    while (await cursor.hasNext()) {
+      results.push(await cursor.next());
     }
     for (let i = 0; i < pipeline.length; i++) {
       const stage = pipeline[i];
@@ -8040,8 +8115,9 @@ class Collection extends eventsExports.EventEmitter {
           const doc = results[j];
           const matchField = typeof on === "string" ? on : on[0];
           const matchValue = getProp(doc, matchField);
-          const existingCursor = await targetCollection.find({ [matchField]: matchValue });
-          const existing = existingCursor.hasNext() ? existingCursor.next() : null;
+          const existingCursor = targetCollection.find({ [matchField]: matchValue });
+          await existingCursor._ensureInitialized();
+          const existing = await existingCursor.hasNext() ? await existingCursor.next() : null;
           if (existing) {
             if (whenMatched === "replace") {
               await targetCollection.replaceOne({ _id: existing._id }, doc);
@@ -8088,9 +8164,10 @@ class Collection extends eventsExports.EventEmitter {
           const doc = copy(results[j]);
           const localValue = getProp(doc, stageSpec.localField);
           const matches2 = [];
-          const foreignCursor = await fromCollection.find({ [stageSpec.foreignField]: localValue });
-          while (foreignCursor.hasNext()) {
-            matches2.push(foreignCursor.next());
+          const foreignCursor = fromCollection.find({ [stageSpec.foreignField]: localValue });
+          await foreignCursor._ensureInitialized();
+          while (await foreignCursor.hasNext()) {
+            matches2.push(await foreignCursor.next());
           }
           doc[stageSpec.as] = matches2;
           joined.push(doc);
@@ -8131,9 +8208,10 @@ class Collection extends eventsExports.EventEmitter {
             if (restrictSearchWithMatch) {
               query = { $and: [query, restrictSearchWithMatch] };
             }
-            const cursor2 = await fromCollection.find(query);
-            while (cursor2.hasNext()) {
-              const match = cursor2.next();
+            const cursor2 = fromCollection.find(query);
+            await cursor2._ensureInitialized();
+            while (await cursor2.hasNext()) {
+              const match = await cursor2.next();
               const matchCopy = copy(match);
               if (depthField) {
                 matchCopy[depthField] = depth;
@@ -8457,9 +8535,10 @@ class Collection extends eventsExports.EventEmitter {
   async copyTo(destCollectionName) {
     const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
-    const c = await this.find({});
-    while (c.hasNext()) {
-      await destCol.insertOne(c.next());
+    const c = this.find({});
+    await c._ensureInitialized();
+    while (await c.hasNext()) {
+      await destCol.insertOne(await c.next());
       numCopied++;
     }
     return numCopied;
@@ -8506,27 +8585,29 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   async deleteMany(query) {
-    const c = await this.find(query);
+    const c = this.find(query);
+    await c._ensureInitialized();
     const ids = [];
     const docs = [];
-    while (c.hasNext()) {
-      const doc = c.next();
+    while (await c.hasNext()) {
+      const doc = await c.next();
       ids.push(doc._id);
       docs.push(doc);
     }
     const deletedCount = ids.length;
     for (let i = 0; i < ids.length; i++) {
       await this.updateIndexesOnDelete(docs[i]);
-      await this.documents.delete(ids[i].toString());
+      this.documents.delete(ids[i].toString());
       this.emit("delete", { _id: ids[i] });
     }
     return { deletedCount };
   }
   async distinct(field, query) {
     const vals = {};
-    const c = await this.find(query);
-    while (c.hasNext()) {
-      const d = c.next();
+    const c = this.find(query);
+    await c._ensureInitialized();
+    while (await c.hasNext()) {
+      const d = await c.next();
       if (d[field]) {
         vals[d[field]] = true;
       }
@@ -8604,9 +8685,16 @@ class Collection extends eventsExports.EventEmitter {
   explain() {
     throw new NotImplementedError("explain", { collection: this.name });
   }
-  async find(query, projection) {
+  find(query, projection) {
     this._validateProjection(projection);
-    return this._findInternal(query, projection);
+    const documentsPromise = this._findInternal(query, projection);
+    return new Cursor(
+      this,
+      query,
+      projection,
+      documentsPromise,
+      SortedCursor
+    );
   }
   _validateProjection(projection) {
     if (!projection || Object.keys(projection).length === 0) return;
@@ -8663,13 +8751,7 @@ class Collection extends eventsExports.EventEmitter {
     if (nearSpec) {
       this._sortByNearDistance(documents, nearSpec);
     }
-    return new Cursor(
-      this,
-      normalizedQuery,
-      projection,
-      documents,
-      SortedCursor
-    );
+    return documents;
   }
   _extractNearSpec(query) {
     for (const field of Object.keys(query || {})) {
@@ -8745,27 +8827,38 @@ class Collection extends eventsExports.EventEmitter {
     throw new NotImplementedError("findAndModify", { collection: this.name });
   }
   async findOne(query, projection) {
-    const cursor = await this.find(query, projection);
-    if (cursor.hasNext()) {
-      return cursor.next();
+    const cursor = this.find(query, projection);
+    await cursor._ensureInitialized();
+    if (await cursor.hasNext()) {
+      return await cursor.next();
     } else {
       return null;
     }
   }
   async findOneAndDelete(filter, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
-    if (!c.hasNext()) return null;
-    const doc = c.next();
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureInitialized();
+    }
+    if (!await c.hasNext()) return null;
+    const doc = await c.next();
     await this.documents.delete(doc._id.toString());
     if (options && options.projection) return applyProjection(options.projection, doc);
     else return doc;
   }
   async findOneAndReplace(filter, replacement, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
-    if (!c.hasNext()) return null;
-    const doc = c.next();
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureInitialized();
+    }
+    if (!await c.hasNext()) return null;
+    const doc = await c.next();
     replacement._id = doc._id;
     await this.documents.add(doc._id.toString(), replacement);
     if (options && options.returnNewDocument) {
@@ -8777,10 +8870,15 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   async findOneAndUpdate(filter, update, options) {
-    let c = await this.find(filter);
-    if (options && options.sort) c = c.sort(options.sort);
-    if (!c.hasNext()) return null;
-    const doc = c.next();
+    let c = this.find(filter);
+    if (options && options.sort) {
+      c = c.sort(options.sort);
+      await c._ensureInitialized();
+    } else {
+      await c._ensureInitialized();
+    }
+    if (!await c.hasNext()) return null;
+    const doc = await c.next();
     const clone = Object.assign({}, doc);
     const matchInfo = matchWithArrayIndices(doc, filter);
     const positionalMatchInfo = matchInfo.arrayFilters;
@@ -8850,8 +8948,9 @@ class Collection extends eventsExports.EventEmitter {
   }
   async replaceOne(query, replacement, options) {
     const result = {};
-    const c = await this.find(query);
-    result.matchedCount = c.count();
+    const c = this.find(query);
+    await c._ensureInitialized();
+    result.matchedCount = await c.count();
     if (result.matchedCount == 0) {
       result.modifiedCount = 0;
       if (options && options.upsert) {
@@ -8864,27 +8963,28 @@ class Collection extends eventsExports.EventEmitter {
       }
     } else {
       result.modifiedCount = 1;
-      const doc = c.next();
+      const doc = await c.next();
       await this.updateIndexesOnDelete(doc);
       replacement._id = doc._id;
-      await this.documents.add(doc._id.toString(), replacement);
+      this.documents.add(doc._id.toString(), replacement);
       await this.updateIndexesOnInsert(replacement);
       this.emit("replace", replacement);
     }
     return result;
   }
   async remove(query, options) {
-    const c = await this.find(query);
-    if (!c.hasNext()) return;
+    const c = this.find(query);
+    await c._ensureInitialized();
+    if (!await c.hasNext()) return;
     if (options === true || options && options.justOne) {
-      const doc = c.next();
+      const doc = await c.next();
       await this.updateIndexesOnDelete(doc);
-      await this.documents.delete(doc._id.toString());
+      this.documents.delete(doc._id.toString());
     } else {
-      while (c.hasNext()) {
-        const doc = c.next();
+      while (await c.hasNext()) {
+        const doc = await c.next();
         await this.updateIndexesOnDelete(doc);
-        await this.documents.delete(doc._id.toString());
+        this.documents.delete(doc._id.toString());
       }
     }
   }
@@ -8907,11 +9007,12 @@ class Collection extends eventsExports.EventEmitter {
     throw new NotImplementedError("totalIndexSize", { collection: this.name });
   }
   async update(query, updates, options) {
-    const c = await this.find(query);
-    if (c.hasNext()) {
+    const c = this.find(query);
+    await c._ensureInitialized();
+    if (await c.hasNext()) {
       if (options && options.multi) {
-        while (c.hasNext()) {
-          const doc = c.next();
+        while (await c.hasNext()) {
+          const doc = await c.next();
           const matchInfo = matchWithArrayIndices(doc, query);
           const positionalMatchInfo = matchInfo.arrayFilters;
           const userArrayFilters = options && options.arrayFilters;
@@ -8921,7 +9022,7 @@ class Collection extends eventsExports.EventEmitter {
           await this.updateIndexesOnInsert(doc);
         }
       } else {
-        const doc = c.next();
+        const doc = await c.next();
         const matchInfo = matchWithArrayIndices(doc, query);
         const positionalMatchInfo = matchInfo.arrayFilters;
         const userArrayFilters = options && options.arrayFilters;
@@ -8939,40 +9040,42 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   async updateOne(query, updates, options) {
-    const c = await this.find(query);
-    if (c.hasNext()) {
-      const doc = c.next();
+    const c = this.find(query);
+    await c._ensureInitialized();
+    if (await c.hasNext()) {
+      const doc = await c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
       const matchInfo = matchWithArrayIndices(doc, query);
       const positionalMatchInfo = matchInfo.arrayFilters;
       const userArrayFilters = options && options.arrayFilters;
       await this.updateIndexesOnDelete(doc);
       applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-      await this.documents.add(doc._id.toString(), doc);
+      this.documents.add(doc._id.toString(), doc);
       await this.updateIndexesOnInsert(doc);
       const updateDescription = this._getUpdateDescription(originalDoc, doc);
       this.emit("update", doc, updateDescription);
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.documents.add(newDoc._id.toString(), newDoc);
+        this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit("insert", newDoc);
       }
     }
   }
   async updateMany(query, updates, options) {
-    const c = await this.find(query);
-    if (c.hasNext()) {
-      while (c.hasNext()) {
-        const doc = c.next();
+    const c = this.find(query);
+    await c._ensureInitialized();
+    if (await c.hasNext()) {
+      while (await c.hasNext()) {
+        const doc = await c.next();
         const originalDoc = JSON.parse(JSON.stringify(doc));
         const matchInfo = matchWithArrayIndices(doc, query);
         const positionalMatchInfo = matchInfo.arrayFilters;
         const userArrayFilters = options && options.arrayFilters;
         await this.updateIndexesOnDelete(doc);
         applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
-        await this.documents.add(doc._id.toString(), doc);
+        this.documents.add(doc._id.toString(), doc);
         await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit("update", doc, updateDescription);
@@ -8980,7 +9083,7 @@ class Collection extends eventsExports.EventEmitter {
     } else {
       if (options && options.upsert) {
         const newDoc = createDocFromUpdate(query, updates, new ObjectId());
-        await this.documents.add(newDoc._id.toString(), newDoc);
+        this.documents.add(newDoc._id.toString(), newDoc);
         await this.updateIndexesOnInsert(newDoc);
         this.emit("insert", newDoc);
       }
@@ -9073,7 +9176,7 @@ function applyProjectionWithExpressions(projection, doc) {
 class DB {
   constructor(options) {
     this.options = options || {};
-    this.baseFolder = this.options.baseFolder || "/micro-mongo";
+    this.baseFolder = this.options.baseFolder || "micro-mongo";
     this.dbName = this.options.dbName || "default";
     this.dbFolder = `${this.baseFolder}/${this.dbName}`;
     this.collections = /* @__PURE__ */ new Map();
