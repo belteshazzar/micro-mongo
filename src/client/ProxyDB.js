@@ -35,7 +35,7 @@ export class ProxyDB {
           if (prop === 'createCollection') {
             return (...args) => {
               const collName = args[0];
-              target.collection(collName); // Register synchronously
+              target.collection(collName, receiver); // Pass proxy receiver
               return target._call(String(prop), args); // Still send to worker
             };
           }
@@ -56,24 +56,25 @@ export class ProxyDB {
         }
 
         // Dynamic collection access
-        return target.collection(prop);
+        return target.collection(prop, receiver); // Pass proxy receiver
       }
     });
   }
 
-  collection(name) {
+  collection(name, dbProxy) {
     if (this.collections.has(name)) return this.collections.get(name);
     const col = new ProxyCollection({
       dbName: this.dbName,
       name,
-      bridge: this.bridge
+      bridge: this.bridge,
+      db: dbProxy || this // Pass DB proxy if available, otherwise this
     });
     this.collections.set(name, col);
     return col;
   }
 
   getCollectionNames() {
-    // Return collection names synchronously from local cache
+    // Return collection names from local cache
     return Array.from(this.collections.keys());
   }
 

@@ -1565,6 +1565,8 @@ export class Collection extends EventEmitter {
   }
 
   async copyTo(destCollectionName) {
+    // Create the destination collection explicitly to ensure it's registered
+    this.db.createCollection(destCollectionName);
     const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
     const c = this.find({});
