@@ -55,6 +55,7 @@ export class ProxyCursor {
   }
 
   async hasNext() {
+    if (this._closed) return false;
     await this._ensureInitialized();
     if (this.buffer.length > 0) return true;
     if (this.exhausted) return false;
@@ -129,7 +130,7 @@ export class ProxyCursor {
     return this;
   }
 
-  async explain(verbosity = 'queryPlanner') {
+  explain(verbosity = 'queryPlanner') {
     // Return a basic explanation without sending to worker
     // Since we already have the cursor initialized, we can provide basic info
     const result = {
@@ -173,11 +174,13 @@ export class ProxyCursor {
 
   min(spec) {
     this._min = spec;
+    this._minIndexBounds = spec;
     return this;
   }
 
   max(spec) {
     this._max = spec;
+    this._maxIndexBounds = spec;
     return this;
   }
 
