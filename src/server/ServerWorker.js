@@ -1,4 +1,53 @@
 import { Server } from './Server.js';
+import { ObjectId } from 'bjson';
+
+/**
+ * Serialize ObjectId and Date instances for worker communication
+ */
+function serializePayload(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (obj instanceof ObjectId) {
+    return { __objectId: obj.toString() };
+  }
+  if (obj instanceof Date) {
+    return { __date: obj.toISOString() };
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(serializePayload);
+  }
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
+/**
+ * Deserialize ObjectId and Date instances from worker communication
+ */
+function deserializePayload(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'object' && obj.__objectId) {
+    return new ObjectId(obj.__objectId);
+  }
+  if (typeof obj === 'object' && obj.__date) {
+    return new Date(obj.__date);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(deserializePayload);
+  }
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = deserializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
 
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 let server;
@@ -61,11 +110,13 @@ async function handleMessage(message, post) {
   }
   
   const { id, payload } = message;
+  const deserializedPayload = deserializePayload(payload);
   const srv = createServer(post);
 
   try {
-    const result = await srv.dispatch(payload);
-    post({ type: 'response', id, success: true, result });
+    const result = await srv.dispatch(deserializedPayload);
+    const serializedResult = serializePayload(result);
+    post({ type: 'response', id, success: true, result: serializedResult });
   } catch (error) {
     post({
       type: 'response',
@@ -74,7 +125,9 @@ async function handleMessage(message, post) {
       error: {
         name: error?.name,
         message: error?.message,
-        stack: error?.stack
+        stack: error?.stack,
+        code: error?.code,
+        $err: error?.$err
       }
     });
   }

@@ -85,15 +85,15 @@ export class DB {
     const pathParts = this.dbFolder.split('/').filter(Boolean);
     const dbFolder = pathParts.pop();
 
-    let dir = await globalThis.navigator.storage.getDirectory();
-    for (const part of pathParts) {
-      dir = await dir.getDirectoryHandle(part, { create: false });
-    }
-    
     try {
+      let dir = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dir = await dir.getDirectoryHandle(part, { create: false });
+      }
+      
       await dir.removeEntry(dbFolder, { recursive: true });
     } catch (error) {
-      // Ignore not found errors
+      // Ignore not found errors - directory might not exist yet
       if (error.name !== 'NotFoundError' && error.code !== 'ENOENT') {
         throw error;
       }

@@ -9061,11 +9061,11 @@ class DB {
     this.collections.clear();
     const pathParts = this.dbFolder.split("/").filter(Boolean);
     const dbFolder = pathParts.pop();
-    let dir = await globalThis.navigator.storage.getDirectory();
-    for (const part of pathParts) {
-      dir = await dir.getDirectoryHandle(part, { create: false });
-    }
     try {
+      let dir = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts) {
+        dir = await dir.getDirectoryHandle(part, { create: false });
+      }
       await dir.removeEntry(dbFolder, { recursive: true });
     } catch (error) {
       if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
@@ -9227,7 +9227,7 @@ class Server {
     this.streamCounter = 1;
   }
   async dispatch(request) {
-    const { target, database, collection, method, args = [], cursorId, streamId } = request;
+    const { target, database, collection, method, args = [], cursorId, streamId, cursorOpts } = request;
     if (target === "cursor") {
       return await this._cursorOp(cursorId, method, args);
     }
@@ -9246,7 +9246,7 @@ class Server {
         throw new Error("Collection name required for collection target");
       }
       const col = db.collection(collection);
-      return await this._call(col, method, args);
+      return await this._call(col, method, args, cursorOpts);
     }
     throw new Error(`Unknown target: ${target}`);
   }
@@ -9256,14 +9256,14 @@ class Server {
     this.databases.set(dbName, db);
     return db;
   }
-  async _call(target, method, args) {
+  async _call(target, method, args, cursorOpts) {
     if (typeof target[method] !== "function") {
       throw new Error(`Method ${method} not found on target`);
     }
     const result = target[method](...args || []);
     const awaited = result && typeof result.then === "function" ? await result : result;
     if (awaited && typeof awaited.hasNext === "function" && typeof awaited.next === "function") {
-      return await this._registerCursor(awaited, args?.[0]);
+      return await this._registerCursor(awaited, cursorOpts);
     }
     if (method === "aggregate" && Array.isArray(awaited)) {
       return await this._registerArrayAsCursor(awaited);
@@ -9273,7 +9273,19 @@ class Server {
     }
     return awaited;
   }
-  async _registerCursor(cursor) {
+  async _registerCursor(cursor, cursorOpts = {}) {
+    if (cursorOpts.sort) cursor = cursor.sort(cursorOpts.sort);
+    if (cursorOpts.skip) cursor = await cursor.skip(cursorOpts.skip);
+    if (cursorOpts.limit) cursor = await cursor.limit(cursorOpts.limit);
+    if (cursorOpts.min && cursor.min) cursor = cursor.min(cursorOpts.min);
+    if (cursorOpts.max && cursor.max) cursor = cursor.max(cursorOpts.max);
+    if (cursorOpts.hint && cursor.hint) cursor = cursor.hint(cursorOpts.hint);
+    if (cursorOpts.comment && cursor.comment) cursor = cursor.comment(cursorOpts.comment);
+    if (cursorOpts.maxTimeMS && cursor.maxTimeMS) cursor = cursor.maxTimeMS(cursorOpts.maxTimeMS);
+    if (cursorOpts.maxScan && cursor.maxScan) cursor = cursor.maxScan(cursorOpts.maxScan);
+    if (cursorOpts.returnKey && cursor.returnKey) cursor = cursor.returnKey(cursorOpts.returnKey);
+    if (cursorOpts.showRecordId && cursor.showRecordId) cursor = cursor.showRecordId(cursorOpts.showRecordId);
+    if (cursorOpts.collation && cursor.collation) cursor = cursor.collation(cursorOpts.collation);
     const id = `cur_${this.cursorCounter++}`;
     const batchSize = this.options.batchSize || 100;
     const batch = [];
@@ -9380,6 +9392,46 @@ class Server {
     throw new Error(`Unknown change stream method: ${method}`);
   }
 }
+function serializePayload(obj) {
+  if (obj === null || obj === void 0) return obj;
+  if (obj instanceof ObjectId) {
+    return { __objectId: obj.toString() };
+  }
+  if (obj instanceof Date) {
+    return { __date: obj.toISOString() };
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(serializePayload);
+  }
+  if (typeof obj === "object") {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
+function deserializePayload(obj) {
+  if (obj === null || obj === void 0) return obj;
+  if (typeof obj === "object" && obj.__objectId) {
+    return new ObjectId(obj.__objectId);
+  }
+  if (typeof obj === "object" && obj.__date) {
+    return new Date(obj.__date);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(deserializePayload);
+  }
+  if (typeof obj === "object") {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = deserializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
 const isNode = typeof process !== "undefined" && !!process.versions?.node;
 let server;
 let initPromise = null;
@@ -9425,10 +9477,12 @@ async function handleMessage(message, post) {
     await initPromise;
   }
   const { id, payload } = message;
+  const deserializedPayload = deserializePayload(payload);
   const srv = createServer(post);
   try {
-    const result = await srv.dispatch(payload);
-    post({ type: "response", id, success: true, result });
+    const result = await srv.dispatch(deserializedPayload);
+    const serializedResult = serializePayload(result);
+    post({ type: "response", id, success: true, result: serializedResult });
   } catch (error) {
     post({
       type: "response",
@@ -9437,7 +9491,9 @@ async function handleMessage(message, post) {
       error: {
         name: error?.name,
         message: error?.message,
-        stack: error?.stack
+        stack: error?.stack,
+        code: error?.code,
+        $err: error?.$err
       }
     });
   }

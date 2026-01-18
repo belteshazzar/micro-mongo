@@ -17,7 +17,7 @@ export class Server {
   }
 
   async dispatch(request) {
-    const { target, database, collection, method, args = [], cursorId, streamId } = request;
+    const { target, database, collection, method, args = [], cursorId, streamId, cursorOpts } = request;
     if (target === 'cursor') {
       return await this._cursorOp(cursorId, method, args);
     }
@@ -40,7 +40,7 @@ export class Server {
         throw new Error('Collection name required for collection target');
       }
       const col = db.collection(collection);
-      return await this._call(col, method, args);
+      return await this._call(col, method, args, cursorOpts);
     }
 
     throw new Error(`Unknown target: ${target}`);
@@ -53,7 +53,7 @@ export class Server {
     return db;
   }
 
-  async _call(target, method, args) {
+  async _call(target, method, args, cursorOpts) {
     if (typeof target[method] !== 'function') {
       throw new Error(`Method ${method} not found on target`);
     }
@@ -62,7 +62,7 @@ export class Server {
 
     // Handle cursors (find/aggregate) by registering and returning first batch
     if (awaited && typeof awaited.hasNext === 'function' && typeof awaited.next === 'function') {
-      return await this._registerCursor(awaited, args?.[0]);
+      return await this._registerCursor(awaited, cursorOpts);
     }
 
     // For aggregate(), wrap the array results in a cursor-like object
@@ -78,7 +78,22 @@ export class Server {
     return awaited;
   }
 
-  async _registerCursor(cursor) {
+  async _registerCursor(cursor, cursorOpts = {}) {
+    // Apply cursor modifiers before fetching results
+    // Note: some modifiers like sort() return a new cursor instance
+    if (cursorOpts.sort) cursor = cursor.sort(cursorOpts.sort);
+    if (cursorOpts.skip) cursor = await cursor.skip(cursorOpts.skip);
+    if (cursorOpts.limit) cursor = await cursor.limit(cursorOpts.limit);
+    if (cursorOpts.min && cursor.min) cursor = cursor.min(cursorOpts.min);
+    if (cursorOpts.max && cursor.max) cursor = cursor.max(cursorOpts.max);
+    if (cursorOpts.hint && cursor.hint) cursor = cursor.hint(cursorOpts.hint);
+    if (cursorOpts.comment && cursor.comment) cursor = cursor.comment(cursorOpts.comment);
+    if (cursorOpts.maxTimeMS && cursor.maxTimeMS) cursor = cursor.maxTimeMS(cursorOpts.maxTimeMS);
+    if (cursorOpts.maxScan && cursor.maxScan) cursor = cursor.maxScan(cursorOpts.maxScan);
+    if (cursorOpts.returnKey && cursor.returnKey) cursor = cursor.returnKey(cursorOpts.returnKey);
+    if (cursorOpts.showRecordId && cursor.showRecordId) cursor = cursor.showRecordId(cursorOpts.showRecordId);
+    if (cursorOpts.collation && cursor.collation) cursor = cursor.collation(cursorOpts.collation);
+    
     const id = `cur_${this.cursorCounter++}`;
     const batchSize = this.options.batchSize || 100;
     const batch = [];
