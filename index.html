@@ -90,7 +90,7 @@
   </div>
 
   <script type="module">
-    import { MongoClient, ObjectId, WorkerBridge } from './build/micro-mongo-2.0.0.js';
+    import { MongoClient, ObjectId, WorkerBridge } from './build/micro-mongo-client.min.js';
 
     window.MongoClient = MongoClient;
     window.ObjectId = ObjectId;
@@ -139,7 +139,7 @@
         log('✓ Inserted 3 documents', 'success');
         
         // Find all
-        const users = await (await db.users.find({})).toArray();
+        const users = await db.users.find({}).toArray();
         logObject('All users', users);
         
         // Update
@@ -227,22 +227,22 @@
         log('✓ Inserted 5 products', 'success');
         
         // Test $gt
-        const expensive = await (await db.products.find({ price: { $gt: 100 } })).toArray();
+        const expensive = await db.products.find({ price: { $gt: 100 } }).toArray();
         logObject('Products > $100', expensive);
         
         // Test $in
-        const electronics = await (await db.products.find({ 
+        const electronics = await db.products.find({ 
           category: { $in: ['electronics'] } 
-        })).toArray();
+        }).toArray();
         logObject('Electronics', electronics);
         
         // Test $and
-        const result = await (await db.products.find({ 
+        const result = await db.products.find({ 
           $and: [
             { price: { $gte: 50 } },
             { price: { $lte: 200 } }
           ]
-        })).toArray();
+        }).toArray();
         logObject('Price between $50 and $200', result);
         
         log('✓ Query tests passed', 'success');
@@ -276,7 +276,7 @@
         log('✓ Inserted 4 orders', 'success');
         
         // Test $group aggregation
-        const aggregatePromise = db.orders.aggregate([
+        const aggregateCursor = db.orders.aggregate([
           { $match: { status: 'completed' } },
           { 
             $group: { 
@@ -287,7 +287,6 @@
           },
           { $sort: { totalAmount: -1 } }
         ]);
-        const aggregateCursor = await aggregatePromise;
         const result = await aggregateCursor.toArray();
         
         logObject('Customer totals', result);

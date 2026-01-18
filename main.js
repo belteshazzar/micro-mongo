@@ -3,10 +3,10 @@
  */
 
 // Export classes
-export { MongoClient } from './src/MongoClient.js';
+export { MongoClient } from './src/client/MongoClient.js';
 export { ObjectId } from 'bjson';
-export { ChangeStream } from './src/ChangeStream.js';
-export { WorkerBridge } from './src/WorkerBridge.js';
+export { ChangeStream } from './src/server/ChangeStream.js';
+export { WorkerBridge } from './src/client/WorkerBridge.js';
 
 // Export error classes and codes
 export { 

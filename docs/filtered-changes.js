@@ -27,97 +27,112 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient } from '../main.js';
+import { MongoClient, WorkerBridge } from '../main.js';
 
 async function filteredExample() {
   console.log('=== Filtered Change Stream Example ===\n');
 
-  const client = new MongoClient();
-  await client.connect();
-  const db = client.db('example');
-  const collection = db.collection('users');
+  // Create and connect the worker bridge first
+  const bridge = await WorkerBridge.create();
 
-  // Example 1: Filter by operation type
-  console.log('Example 1: Only watch for INSERT operations\n');
-  const insertStream = collection.watch([
-    { $match: { operationType: 'insert' } }
-  ]);
+  try {
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
+    const db = client.db('example');
+    const collection = db.collection('users');
 
-  insertStream.on('change', (change) => {
-    console.log('New user inserted:', change.fullDocument.name);
-  });
+    // Example 1: Filter by operation type
+    console.log('Example 1: Only watch for INSERT operations\n');
+    const insertStream = collection.watch([
+      { $match: { operationType: 'insert' } }
+    ]);
 
-  await collection.insertOne({ name: 'Alice' });
-  await collection.insertOne({ name: 'Bob' });
-  await collection.updateOne({ name: 'Alice' }, { $set: { age: 30 } }); // Won't be seen
-  await collection.deleteOne({ name: 'Bob' }); // Won't be seen
+    insertStream.on('change', (change) => {
+      const name = change.fullDocument?.name ?? '(unknown)';
+      console.log('New user inserted:', name);
+    });
 
-  await new Promise(resolve => setTimeout(resolve, 100));
-  insertStream.close();
+    await collection.insertOne({ name: 'Alice' });
+    await collection.insertOne({ name: 'Bob' });
+    await collection.updateOne({ name: 'Alice' }, { $set: { age: 30 } }); // Won't be seen
+    await collection.deleteOne({ name: 'Bob' }); // Won't be seen
 
-  // Example 2: Filter by document fields
-  console.log('\nExample 2: Only watch for users with age >= 30\n');
-  const ageStream = collection.watch([
-    { $match: { 'fullDocument.age': { $gte: 30 } } }
-  ]);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    insertStream.close();
 
-  ageStream.on('change', (change) => {
-    console.log('Mature user detected:', change.fullDocument.name, '- age:', change.fullDocument.age);
-  });
+    // Example 2: Filter by document fields
+    console.log('\nExample 2: Only watch for users with age >= 30\n');
+    const ageStream = collection.watch([
+      { $match: { 'fullDocument.age': { $gte: 30 } } }
+    ]);
 
-  await collection.insertOne({ name: 'Charlie', age: 35 });
-  await collection.insertOne({ name: 'David', age: 25 }); // Won't be seen
-  await collection.insertOne({ name: 'Eve', age: 40 });
+    ageStream.on('change', (change) => {
+      const doc = change.fullDocument || {};
+      console.log('Mature user detected:', doc.name, '- age:', doc.age);
+    });
 
-  await new Promise(resolve => setTimeout(resolve, 100));
-  ageStream.close();
+    await collection.insertOne({ name: 'Charlie', age: 35 });
+    await collection.insertOne({ name: 'David', age: 25 }); // Won't be seen
+    await collection.insertOne({ name: 'Eve', age: 40 });
 
-  // Example 3: Filter updates to specific fields
-  console.log('\nExample 3: Only watch for status changes\n');
-  const statusStream = collection.watch([
-    { 
-      $match: { 
-        operationType: 'update',
-        'updateDescription.updatedFields.status': { $exists: true }
-      } 
-    }
-  ]);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    ageStream.close();
 
-  statusStream.on('change', (change) => {
-    console.log('Status changed for user:', change.documentKey._id);
-    console.log('New status:', change.updateDescription.updatedFields.status);
-  });
+    // Example 3: Filter updates to specific fields
+    console.log('\nExample 3: Only watch for status changes\n');
+    const statusStream = collection.watch([
+      { 
+        $match: { 
+          operationType: 'update',
+          'updateDescription.updatedFields.status': { $exists: true }
+        } 
+      }
+    ]);
 
-  await collection.insertOne({ _id: 1, name: 'Frank', status: 'active' });
-  await collection.updateOne({ _id: 1 }, { $set: { age: 30 } }); // Won't be seen
-  await collection.updateOne({ _id: 1 }, { $set: { status: 'inactive' } }); // Will be seen
+    statusStream.on('change', (change) => {
+      console.log('Status changed for user:', change.documentKey._id);
+      console.log('New status:', change.updateDescription.updatedFields.status);
+    });
 
-  await new Promise(resolve => setTimeout(resolve, 100));
-  statusStream.close();
+    await collection.insertOne({ _id: 1, name: 'Frank', status: 'active' });
+    await collection.updateOne({ _id: 1 }, { $set: { age: 30 } }); // Won't be seen
+    await collection.updateOne({ _id: 1 }, { $set: { status: 'inactive' } }); // Will be seen
 
-  // Example 4: Complex filter
-  console.log('\nExample 4: Watch for active users being updated\n');
-  const complexStream = collection.watch([
-    { 
-      $match: { 
-        operationType: { $in: ['insert', 'update'] },
-        'fullDocument.status': 'active'
-      } 
-    }
-  ]);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    statusStream.close();
 
-  complexStream.on('change', (change) => {
-    console.log(`Active user ${change.operationType}:`, change.fullDocument.name);
-  });
+    // Example 4: Complex filter
+    console.log('\nExample 4: Watch for active users being updated\n');
+    const complexStream = collection.watch([
+      { 
+        $match: { 
+          operationType: { $in: ['insert', 'update'] },
+          'fullDocument.status': 'active'
+        } 
+      }
+    ]);
 
-  await collection.insertOne({ name: 'Grace', status: 'active' }); // Will be seen
-  await collection.insertOne({ name: 'Henry', status: 'inactive' }); // Won't be seen
-  await collection.updateOne({ name: 'Grace' }, { $set: { age: 28, status: 'active' } }); // Will be seen
+    complexStream.on('change', (change) => {
+      const name = change.fullDocument?.name ?? '(unknown)';
+      console.log(`Active user ${change.operationType}:`, name);
+    });
 
-  await new Promise(resolve => setTimeout(resolve, 100));
-  complexStream.close();
+    await collection.insertOne({ name: 'Grace', status: 'active' }); // Will be seen
+    await collection.insertOne({ name: 'Henry', status: 'inactive' }); // Won't be seen
+    await collection.updateOne({ name: 'Grace' }, { $set: { age: 28, status: 'active' } }); // Will be seen
 
-  console.log('\n=== Example Complete ===\n');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    complexStream.close();
+
+    console.log('\n=== Example Complete ===\n');
+  } finally {
+    await bridge.terminate();
+  }
 }
 
-filteredExample().catch(console.error);
+filteredExample()
+  .catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  })
+  .finally(() => process.exit(0));

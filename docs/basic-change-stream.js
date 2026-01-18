@@ -27,76 +27,87 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient } from '../main.js';
+import { MongoClient, WorkerBridge } from '../main.js';
 
 async function basicExample() {
   console.log('=== Basic Change Stream Example ===\n');
 
-  // Create client and connect
-  const client = new MongoClient();
-  await client.connect();
-  const db = client.db('example');
-  const collection = db.collection('users');
+  // Create and connect the worker bridge first
+  const bridge = await WorkerBridge.create();
 
-  // Create a change stream
-  const changeStream = collection.watch();
+  try {
+    // Create client with the worker bridge
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    const db = client.db('example');
+    const collection = db.collection('users');
 
-  // Listen for changes
-  changeStream.on('change', (change) => {
-    console.log('\n--- Change Detected ---');
-    console.log('Operation:', change.operationType);
-    console.log('Collection:', change.ns.coll);
-    
-    switch (change.operationType) {
-      case 'insert':
-        console.log('Inserted document:', change.fullDocument);
-        break;
-      case 'update':
-        console.log('Document ID:', change.documentKey._id);
-        console.log('Updated fields:', change.updateDescription.updatedFields);
-        console.log('Removed fields:', change.updateDescription.removedFields);
-        break;
-      case 'replace':
-        console.log('Replaced with:', change.fullDocument);
-        break;
-      case 'delete':
-        console.log('Deleted document ID:', change.documentKey._id);
-        break;
-    }
-  });
+    // Create a change stream
+    const changeStream = collection.watch();
 
-  changeStream.on('close', () => {
-    console.log('\n--- Change Stream Closed ---');
-  });
+    // Listen for changes
+    changeStream.on('change', (change) => {
+      console.log('\n--- Change Detected ---');
+      console.log('Operation:', change.operationType);
+      console.log('Collection:', change.ns.coll);
+      
+      switch (change.operationType) {
+        case 'insert':
+          console.log('Inserted document:', change.fullDocument);
+          break;
+        case 'update':
+          console.log('Document ID:', change.documentKey._id);
+          console.log('Updated fields:', change.updateDescription.updatedFields);
+          console.log('Removed fields:', change.updateDescription.removedFields);
+          break;
+        case 'replace':
+          console.log('Replaced with:', change.fullDocument);
+          break;
+        case 'delete':
+          console.log('Deleted document ID:', change.documentKey._id);
+          break;
+      }
+    });
 
-  // Perform various operations
-  console.log('\n1. Inserting documents...');
-  await collection.insertOne({ _id: 1, name: 'Alice', age: 30, city: 'NYC' });
-  await collection.insertOne({ _id: 2, name: 'Bob', age: 25, city: 'SF' });
+    changeStream.on('close', () => {
+      console.log('\n--- Change Stream Closed ---');
+    });
 
-  // Wait for events to propagate
-  await new Promise(resolve => setTimeout(resolve, 100));
+    // Perform various operations
+    console.log('\n1. Inserting documents...');
+    await collection.insertOne({ _id: 1, name: 'Alice', age: 30, city: 'NYC' });
+    await collection.insertOne({ _id: 2, name: 'Bob', age: 25, city: 'SF' });
 
-  console.log('\n2. Updating a document...');
-  await collection.updateOne({ _id: 1 }, { $set: { age: 31, status: 'active' } });
+    // Wait for events to propagate
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  await new Promise(resolve => setTimeout(resolve, 100));
+    console.log('\n2. Updating a document...');
+    await collection.updateOne({ _id: 1 }, { $set: { age: 31, status: 'active' } });
 
-  console.log('\n3. Replacing a document...');
-  await collection.replaceOne({ _id: 2 }, { name: 'Bob Smith', age: 26 });
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  await new Promise(resolve => setTimeout(resolve, 100));
+    console.log('\n3. Replacing a document...');
+    await collection.replaceOne({ _id: 2 }, { name: 'Bob Smith', age: 26 });
 
-  console.log('\n4. Deleting a document...');
-  await collection.deleteOne({ _id: 1 });
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  await new Promise(resolve => setTimeout(resolve, 100));
+    console.log('\n4. Deleting a document...');
+    await collection.deleteOne({ _id: 1 });
 
-  // Close the change stream
-  changeStream.close();
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  console.log('\n=== Example Complete ===\n');
+    // Close the change stream
+    changeStream.close();
+
+    console.log('\n=== Example Complete ===\n');
+  } finally {
+    await bridge.terminate();
+  }
 }
 
 // Run the example
-basicExample().catch(console.error);
+basicExample()
+  .catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  })
+  .finally(() => process.exit(0));

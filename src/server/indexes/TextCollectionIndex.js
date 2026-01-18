@@ -1,7 +1,7 @@
 import { Index } from './Index.js';
 import { TextIndex } from 'bjson/textindex';
 import { BPlusTree } from 'bjson/bplustree';
-import { getProp } from './utils.js';
+import { getProp } from '../../utils.js';
 
 /**
  * Text index implementation

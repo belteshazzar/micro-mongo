@@ -1,7 +1,7 @@
 import { Collection } from './Collection.js';
 import { ObjectId } from 'bjson';
 import { ChangeStream } from './ChangeStream.js';
-import { NotImplementedError } from './errors.js';
+import { NotImplementedError } from '../errors.js';
 
 /**
  * DB class

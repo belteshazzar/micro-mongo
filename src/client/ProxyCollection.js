@@ -1,6 +1,6 @@
 import { ProxyChangeStream } from './ProxyChangeStream.js';
 import { ProxyCursor } from './ProxyCursor.js';
-import { NotImplementedError } from './errors.js';
+import { NotImplementedError } from '../errors.js';
 
 /**
  * ProxyCollection lives on the main thread and forwards operations to the worker Server.
@@ -94,11 +94,13 @@ export class ProxyCollection {
     return this.indexes;
   }
 
-  _watch() {
+  _watch(pipeline = [], options = {}) {
     return ProxyChangeStream.create({
       bridge: this.bridge,
       database: this.dbName,
-      collection: this.name
+      collection: this.name,
+      pipeline,
+      options
     });
   }
 }

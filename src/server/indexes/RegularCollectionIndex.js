@@ -1,5 +1,5 @@
 import { Index } from './Index.js';
-import { getProp } from './utils.js';
+import { getProp } from '../../utils.js';
 import { BPlusTree } from 'bjson/bplustree';
 
 /**

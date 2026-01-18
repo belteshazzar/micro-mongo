@@ -1,6 +1,6 @@
 import { Index } from './Index.js';
 import { RTree, haversineDistance } from 'bjson/rtree';
-import { getProp } from './utils.js';
+import { getProp } from '../../utils.js';
 import { ObjectId } from 'bjson';
 
 /**

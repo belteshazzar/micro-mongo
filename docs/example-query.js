@@ -2,7 +2,7 @@
  * Example usage of micro-mongo with MongoClient (similar to MongoDB driver)
  */
 
-import { MongoClient, ObjectId } from '../main.js';
+import { MongoClient, ObjectId, WorkerBridge } from '../main.js';
 import { StorageManager } from 'node-opfs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -28,8 +28,14 @@ if (typeof globalThis.navigator === 'undefined') {
 async function main() {
 
   console.time('connect');
-  // Create and connect to a client (async pattern like real MongoDB)
-  let client = await MongoClient.connect('mongodb://localhost:27017');
+  // Create and connect the worker bridge first
+  const bridge = await WorkerBridge.create();
+  
+  try {
+    // Create and connect to a client
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
+  
   // Get a database reference
   let db = client.db('myapp');
   await db.posts.createIndex({ body: "text" });
@@ -77,13 +83,20 @@ async function main() {
   console.time('queries');
   console.log((await db.posts.find({}).toArray()).length);
   console.log((await db.posts.find({ $text: { $search: "post" } }).toArray()).length);
-  console.log((await db.posts.find({ likes: { $gt: 2 } }).toArray()).length);
-  console.timeEnd('queries');
+    console.log((await db.posts.find({ likes: { $gt: 2 } }).toArray()).length);
+    console.timeEnd('queries');
 
-  await client.close();
-
+    await client.close();
+  } finally {
+    await bridge.terminate();
+  }
 }
 
 // Run the main function
-main().catch(console.error);
+main()
+  .catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  })
+  .finally(() => process.exit(0));
 

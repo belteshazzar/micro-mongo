@@ -28,14 +28,17 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient } from '../main.js';
+import { MongoClient, WorkerBridge } from '../main.js';
 
 async function quickStart() {
   console.log('🚀 Change Streams Quick Start\n');
 
-  // Setup
-  const client = new MongoClient();
-  await client.connect();
+  // Create and connect the worker bridge first
+  const bridge = await WorkerBridge.create();
+
+  try {
+    // Setup
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
   const db = client.db('quickstart');
   const collection = db.collection('todos');
 
@@ -81,6 +84,14 @@ async function quickStart() {
   // Cleanup
   console.log('\n✨ Done! Closing change stream...\n');
   changeStream.close();
+  } finally {
+    await bridge.terminate();
+  }
 }
 
-quickStart().catch(console.error);
+quickStart()
+  .catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  })
+  .finally(() => process.exit(0));

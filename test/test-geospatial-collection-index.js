@@ -2,7 +2,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { expect } from 'chai';
 import { StorageManager } from 'node-opfs';
-import { GeospatialIndex } from '../src/GeospatialIndex.js';
+import { GeospatialIndex } from '../src/server/indexes/GeospatialIndex.js';
 import { ObjectId } from 'bjson';
 
 // Set up OPFS shim for bjson/rtree in Node

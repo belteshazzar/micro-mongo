@@ -5,7 +5,7 @@
  * $project, $addFields, $set, $group, and other pipeline stages.
  */
 
-import { getProp } from './utils.js';
+import { getProp } from '../utils.js';
 
 /**
  * Evaluate an aggregation expression against a document

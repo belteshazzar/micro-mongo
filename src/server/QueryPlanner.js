@@ -1,5 +1,5 @@
-import { TextCollectionIndex } from './TextCollectionIndex.js';
-import { GeospatialIndex } from './GeospatialIndex.js';
+import { TextCollectionIndex } from './indexes/TextCollectionIndex.js';
+import { GeospatialIndex } from './indexes/GeospatialIndex.js';
 
 /**
  * Query execution plan

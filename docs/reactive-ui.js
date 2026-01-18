@@ -30,7 +30,7 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient } from '../main.js';
+import { MongoClient, WorkerBridge } from '../main.js';
 
 // ==========================================
 // React Pattern
@@ -260,20 +260,25 @@ class ReactiveCollection {
 
 // Usage example:
 async function vanillaExample() {
-  const client = new MongoClient();
-  await client.connect();
-  const collection = client.db('app').collection('users');
+  const bridge = await WorkerBridge.create();
+  try {
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
+    const collection = client.db('app').collection('users');
 
-  const reactive = await new ReactiveCollection(collection).initialize();
+    const reactive = await new ReactiveCollection(collection).initialize();
 
-  const unsubscribe = reactive.subscribe((users) => {
-    console.log('Users updated:', users);
-    updateUI(users);
-  });
+    const unsubscribe = reactive.subscribe((users) => {
+      console.log('Users updated:', users);
+      updateUI(users);
+    });
 
-  // Later...
-  // unsubscribe();
-  // reactive.close();
+    // Later...
+    // unsubscribe();
+    // reactive.close();
+  } finally {
+    await bridge.terminate();
+  }
 }
 
 function updateUI(users) {
@@ -293,10 +298,12 @@ function updateUI(users) {
 async function dashboardExample() {
   console.log('=== Reactive Dashboard Example ===\n');
 
-  const client = new MongoClient();
-  await client.connect();
-  const db = client.db('dashboard');
-  const metrics = db.collection('metrics');
+  const bridge = await WorkerBridge.create();
+  try {
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
+    const db = client.db('dashboard');
+    const metrics = db.collection('metrics');
 
   // Dashboard state
   let stats = {
@@ -330,9 +337,12 @@ async function dashboardExample() {
   await metrics.updateOne({}, { $inc: { userCount: 10, revenue: 100 } });
   await new Promise(resolve => setTimeout(resolve, 50));
 
-  changeStream.close();
-  console.log('\nFinal stats:', stats);
-  console.log('\n=== Example Complete ===\n');
+    changeStream.close();
+    console.log('\nFinal stats:', stats);
+    console.log('\n=== Example Complete ===\n');
+  } finally {
+    await bridge.terminate();
+  }
 }
 
 // ==========================================
@@ -342,15 +352,17 @@ async function dashboardExample() {
 async function collaborativeExample() {
   console.log('=== Collaborative Editing Example ===\n');
 
-  const client = new MongoClient();
-  await client.connect();
-  const db = client.db('collab');
-  const documents = db.collection('documents');
+  const bridge = await WorkerBridge.create();
+  try {
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
+    const db = client.db('collab');
+    const documents = db.collection('documents');
 
-  // Simulate multiple users editing the same document
-  const changeStream = documents.watch([
-    { $match: { 'fullDocument.docId': 'doc-123' } }
-  ]);
+    // Simulate multiple users editing the same document
+    const changeStream = documents.watch([
+      { $match: { 'fullDocument.docId': 'doc-123' } }
+    ]);
 
   changeStream.on('change', (change) => {
     if (change.operationType === 'update') {
@@ -385,6 +397,9 @@ async function collaborativeExample() {
 
   changeStream.close();
   console.log('\n=== Example Complete ===\n');
+  } finally {
+    await bridge.terminate();
+  }
 }
 
 // Export for use in different contexts

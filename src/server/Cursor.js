@@ -1,5 +1,5 @@
-import { applyProjection } from './utils.js';
-import { NotImplementedError, QueryError, ErrorCodes } from './errors.js';
+import { applyProjection } from '../utils.js';
+import { NotImplementedError, QueryError, ErrorCodes } from '../errors.js';
 
 /**
  * Cursor class for iterating over query results

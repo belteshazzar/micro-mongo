@@ -11,7 +11,7 @@ export default defineConfig({
       entry: resolve(__dirname, 'main.js'),
       name: 'MicroMongo',
       formats: ['es', 'umd'],
-      fileName: (format) => `micro-mongo-${pkg.version}.${format === 'es' ? 'js' : format + '.js'}`
+      fileName: (format) => format === 'es' ? 'micro-mongo-client.js' : 'micro-mongo-server.umd.js'
     },
     outDir: 'build',
     sourcemap: true,

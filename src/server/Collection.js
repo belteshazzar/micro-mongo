@@ -1,12 +1,12 @@
 import { EventEmitter } from 'events';
 import { Cursor } from './Cursor.js';
 import { SortedCursor } from './SortedCursor.js';
-import { isArray, getProp, applyProjection, copy } from './utils.js';
+import { isArray, getProp, applyProjection, copy } from '../utils.js';
 import { matches, matchWithArrayIndices } from './queryMatcher.js';
 import { applyUpdates, createDocFromUpdate } from './updates.js';
-import { RegularCollectionIndex } from './RegularCollectionIndex.js';
-import { TextCollectionIndex } from './TextCollectionIndex.js';
-import { GeospatialIndex } from './GeospatialIndex.js';
+import { RegularCollectionIndex } from './indexes/RegularCollectionIndex.js';
+import { TextCollectionIndex } from './indexes/TextCollectionIndex.js';
+import { GeospatialIndex } from './indexes/GeospatialIndex.js';
 import { QueryPlanner } from './QueryPlanner.js';
 import { evaluateExpression } from './aggregationExpressions.js';
 import { ChangeStream } from './ChangeStream.js';
@@ -17,7 +17,7 @@ import {
   IndexError,
   IndexNotFoundError,
   ErrorCodes
-} from './errors.js';
+} from '../errors.js';
 import { ObjectId } from 'bjson';
 import { BPlusTree } from 'bjson/bplustree';
 

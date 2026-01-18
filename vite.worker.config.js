@@ -5,9 +5,9 @@ export default defineConfig({
   build: {
     emptyOutDir: false, // preserve main build output
     lib: {
-      entry: resolve(__dirname, 'src/ServerWorker.js'),
+      entry: resolve(__dirname, 'src/server/ServerWorker.js'),
       formats: ['es'],
-      fileName: () => 'server-worker.js'
+      fileName: () => 'micro-mongo-server-worker.js'
     },
     outDir: 'build',
     sourcemap: true,

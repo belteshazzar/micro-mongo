@@ -1,4 +1,4 @@
-import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from './utils.js';
+import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from '../utils.js';
 import { stemmer, tokenize } from 'bjson/textindex';
 import { ObjectId } from 'bjson';
 import { evaluateExpression } from './aggregationExpressions.js';

@@ -1,11 +1,11 @@
 import { EventEmitter } from 'events';
-import { NotImplementedError } from './errors.js';
+import { NotImplementedError } from '../errors.js';
 
 /**
  * ProxyChangeStream listens for forwarded events from the worker.
  */
 export class ProxyChangeStream extends EventEmitter {
-  static create({ bridge, database, collection, streamId }) {
+  static create({ bridge, database, collection, streamId, pipeline = [], options = {} }) {
     const stream = new ProxyChangeStream({ bridge, streamId });
     
     if (!streamId) {
@@ -15,7 +15,7 @@ export class ProxyChangeStream extends EventEmitter {
         database,
         collection,
         method: 'watch',
-        args: []
+        args: [pipeline, options]
       }).then((resp) => {
         if (resp && resp.streamId) {
           stream.streamId = resp.streamId; // Update stream with the ID

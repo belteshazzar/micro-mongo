@@ -27,174 +27,211 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient } from '../main.js';
+import { MongoClient, WorkerBridge } from '../main.js';
 
 async function multiCollectionExample() {
   console.log('=== Multi-Collection Watching Example ===\n');
 
-  const client = new MongoClient();
-  await client.connect();
-  const db = client.db('multiapp');
+  // Create and connect the worker bridge first
+  const bridge = await WorkerBridge.create();
 
-  // Example 1: Watch all collections in a database
-  console.log('Example 1: Watch all collections in a database\n');
+  try {
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
+    const db = client.db('multiapp');
 
-  const dbStream = db.watch();
-  const dbChanges = [];
+    // Example 1: Watch all collections in a database
+    console.log('Example 1: Watch all collections in a database\n');
 
-  dbStream.on('change', (change) => {
-    console.log(`[${change.ns.coll}] ${change.operationType}:`, 
-                change.fullDocument?.name || change.documentKey._id);
-    dbChanges.push(change);
-  });
+    const dbStream = await db.watch();
+    const dbChanges = [];
 
-  // Make changes to different collections
-  await db.collection('users').insertOne({ name: 'Alice' });
-  await db.collection('posts').insertOne({ name: 'First Post' });
-  await db.collection('comments').insertOne({ name: 'Great post!' });
+    dbStream.on('change', (change) => {
+      console.log(`[${change.ns.coll}] ${change.operationType}:`,
+        change.fullDocument?.name || change.documentKey._id);
+      dbChanges.push(change);
+    });
 
-  await new Promise(resolve => setTimeout(resolve, 100));
-  
-  console.log(`\nTotal changes detected: ${dbChanges.length}\n`);
-  dbStream.close();
+    // Make changes to different collections
+    await db.collection('users').insertOne({ name: 'Alice' });
+    await db.collection('posts').insertOne({ name: 'First Post' });
+    await db.collection('comments').insertOne({ name: 'Great post!' });
 
-  // Example 2: Watch all databases and collections (client level)
-  console.log('Example 2: Watch all databases\n');
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  const clientStream = client.watch();
-  const clientChanges = [];
+    console.log(`\nTotal changes detected: ${dbChanges.length}\n`);
+    dbStream.close();
 
-  clientStream.on('change', (change) => {
-    console.log(`[${change.ns.db}.${change.ns.coll}] ${change.operationType}`);
-    clientChanges.push(change);
-  });
+    // Example 2: Watch all databases via DB-level streams
+    console.log('Example 2: Watch all databases via DB-level streams\n');
 
-  // Make changes to different databases
-  await client.db('db1').collection('col1').insertOne({ x: 1 });
-  await client.db('db2').collection('col2').insertOne({ y: 2 });
-  await client.db('db3').collection('col3').insertOne({ z: 3 });
+    const db1 = client.db('db1');
+    const db2 = client.db('db2');
+    const db3 = client.db('db3');
 
-  await new Promise(resolve => setTimeout(resolve, 100));
+    const clientChanges = [];
 
-  console.log(`\nTotal changes across all databases: ${clientChanges.length}\n`);
-  clientStream.close();
+    const db1Stream = await db1.watch();
+    const db2Stream = await db2.watch();
+    const db3Stream = await db3.watch();
 
-  // Example 3: Watch multiple specific collections
-  console.log('Example 3: Watch multiple specific collections with separate streams\n');
+    const onDbChange = (change) => {
+      console.log(`[${change.ns.db}.${change.ns.coll}] ${change.operationType}`);
+      clientChanges.push(change);
+    };
 
-  const usersStream = db.collection('users').watch();
-  const postsStream = db.collection('posts').watch();
+    db1Stream.on('change', onDbChange);
+    db2Stream.on('change', onDbChange);
+    db3Stream.on('change', onDbChange);
 
-  usersStream.on('change', (change) => {
-    console.log('[Users]', change.operationType, '-', change.fullDocument?.name);
-  });
+    // Make changes to different databases
+    await db1.collection('col1').insertOne({ x: 1 });
+    await db2.collection('col2').insertOne({ y: 2 });
+    await db3.collection('col3').insertOne({ z: 3 });
 
-  postsStream.on('change', (change) => {
-    console.log('[Posts]', change.operationType, '-', change.fullDocument?.title);
-  });
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-  await db.collection('users').insertOne({ name: 'Bob' });
-  await db.collection('posts').insertOne({ title: 'Second Post' });
-  await db.collection('users').insertOne({ name: 'Charlie' });
-  await db.collection('posts').insertOne({ title: 'Third Post' });
+    console.log(`\nTotal changes across all databases: ${clientChanges.length}\n`);
+    db1Stream.close();
+    db2Stream.close();
+    db3Stream.close();
 
-  await new Promise(resolve => setTimeout(resolve, 100));
+    // Example 3: Watch multiple specific collections
+    console.log('Example 3: Watch multiple specific collections with separate streams\n');
 
-  usersStream.close();
-  postsStream.close();
+    const usersStream = db.collection('users').watch();
+    const postsStream = db.collection('posts').watch();
 
-  // Example 4: Aggregate changes from multiple collections
-  console.log('\nExample 4: Aggregate statistics from multiple collections\n');
+    usersStream.on('change', (change) => {
+      console.log('[Users]', change.operationType, '-', change.fullDocument?.name);
+    });
 
-  const stats = {
-    userInserts: 0,
-    postInserts: 0,
-    totalChanges: 0
-  };
+    postsStream.on('change', (change) => {
+      console.log('[Posts]', change.operationType, '-', change.fullDocument?.title);
+    });
 
-  const aggregateStream = db.watch();
+    await db.collection('users').insertOne({ name: 'Bob' });
+    await db.collection('posts').insertOne({ title: 'Second Post' });
+    await db.collection('users').insertOne({ name: 'Charlie' });
+    await db.collection('posts').insertOne({ title: 'Third Post' });
 
-  aggregateStream.on('change', (change) => {
-    stats.totalChanges++;
-    
-    if (change.operationType === 'insert') {
-      if (change.ns.coll === 'users') stats.userInserts++;
-      if (change.ns.coll === 'posts') stats.postInserts++;
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    usersStream.close();
+    postsStream.close();
+
+    // Example 4: Aggregate changes from multiple collections
+    console.log('\nExample 4: Aggregate statistics from multiple collections\n');
+
+    const stats = {
+      userInserts: 0,
+      postInserts: 0,
+      totalChanges: 0
+    };
+
+    const aggregateStream = await db.watch();
+
+    aggregateStream.on('change', (change) => {
+      stats.totalChanges++;
+
+      if (change.operationType === 'insert') {
+        if (change.ns.coll === 'users') stats.userInserts++;
+        if (change.ns.coll === 'posts') stats.postInserts++;
+      }
+    });
+
+    // Generate some activity
+    for (let i = 0; i < 5; i++) {
+      await db.collection('users').insertOne({ name: `User ${i}` });
+      await db.collection('posts').insertOne({ title: `Post ${i}` });
     }
-  });
 
-  // Generate some activity
-  for (let i = 0; i < 5; i++) {
-    await db.collection('users').insertOne({ name: `User ${i}` });
-    await db.collection('posts').insertOne({ title: `Post ${i}` });
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    console.log('Statistics:');
+    console.log('  User inserts:', stats.userInserts);
+    console.log('  Post inserts:', stats.postInserts);
+    console.log('  Total changes:', stats.totalChanges);
+
+    aggregateStream.close();
+
+    console.log('\n=== Example Complete ===\n');
+  } finally {
+    await bridge.terminate();
   }
-
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  console.log('Statistics:');
-  console.log('  User inserts:', stats.userInserts);
-  console.log('  Post inserts:', stats.postInserts);
-  console.log('  Total changes:', stats.totalChanges);
-
-  aggregateStream.close();
-
-  console.log('\n=== Example Complete ===\n');
 }
 
 async function crossDatabaseExample() {
   console.log('=== Cross-Database Coordination Example ===\n');
 
-  const client = new MongoClient();
-  await client.connect();
+  const bridge = await WorkerBridge.create();
 
-  // Watch for changes across all databases
-  const changeStream = client.watch();
+  try {
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
 
-  // Track activity across databases
-  const activity = new Map();
+    // Track activity across databases
+    const activity = new Map();
 
-  changeStream.on('change', (change) => {
-    const dbName = change.ns.db;
-    
-    if (!activity.has(dbName)) {
-      activity.set(dbName, { inserts: 0, updates: 0, deletes: 0 });
+    // Simulate multi-database application
+    const analytics = client.db('analytics');
+    const sales = client.db('sales');
+    const inventory = client.db('inventory');
+
+    // Watch each database via DB-level streams
+    const analyticsStream = await analytics.watch();
+    const salesStream = await sales.watch();
+    const inventoryStream = await inventory.watch();
+
+    const onChange = (change) => {
+      const dbName = change.ns.db;
+      if (!activity.has(dbName)) {
+        activity.set(dbName, { inserts: 0, updates: 0, deletes: 0 });
+      }
+      const stats = activity.get(dbName);
+      stats[change.operationType + 's'] = (stats[change.operationType + 's'] || 0) + 1;
+      console.log(`[${dbName}] ${change.operationType} in ${change.ns.coll}`);
+    };
+
+    analyticsStream.on('change', onChange);
+    salesStream.on('change', onChange);
+    inventoryStream.on('change', onChange);
+
+    await analytics.collection('events').insertOne({ event: 'page_view' });
+    await sales.collection('orders').insertOne({ amount: 100 });
+    await inventory.collection('products').insertOne({ sku: 'ABC123' });
+
+    await sales.collection('orders').updateOne({}, { $set: { status: 'shipped' } });
+    await inventory.collection('products').deleteOne({ sku: 'ABC123' });
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    console.log('\nActivity Summary:');
+    for (const [dbName, stats] of activity.entries()) {
+      console.log(`  ${dbName}:`, JSON.stringify(stats));
     }
 
-    const stats = activity.get(dbName);
-    stats[change.operationType + 's'] = (stats[change.operationType + 's'] || 0) + 1;
+    analyticsStream.close();
+    salesStream.close();
+    inventoryStream.close();
 
-    console.log(`[${dbName}] ${change.operationType} in ${change.ns.coll}`);
-  });
-
-  // Simulate multi-database application
-  const analytics = client.db('analytics');
-  const sales = client.db('sales');
-  const inventory = client.db('inventory');
-
-  await analytics.collection('events').insertOne({ event: 'page_view' });
-  await sales.collection('orders').insertOne({ amount: 100 });
-  await inventory.collection('products').insertOne({ sku: 'ABC123' });
-
-  await sales.collection('orders').updateOne({}, { $set: { status: 'shipped' } });
-  await inventory.collection('products').deleteOne({ sku: 'ABC123' });
-
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  console.log('\nActivity Summary:');
-  for (const [dbName, stats] of activity.entries()) {
-    console.log(`  ${dbName}:`, JSON.stringify(stats));
+    console.log('\n=== Example Complete ===\n');
+  } finally {
+    await bridge.terminate();
   }
-
-  changeStream.close();
-
-  console.log('\n=== Example Complete ===\n');
 }
 
 // Run examples
 if (import.meta.url === `file://${process.argv[1]}`) {
-  multiCollectionExample()
-    .then(() => crossDatabaseExample())
-    .catch(console.error);
+  (async () => {
+    try {
+      await multiCollectionExample();
+      await crossDatabaseExample();
+    } catch (err) {
+      console.error('Error:', err);
+      process.exit(1);
+    }
+  })().finally(() => process.exit(0));
 }
 
 export { multiCollectionExample, crossDatabaseExample };

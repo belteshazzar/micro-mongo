@@ -2,7 +2,7 @@
  * Update operations module
  */
 
-import { setProp, getProp, isArray } from './utils.js';
+import { setProp, getProp, isArray } from '../utils.js';
 import { opMatches, matches } from './queryMatcher.js';
 
 /**

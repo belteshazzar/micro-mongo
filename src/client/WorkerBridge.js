@@ -31,7 +31,7 @@ export class WorkerBridge extends EventEmitter {
     // Default to built worker artifact; use proper absolute path for Node worker
     let workerPath = options.workerPath;
     if (!workerPath) {
-      const buildUrl = new URL('../build/server-worker.js', import.meta.url);
+      const buildUrl = new URL('../../build/micro-mongo-server-worker.js', import.meta.url);
       workerPath = fileURLToPath(buildUrl);
     }
     const worker = new NodeWorker(workerPath, {
@@ -65,13 +65,14 @@ export class WorkerBridge extends EventEmitter {
   }
 
   /**
-   * Terminate the worker and reject pending requests.
+   * Gracefully close the worker without rejecting pending requests.
+   * Any pending requests will simply be abandoned without error messages.
    */
   async terminate() {
     this._terminating = true;
+    // Clear pending requests without rejecting them to avoid unhandled rejection warnings
     for (const [id, pending] of this._pending.entries()) {
       clearTimeout(pending.timeoutHandle);
-      pending.reject(new Error('Worker terminated'));
     }
     this._pending.clear();
     await this._terminateImpl();
@@ -132,7 +133,8 @@ class BrowserWorkerBridge extends WorkerBridge {
     }
     
     // Default to built worker artifact; allow override for custom hosting
-    const workerUrl = options.workerUrl || new URL('../build/server-worker.js', import.meta.url);
+    // Use absolute path from server root for consistent resolution in dev and prod
+    const workerUrl = options.workerUrl || '/build/micro-mongo-server-worker.js';
     const worker = new WebWorkerCtor(workerUrl, { type: 'module' });
     super(worker);
   }

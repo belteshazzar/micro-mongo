@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'mocha';
 import { expect } from 'chai';
-import { MongoClient } from '../src/MongoClient.js';
+import { MongoClient } from '../src/client/MongoClient.js';
 import { createMongoClientSetup } from './test-utils.js';
 
 describe('Change Streams', () => {

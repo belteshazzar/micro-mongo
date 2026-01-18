@@ -25,11 +25,16 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient, ObjectId } from '../main.js';
+import { MongoClient, ObjectId, WorkerBridge } from '../main.js';
 
 async function main() {
-  // Create and connect to a client (async pattern like real MongoDB)
-  const client = await MongoClient.connect('mongodb://localhost:27017');
+  // Create and connect the worker bridge first
+  const bridge = await WorkerBridge.create();
+
+  try {
+    // Create and connect to a client (pass the bridge as an option)
+    const client = new MongoClient('mongodb://localhost:27017', { workerBridge: bridge });
+    await client.connect();
 
   // Get a database reference
   const db = client.db('myapp');
@@ -65,7 +70,8 @@ async function main() {
   console.log('\nObjectId methods:');
   console.log('Hex String:', customId.toHexString());
   console.log('Timestamp:', customId.getTimestamp());
-  console.log('Equals:', customId.equals(diana._id));
+// TODO: how should this work?
+//   console.log('Equals:', customId.equals(diana._id));
 
   // Same with db.products - auto-created on first access
   await db.products.insertMany([
@@ -130,12 +136,20 @@ async function main() {
   // List all collections
   console.log('\nAll collections:', db.getCollectionNames());
 
-  // Close the connection
-  await client.close();
+    // Close the connection
+    await client.close();
 
-  console.log('\nDone!');
+    console.log('\nDone!');
+  } finally {
+    await bridge.terminate();
+  }
 }
 
 // Run the main function
-main().catch(console.error);
+main()
+  .catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  })
+  .finally(() => process.exit(0));
 

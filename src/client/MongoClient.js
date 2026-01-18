@@ -1,6 +1,4 @@
 import { EventEmitter } from 'events';
-import { DB } from './DB.js';
-import { ChangeStream } from './ChangeStream.js';
 import { ProxyDB } from './ProxyDB.js';
 
 export class MongoClient extends EventEmitter {

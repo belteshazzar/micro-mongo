@@ -1,7 +1,7 @@
 /**
  * SortedCursor class for iterating over sorted query results
  */
-import { QueryError } from './errors.js';
+import { QueryError } from '../errors.js';
 
 export class SortedCursor {
 	constructor(collection, query, cursor, sort) {

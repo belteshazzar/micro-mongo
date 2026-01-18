@@ -2,7 +2,7 @@
  * Tests for filtered positional operator $[<identifier>] with arrayFilters
  */
 
-import { DB } from '../src/DB.js';
+import { DB } from '../src/server/DB.js';
 import { expect } from 'chai';
 import { createDBSetup } from './test-utils.js';
 
