@@ -1,15 +1,16 @@
 import { ProxyChangeStream } from './ProxyChangeStream.js';
 import { ProxyCursor } from './ProxyCursor.js';
-import { NotImplementedError } from '../errors.js';
+import { NotImplementedError, QueryError, ErrorCodes } from '../errors.js';
 
 /**
  * ProxyCollection lives on the main thread and forwards operations to the worker Server.
  */
 export class ProxyCollection {
-  constructor({ dbName, name, bridge }) {
+  constructor({ dbName, name, bridge, db }) {
     this.dbName = dbName;
     this.name = name;
     this.bridge = bridge;
+    this._db = db; // Reference to ProxyDB for registering new collections
     this.indexes = []; // Track indexes locally
 
     return new Proxy(this, {
@@ -29,6 +30,11 @@ export class ProxyCollection {
   }
 
   _cursorMethod(method, args = []) {
+    // Validate projection for find() calls to catch errors early
+    if (method === 'find' && args.length >= 2) {
+      this._validateProjection(args[1]);
+    }
+    
     // Return cursor immediately - it will fetch data asynchronously with delayed execution
     const requestPayload = {
       target: 'collection',
@@ -53,6 +59,27 @@ export class ProxyCollection {
     return cursor;
   }
 
+  _validateProjection(projection) {
+    if (!projection || Object.keys(projection).length === 0) return;
+    
+    const keys = Object.keys(projection);
+    let hasInclusion = false;
+    let hasExclusion = false;
+
+    for (const key of keys) {
+      if (key === '_id') continue; // _id can appear with either style
+      if (projection[key]) hasInclusion = true; else hasExclusion = true;
+      if (hasInclusion && hasExclusion) break;
+    }
+
+    if (hasInclusion && hasExclusion) {
+      throw new QueryError("Cannot do exclusion on field in inclusion projection", {
+        code: ErrorCodes.CANNOT_DO_EXCLUSION_ON_FIELD_ID_IN_INCLUSION_PROJECTION,
+        collection: this.name
+      });
+    }
+  }
+
   _call(method, args = []) {
     const promise = this.bridge.sendRequest({
       target: 'collection',
@@ -69,6 +96,15 @@ export class ProxyCollection {
           exhausted: res.exhausted,
           batchSize: res.batchSize
         });
+      }
+      // If copyTo, register the destination collection locally
+      if (method === 'copyTo' && args.length > 0) {
+        // Access the destination collection to register it
+        // This assumes we have access to the database proxy
+        // We'll need to pass db reference to ProxyCollection
+        if (this._db) {
+          this._db.collection(args[0]);
+        }
       }
       // If createIndex, cache the index info
       if (method === 'createIndex') {
