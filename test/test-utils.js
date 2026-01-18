@@ -89,7 +89,7 @@ export function createDBSetup() {
 		},
 		
 		beforeEach: async () => {
-			const { DB } = await import('../src/DB.js');
+			const { DB } = await import('../src/server/DB.js');
 			_db = new DB();
 			return { db: _db };
 		},
@@ -153,7 +153,7 @@ export function createMongoClientFactory(dbName = 'testdb') {
  */
 export function createDBFactory() {
 	return async () => {
-		const { DB } = await import('../src/DB.js');
+		const { DB } = await import('../src/server/DB.js');
 		const db = new DB();
 		return { db };
 	};

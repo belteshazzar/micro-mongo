@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { ProxyDB } from './ProxyDB.js';
+import { ProxyChangeStream } from './ProxyChangeStream.js';
 
 export class MongoClient extends EventEmitter {
   constructor(uri = 'mongodb://localhost:27017', options = {}) {
@@ -156,10 +157,16 @@ export class MongoClient extends EventEmitter {
    * Watch for changes across all databases and collections
    * @param {Array} pipeline - Aggregation pipeline to filter changes
    * @param {Object} options - Watch options
-   * @returns {ChangeStream} A change stream instance
+   * @returns {ProxyChangeStream} A change stream instance
    */
   watch(pipeline = [], options = {}) {
-    return new ChangeStream(this, pipeline, options);
+    return ProxyChangeStream.create({
+      bridge: this._bridge,
+      database: null, // null means watch all databases
+      collection: null,
+      pipeline,
+      options
+    });
   }
 
   _parseDefaultDbName(uri) {

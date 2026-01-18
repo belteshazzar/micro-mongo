@@ -29,18 +29,18 @@ export class ProxyCollection {
   }
 
   _cursorMethod(method, args = []) {
-    // Return cursor immediately - it will fetch data asynchronously
-    const requestPromise = this.bridge.sendRequest({
+    // Return cursor immediately - it will fetch data asynchronously with delayed execution
+    const requestPayload = {
       target: 'collection',
       database: this.dbName,
       collection: this.name,
       method,
       args
-    });
+    };
 
     const cursor = new ProxyCursor({
       bridge: this.bridge,
-      requestPromise
+      requestPayload
     });
 
     // For aggregate, also make the cursor thenable so await works like in older API
@@ -78,11 +78,22 @@ export class ProxyCollection {
           .map(([k, v]) => `${k}_${v}`)
           .join('_');
         
-        this.indexes.push({
-          name: indexName,
-          key: indexSpec,
-          ...indexOptions
-        });
+        // Only add if not already present
+        if (!this.indexes.find(idx => idx.name === indexName)) {
+          this.indexes.push({
+            name: indexName,
+            key: indexSpec,
+            ...indexOptions
+          });
+        }
+      }
+      // If dropIndex or dropIndexes, update cache
+      if (method === 'dropIndex') {
+        const indexName = args[0];
+        this.indexes = this.indexes.filter(idx => idx.name !== indexName);
+      }
+      if (method === 'dropIndexes') {
+        this.indexes = [];
       }
       return res;
     });

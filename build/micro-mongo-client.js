@@ -759,18 +759,41 @@ class ProxyChangeStream extends eventsExports.EventEmitter {
   }
 }
 class ProxyCursor {
-  constructor({ bridge, cursorId, batch = [], exhausted = false, batchSize = 100, requestPromise }) {
+  constructor({ bridge, cursorId, batch = [], exhausted = false, batchSize = 100, requestPromise, requestPayload }) {
     this.bridge = bridge;
     this.cursorId = cursorId;
     this.buffer = Array.isArray(batch) ? batch : [];
     this.exhausted = exhausted || false;
     this._batchSize = batchSize;
     this._requestPromise = requestPromise || null;
-    this._initialized = !requestPromise;
+    this._requestPayload = requestPayload || null;
+    this._initialized = !requestPromise && !requestPayload;
   }
   async _ensureInitialized() {
     if (this._initialized) return;
-    if (this._requestPromise) {
+    if (this._requestPayload) {
+      const cursorOpts = {};
+      if (this._limit !== void 0) cursorOpts.limit = this._limit;
+      if (this._skip !== void 0) cursorOpts.skip = this._skip;
+      if (this._sort !== void 0) cursorOpts.sort = this._sort;
+      if (this._min !== void 0) cursorOpts.min = this._min;
+      if (this._max !== void 0) cursorOpts.max = this._max;
+      if (this._hint !== void 0) cursorOpts.hint = this._hint;
+      if (this._comment !== void 0) cursorOpts.comment = this._comment;
+      if (this._maxTimeMS !== void 0) cursorOpts.maxTimeMS = this._maxTimeMS;
+      if (this._maxScan !== void 0) cursorOpts.maxScan = this._maxScan;
+      if (this._returnKey !== void 0) cursorOpts.returnKey = this._returnKey;
+      if (this._showRecordId !== void 0) cursorOpts.showRecordId = this._showRecordId;
+      if (this._collation !== void 0) cursorOpts.collation = this._collation;
+      this._requestPayload.cursorOpts = cursorOpts;
+      const res = await this.bridge.sendRequest(this._requestPayload);
+      this.cursorId = res.cursorId;
+      this.buffer = res.batch || [];
+      this.exhausted = res.exhausted || false;
+      this._batchSize = res.batchSize || 100;
+      this._requestPayload = null;
+      this._initialized = true;
+    } else if (this._requestPromise) {
       const res = await this._requestPromise;
       this.cursorId = res.cursorId;
       this.buffer = res.batch || [];
@@ -825,8 +848,9 @@ class ProxyCursor {
     return this;
   }
   // Cursor metadata methods
-  close() {
+  async close() {
     this._closed = true;
+    await this._closeRemote();
     return this;
   }
   isClosed() {
@@ -840,24 +864,55 @@ class ProxyCursor {
     this._hint = spec;
     return this;
   }
-  explain(verbosity = "queryPlanner") {
-    return {
-      queryPlanner: {
-        plannerVersion: 1,
-        namespace: `unknown`,
-        indexFilterSet: false,
-        winningPlan: {
-          stage: "COLLSCAN"
-        }
-      },
-      ok: 1
-    };
+  async explain(verbosity = "queryPlanner") {
+    await this._ensureInitialized();
+    try {
+      return await this.bridge.sendRequest({
+        target: "cursor",
+        cursorId: this.cursorId,
+        method: "explain",
+        args: [verbosity]
+      });
+    } catch (err) {
+      return {
+        queryPlanner: {
+          plannerVersion: 1,
+          namespace: `unknown`,
+          indexFilterSet: false,
+          parsedQuery: {},
+          winningPlan: {
+            stage: "COLLSCAN"
+          }
+        },
+        ...verbosity === "executionStats" && {
+          executionStats: {
+            executionSuccess: true,
+            nReturned: 0,
+            executionTimeMillis: 0
+          }
+        },
+        ok: 1
+      };
+    }
   }
   async itcount() {
-    return this.count();
+    let count = 0;
+    while (await this.hasNext()) {
+      await this.next();
+      count++;
+    }
+    return count;
   }
-  size() {
-    return this.buffer.length;
+  async size() {
+    await this._ensureInitialized();
+    let count = this.buffer.length;
+    const tempBuffer = [...this.buffer];
+    while (!this.exhausted) {
+      await this._getMore();
+      count += this.buffer.length;
+    }
+    this.buffer = tempBuffer;
+    return count;
   }
   min(spec) {
     this._min = spec;
@@ -978,16 +1033,16 @@ class ProxyCollection {
     });
   }
   _cursorMethod(method, args = []) {
-    const requestPromise = this.bridge.sendRequest({
+    const requestPayload = {
       target: "collection",
       database: this.dbName,
       collection: this.name,
       method,
       args
-    });
+    };
     const cursor = new ProxyCursor({
       bridge: this.bridge,
-      requestPromise
+      requestPayload
     });
     if (method === "aggregate") {
       cursor.then = function(onFulfilled, onRejected) {
@@ -1017,11 +1072,20 @@ class ProxyCollection {
         const indexSpec = args[0];
         const indexOptions = args[1] || {};
         const indexName = indexOptions.name || Object.entries(indexSpec).map(([k, v]) => `${k}_${v}`).join("_");
-        this.indexes.push({
-          name: indexName,
-          key: indexSpec,
-          ...indexOptions
-        });
+        if (!this.indexes.find((idx) => idx.name === indexName)) {
+          this.indexes.push({
+            name: indexName,
+            key: indexSpec,
+            ...indexOptions
+          });
+        }
+      }
+      if (method === "dropIndex") {
+        const indexName = args[0];
+        this.indexes = this.indexes.filter((idx) => idx.name !== indexName);
+      }
+      if (method === "dropIndexes") {
+        this.indexes = [];
       }
       return res;
     });
@@ -1255,10 +1319,17 @@ class MongoClient extends eventsExports.EventEmitter {
    * Watch for changes across all databases and collections
    * @param {Array} pipeline - Aggregation pipeline to filter changes
    * @param {Object} options - Watch options
-   * @returns {ChangeStream} A change stream instance
+   * @returns {ProxyChangeStream} A change stream instance
    */
   watch(pipeline = [], options = {}) {
-    return new ChangeStream(this, pipeline, options);
+    return ProxyChangeStream.create({
+      bridge: this._bridge,
+      database: null,
+      // null means watch all databases
+      collection: null,
+      pipeline,
+      options
+    });
   }
   _parseDefaultDbName(uri) {
     const match = uri.match(/\/([^/?]+)/);
@@ -3175,7 +3246,7 @@ function nor(doc, els) {
 function matches(doc, query) {
   return and(doc, toArray(query));
 }
-let ChangeStream$1 = class ChangeStream2 extends eventsExports.EventEmitter {
+class ChangeStream extends eventsExports.EventEmitter {
   constructor(target, pipeline = [], options = {}) {
     super();
     this.target = target;
@@ -3529,7 +3600,41 @@ let ChangeStream$1 = class ChangeStream2 extends eventsExports.EventEmitter {
       this.once("error", onError);
     });
   }
-};
+}
+function serializePayload(obj) {
+  if (obj === null || obj === void 0) return obj;
+  if (obj instanceof ObjectId) {
+    return { __objectId: obj.toString() };
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(serializePayload);
+  }
+  if (typeof obj === "object") {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
+function deserializePayload(obj) {
+  if (obj === null || obj === void 0) return obj;
+  if (typeof obj === "object" && obj.__objectId) {
+    return new ObjectId(obj.__objectId);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(deserializePayload);
+  }
+  if (typeof obj === "object") {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = deserializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
 class WorkerBridge extends eventsExports.EventEmitter {
   constructor(worker) {
     super();
@@ -3565,7 +3670,8 @@ class WorkerBridge extends eventsExports.EventEmitter {
    */
   sendRequest(payload, opts = {}) {
     const id = this._nextId++;
-    const message = { type: "request", id, payload };
+    const serializedPayload = serializePayload(payload);
+    const message = { type: "request", id, payload: serializedPayload };
     return new Promise((resolve, reject) => {
       let timeoutHandle;
       if (opts.timeout) {
@@ -3599,7 +3705,8 @@ class WorkerBridge extends eventsExports.EventEmitter {
       this._pending.delete(data.id);
       clearTimeout(pending.timeoutHandle);
       if (data.success) {
-        pending.resolve(data.result);
+        const deserializedResult = deserializePayload(data.result);
+        pending.resolve(deserializedResult);
       } else {
         const error = new Error(data.error?.message || "Worker error");
         if (data.error?.name) error.name = data.error.name;
@@ -3610,7 +3717,8 @@ class WorkerBridge extends eventsExports.EventEmitter {
       return;
     }
     if (data.type === "event") {
-      this.emit("event", data.event, data.payload);
+      const deserializedPayload = deserializePayload(data.payload);
+      this.emit("event", data.event, deserializedPayload);
     }
   }
   _handleError(error) {
@@ -3639,7 +3747,7 @@ class BrowserWorkerBridge extends WorkerBridge {
     if (!WebWorkerCtor) {
       throw new Error("Worker API is not available in this environment");
     }
-    const workerUrl = options.workerUrl || new URL("../../build/micro-mongo-server-worker.js", import.meta.url);
+    const workerUrl = options.workerUrl || "/build/micro-mongo-server-worker.js";
     const worker = new WebWorkerCtor(workerUrl, { type: "module" });
     super(worker);
   }
@@ -3678,7 +3786,7 @@ export {
   BadValueError,
   BulkWriteError,
   CannotCreateIndexError,
-  ChangeStream$1 as ChangeStream,
+  ChangeStream,
   CursorError,
   CursorNotFoundError,
   DuplicateKeyError,

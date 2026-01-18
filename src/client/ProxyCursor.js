@@ -2,19 +2,48 @@
  * ProxyCursor lives on the main thread and batches getMore calls to the worker.
  */
 export class ProxyCursor {
-  constructor({ bridge, cursorId, batch = [], exhausted = false, batchSize = 100, requestPromise }) {
+  constructor({ bridge, cursorId, batch = [], exhausted = false, batchSize = 100, requestPromise, requestPayload }) {
     this.bridge = bridge;
     this.cursorId = cursorId;
     this.buffer = Array.isArray(batch) ? batch : [];
     this.exhausted = exhausted || false;
     this._batchSize = batchSize;
     this._requestPromise = requestPromise || null;
-    this._initialized = !requestPromise; // If no requestPromise, already initialized
+    this._requestPayload = requestPayload || null; // Store payload for delayed execution
+    this._initialized = !requestPromise && !requestPayload; // If no requestPromise or payload, already initialized
   }
 
   async _ensureInitialized() {
     if (this._initialized) return;
-    if (this._requestPromise) {
+    
+    // If we have a payload (delayed execution), build the request with cursor modifiers
+    if (this._requestPayload) {
+      const cursorOpts = {};
+      if (this._limit !== undefined) cursorOpts.limit = this._limit;
+      if (this._skip !== undefined) cursorOpts.skip = this._skip;
+      if (this._sort !== undefined) cursorOpts.sort = this._sort;
+      if (this._min !== undefined) cursorOpts.min = this._min;
+      if (this._max !== undefined) cursorOpts.max = this._max;
+      if (this._hint !== undefined) cursorOpts.hint = this._hint;
+      if (this._comment !== undefined) cursorOpts.comment = this._comment;
+      if (this._maxTimeMS !== undefined) cursorOpts.maxTimeMS = this._maxTimeMS;
+      if (this._maxScan !== undefined) cursorOpts.maxScan = this._maxScan;
+      if (this._returnKey !== undefined) cursorOpts.returnKey = this._returnKey;
+      if (this._showRecordId !== undefined) cursorOpts.showRecordId = this._showRecordId;
+      if (this._collation !== undefined) cursorOpts.collation = this._collation;
+      
+      // Attach cursor options to the payload
+      this._requestPayload.cursorOpts = cursorOpts;
+      
+      const res = await this.bridge.sendRequest(this._requestPayload);
+      this.cursorId = res.cursorId;
+      this.buffer = res.batch || [];
+      this.exhausted = res.exhausted || false;
+      this._batchSize = res.batchSize || 100;
+      this._requestPayload = null;
+      this._initialized = true;
+    } else if (this._requestPromise) {
+      // Legacy path for already-initiated requests
       const res = await this._requestPromise;
       this.cursorId = res.cursorId;
       this.buffer = res.batch || [];
@@ -79,8 +108,9 @@ export class ProxyCursor {
   }
 
   // Cursor metadata methods
-  close() {
+  async close() {
     this._closed = true;
+    await this._closeRemote();
     return this;
   }
 
@@ -98,28 +128,62 @@ export class ProxyCursor {
     return this;
   }
 
-  explain(verbosity = 'queryPlanner') {
-    return {
-      queryPlanner: {
-        plannerVersion: 1,
-        namespace: `unknown`,
-        indexFilterSet: false,
-        winningPlan: {
-          stage: 'COLLSCAN'
-        }
-      },
-      ok: 1
-    };
+  async explain(verbosity = 'queryPlanner') {
+    await this._ensureInitialized();
+    // Request explanation from the worker
+    try {
+      return await this.bridge.sendRequest({
+        target: 'cursor',
+        cursorId: this.cursorId,
+        method: 'explain',
+        args: [verbosity]
+      });
+    } catch (err) {
+      // Fallback if explain not supported
+      return {
+        queryPlanner: {
+          plannerVersion: 1,
+          namespace: `unknown`,
+          indexFilterSet: false,
+          parsedQuery: {},
+          winningPlan: {
+            stage: 'COLLSCAN'
+          }
+        },
+        ...(verbosity === 'executionStats' && {
+          executionStats: {
+            executionSuccess: true,
+            nReturned: 0,
+            executionTimeMillis: 0
+          }
+        }),
+        ok: 1
+      };
+    }
   }
 
   async itcount() {
-    // Iterate and count - must be called async
-    return this.count();
+    // Iterate and count - must respect limit/skip
+    let count = 0;
+    while (await this.hasNext()) {
+      await this.next();
+      count++;
+    }
+    return count;
   }
 
-  size() {
-    // Return count of documents remaining in current batch (after any fetches/iterations)
-    return this.buffer.length;
+  async size() {
+    // Return total count considering limit/skip
+    // Must fetch to apply modifiers
+    await this._ensureInitialized();
+    let count = this.buffer.length;
+    const tempBuffer = [...this.buffer]; // Save current buffer
+    while (!this.exhausted) {
+      await this._getMore();
+      count += this.buffer.length;
+    }
+    this.buffer = tempBuffer; // Restore buffer
+    return count;
   }
 
   min(spec) {

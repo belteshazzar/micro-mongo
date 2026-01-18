@@ -1,4 +1,47 @@
 import { EventEmitter } from 'events';
+import { ObjectId } from 'bjson';
+
+/**
+ * Serialize ObjectId instances for worker communication
+ */
+function serializePayload(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (obj instanceof ObjectId) {
+    return { __objectId: obj.toString() };
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(serializePayload);
+  }
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
+/**
+ * Deserialize ObjectId instances from worker communication
+ */
+function deserializePayload(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'object' && obj.__objectId) {
+    return new ObjectId(obj.__objectId);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(deserializePayload);
+  }
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = deserializePayload(value);
+    }
+    return result;
+  }
+  return obj;
+}
 
 /**
  * WorkerBridge provides a unified message-based transport between the main thread
@@ -48,7 +91,8 @@ export class WorkerBridge extends EventEmitter {
    */
   sendRequest(payload, opts = {}) {
     const id = this._nextId++;
-    const message = { type: 'request', id, payload };
+    const serializedPayload = serializePayload(payload);
+    const message = { type: 'request', id, payload: serializedPayload };
 
     return new Promise((resolve, reject) => {
       let timeoutHandle;
@@ -88,7 +132,8 @@ export class WorkerBridge extends EventEmitter {
       this._pending.delete(data.id);
       clearTimeout(pending.timeoutHandle);
       if (data.success) {
-        pending.resolve(data.result);
+        const deserializedResult = deserializePayload(data.result);
+        pending.resolve(deserializedResult);
       } else {
         const error = new Error(data.error?.message || 'Worker error');
         if (data.error?.name) error.name = data.error.name;
@@ -101,7 +146,8 @@ export class WorkerBridge extends EventEmitter {
 
     // Forward events (e.g., change streams)
     if (data.type === 'event') {
-      this.emit('event', data.event, data.payload);
+      const deserializedPayload = deserializePayload(data.payload);
+      this.emit('event', data.event, deserializedPayload);
     }
   }
 
