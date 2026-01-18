@@ -1,6 +1,15 @@
 import { Index } from './Index.js';
 import { getProp } from '../../utils.js';
 import { BPlusTree } from 'bjson/bplustree';
+import {
+	acquireVersionedPath,
+	buildVersionedPath,
+	createSyncAccessHandle,
+	DEFAULT_COMPACTION_MIN_BYTES,
+	getCurrentVersion,
+	promoteVersion,
+	releaseVersionedPath
+} from '../opfsVersioning.js';
 
 /**
  * Regular index using bjson's persistent BPlusTree with OPFS backing
@@ -11,6 +20,9 @@ export class RegularCollectionIndex extends Index {
 		super(name, keys, storageFilePath, options);
 		// Store path for later initialization
 		this.storageFilePath = storageFilePath;
+		this.storageVersionedPath = null;
+		this.storageVersion = 0;
+		this._releaseStorage = null;
 		this.data = null;
 		this.syncHandle = null;
 		this.isOpen = false;
@@ -25,12 +37,17 @@ export class RegularCollectionIndex extends Index {
 			return;
 		}
 		try {
+			const { version, path: versionedPath } = await acquireVersionedPath(this.storageFilePath);
+			this.storageVersion = version;
+			this.storageVersionedPath = versionedPath;
+			this._releaseStorage = () => releaseVersionedPath(this.storageFilePath, version);
+
 			// Parse path to get directory and filename
-			const pathParts = this.storageFilePath.split('/').filter(Boolean);
+			const pathParts = this.storageVersionedPath.split('/').filter(Boolean);
 			const filename = pathParts.pop();
 			
 			if (!filename) {
-				throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+				throw new Error(`Invalid storage path: ${this.storageVersionedPath}`);
 			}
 			
 			// Navigate to directory
@@ -63,11 +80,11 @@ export class RegularCollectionIndex extends Index {
 				}
 				
 				// Parse path to get directory and filename
-				const pathParts = this.storageFilePath.split('/').filter(Boolean);
+				const pathParts = this.storageVersionedPath.split('/').filter(Boolean);
 				const filename = pathParts.pop();
 				
 				if (!filename) {
-					throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+					throw new Error(`Invalid storage path: ${this.storageVersionedPath}`);
 				}
 				
 				// Navigate to directory
@@ -101,17 +118,42 @@ export class RegularCollectionIndex extends Index {
 	 * Close the index file
 	 */
 	async close() {
-		if (this.isOpen) {
-			try {
-				await this.data.close();
-			} catch (error) {
-				// Ignore errors from already-closed files
-				if (!error.message || !error.message.includes('File is not open')) {
-					throw error;
-				}
+		if (!this.isOpen) {
+			if (this._releaseStorage) {
+				await this._releaseStorage();
+				this._releaseStorage = null;
 			}
-			this.isOpen = false;
+			return;
 		}
+
+		try {
+			await this._maybeCompact();
+			await this.data.close();
+		} catch (error) {
+			// Ignore errors from already-closed files
+			if (!error.message || !error.message.includes('File is not open')) {
+				throw error;
+			}
+		}
+		this.isOpen = false;
+		if (this._releaseStorage) {
+			await this._releaseStorage();
+			this._releaseStorage = null;
+		}
+	}
+
+	async _maybeCompact() {
+		if (!this.data || !this.data.file) return;
+		const currentVersion = await getCurrentVersion(this.storageFilePath);
+		if (currentVersion !== this.storageVersion) return;
+		const fileSize = this.data.file.getFileSize();
+		if (!fileSize || fileSize < DEFAULT_COMPACTION_MIN_BYTES) return;
+
+		const nextVersion = currentVersion + 1;
+		const compactPath = buildVersionedPath(this.storageFilePath, nextVersion);
+		const destSyncHandle = await createSyncAccessHandle(compactPath, { reset: true });
+		await this.data.compact(destSyncHandle);
+		await promoteVersion(this.storageFilePath, nextVersion, currentVersion);
 	}
 
 	/**
@@ -377,9 +419,11 @@ export class RegularCollectionIndex extends Index {
 		if (this.isOpen) {
 			await this.close();
 		}
-		
+		const currentVersion = await getCurrentVersion(this.storageFilePath);
+		const targetPath = buildVersionedPath(this.storageFilePath, currentVersion);
+
 		// Parse path to get directory and filename
-		const pathParts = this.storageFilePath.split('/').filter(Boolean);
+		const pathParts = targetPath.split('/').filter(Boolean);
 		const filename = pathParts.pop();
 		
 		// Navigate to directory

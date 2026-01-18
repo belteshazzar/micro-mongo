@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import { DB } from '../src/server/DB.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -111,5 +112,82 @@ describe("OPFS Storage Location", function() {
 		expect(content).to.equal('bjson data');
 		
 		console.log(`\n  ✓ File created in project .opfs: ${filePath}`);
+	});
+});
+
+describe("OPFS BPlusTree compaction", function() {
+	this.timeout(20000);
+	let opfsDir;
+	let dbName;
+
+	before(async function() {
+		const { StorageManager } = await import('node-opfs');
+		opfsDir = path.join(path.resolve(__dirname, '..'), '.opfs-compaction');
+		dbName = `compaction_${Date.now()}`;
+		await fs.rm(opfsDir, { recursive: true, force: true });
+		const storage = new StorageManager(opfsDir);
+		const customNavigator = {
+			storage: {
+				getDirectory: () => storage.getDirectory()
+			}
+		};
+		if (typeof globalThis.navigator === 'undefined') {
+			globalThis.navigator = customNavigator;
+		} else {
+			globalThis.navigator.storage = customNavigator.storage;
+		}
+	});
+
+	after(async function() {
+		if (opfsDir) {
+			await fs.rm(opfsDir, { recursive: true, force: true });
+		}
+	});
+
+	it('keeps old versions available while new clients use compacted data', async function() {
+		const collectionName = 'items';
+		const dbA = new DB({ dbName });
+		const dbB = new DB({ dbName });
+
+		const payloadSize = 2048;
+		const payload = 'x'.repeat(payloadSize);
+		const docs = Array.from({ length: 40 }, (_, i) => ({
+			name: `doc-${i}`,
+			payload
+		}));
+
+		await dbA.collection(collectionName).insertMany(docs);
+
+		const collectionB = dbB.collection(collectionName);
+		const initialDoc = await collectionB.findOne({ name: 'doc-0' });
+		expect(initialDoc).to.not.equal(null);
+
+		await dbA.close();
+
+		const dbC = new DB({ dbName });
+		const collectionC = dbC.collection(collectionName);
+		const compactedDoc = await collectionC.findOne({ name: 'doc-0' });
+		expect(compactedDoc).to.not.equal(null);
+
+		const collectionDir = path.join(opfsDir, 'micro-mongo', dbName, collectionName);
+		const metadataPath = path.join(collectionDir, 'documents.bjson.version.json');
+		const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf-8'));
+		expect(metadata.currentVersion).to.be.greaterThan(0);
+
+		const oldPath = path.join(collectionDir, 'documents.bjson');
+		const newPath = path.join(collectionDir, `documents.bjson.v${metadata.currentVersion}`);
+		const oldExists = await fs.access(oldPath).then(() => true).catch(() => false);
+		const newExists = await fs.access(newPath).then(() => true).catch(() => false);
+		expect(oldExists).to.be.true;
+		expect(newExists).to.be.true;
+
+		const stillReadable = await collectionB.findOne({ name: 'doc-1' });
+		expect(stillReadable).to.not.equal(null);
+
+		await dbB.close();
+		await dbC.close();
+
+		const oldExistsAfterClose = await fs.access(oldPath).then(() => true).catch(() => false);
+		expect(oldExistsAfterClose).to.be.false;
 	});
 });
