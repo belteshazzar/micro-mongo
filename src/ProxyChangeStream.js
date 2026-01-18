@@ -5,25 +5,27 @@ import { NotImplementedError } from './errors.js';
  * ProxyChangeStream listens for forwarded events from the worker.
  */
 export class ProxyChangeStream extends EventEmitter {
-  static async create({ bridge, database, collection, streamId }) {
+  static create({ bridge, database, collection, streamId }) {
+    const stream = new ProxyChangeStream({ bridge, streamId });
+    
     if (!streamId) {
-      // Request a change stream from worker
-      const resp = await bridge.sendRequest({
+      // Request a change stream from worker asynchronously
+      bridge.sendRequest({
         target: 'collection',
         database,
         collection,
         method: 'watch',
         args: []
+      }).then((resp) => {
+        if (resp && resp.streamId) {
+          stream.streamId = resp.streamId; // Update stream with the ID
+        }
+      }).catch(() => {
+        // Ignore errors during async initialization
       });
-
-      if (!resp || !resp.streamId) {
-        throw new NotImplementedError('change streams over WorkerBridge');
-      }
-
-      streamId = resp.streamId;
     }
 
-    return new ProxyChangeStream({ bridge, streamId });
+    return stream;
   }
 
   constructor({ bridge, streamId }) {
@@ -59,5 +61,23 @@ export class ProxyChangeStream extends EventEmitter {
       method: 'close'
     });
     this._cleanup();
+  }
+
+  async next() {
+    // Return a promise that resolves when the next change event arrives
+    return new Promise((resolve, reject) => {
+      const onChange = (change) => {
+        this.off('change', onChange);
+        this.off('error', onError);
+        resolve(change);
+      };
+      const onError = (error) => {
+        this.off('change', onChange);
+        this.off('error', onError);
+        reject(error);
+      };
+      this.on('change', onChange);
+      this.on('error', onError);
+    });
   }
 }

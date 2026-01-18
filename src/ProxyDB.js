@@ -31,6 +31,27 @@ export class ProxyDB {
         if (typeof prop === 'symbol' || String(prop).startsWith('_')) return undefined;
 
         if (dbMethodNames.has(prop)) {
+          // Special handling for collection management methods
+          if (prop === 'createCollection') {
+            return (...args) => {
+              const collName = args[0];
+              target.collection(collName); // Register synchronously
+              return target._call(String(prop), args); // Still send to worker
+            };
+          }
+          if (prop === 'dropCollection') {
+            return (...args) => {
+              const collName = args[0];
+              target.collections.delete(collName); // Remove synchronously
+              return target._call(String(prop), args); // Still send to worker
+            };
+          }
+          if (prop === 'dropDatabase') {
+            return (...args) => {
+              target.collections.clear(); // Clear all collections synchronously
+              return target._call(String(prop), args); // Still send to worker
+            };
+          }
           return (...args) => target._call(String(prop), args);
         }
 
@@ -51,6 +72,11 @@ export class ProxyDB {
     return col;
   }
 
+  getCollectionNames() {
+    // Return collection names synchronously from local cache
+    return Array.from(this.collections.keys());
+  }
+
   async close() {
     // No-op on proxy; the worker owns lifecycle
     return undefined;
@@ -58,12 +84,15 @@ export class ProxyDB {
 
   // Direct forwarding for DB-level methods
   _call(method, args = []) {
-    return this.bridge.sendRequest({
+    const promise = this.bridge.sendRequest({
       target: 'db',
       database: this.dbName,
       method,
       args
     }).then((res) => {
+      // Note: Do NOT re-add createCollection here - it's already added synchronously in the proxy handler
+      // Same for dropCollection - already removed in proxy handler
+      
       if (res && res.streamId) {
         return ProxyChangeStream.create({
           bridge: this.bridge,
@@ -74,5 +103,6 @@ export class ProxyDB {
       }
       return res;
     });
+    return promise;
   }
 }

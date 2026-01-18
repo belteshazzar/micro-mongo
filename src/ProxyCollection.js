@@ -10,6 +10,7 @@ export class ProxyCollection {
     this.dbName = dbName;
     this.name = name;
     this.bridge = bridge;
+    this.indexes = []; // Track indexes locally
 
     return new Proxy(this, {
       get: (target, prop, receiver) => {
@@ -37,14 +38,23 @@ export class ProxyCollection {
       args
     });
 
-    return new ProxyCursor({
+    const cursor = new ProxyCursor({
       bridge: this.bridge,
       requestPromise
     });
+
+    // For aggregate, also make the cursor thenable so await works like in older API
+    if (method === 'aggregate') {
+      cursor.then = function(onFulfilled, onRejected) {
+        return this.toArray().then(onFulfilled, onRejected);
+      };
+    }
+
+    return cursor;
   }
 
   _call(method, args = []) {
-    return this.bridge.sendRequest({
+    const promise = this.bridge.sendRequest({
       target: 'collection',
       database: this.dbName,
       collection: this.name,
@@ -60,8 +70,28 @@ export class ProxyCollection {
           batchSize: res.batchSize
         });
       }
+      // If createIndex, cache the index info
+      if (method === 'createIndex') {
+        const indexSpec = args[0];
+        const indexOptions = args[1] || {};
+        const indexName = indexOptions.name || Object.entries(indexSpec)
+          .map(([k, v]) => `${k}_${v}`)
+          .join('_');
+        
+        this.indexes.push({
+          name: indexName,
+          key: indexSpec,
+          ...indexOptions
+        });
+      }
       return res;
     });
+    return promise;
+  }
+
+  getIndexes() {
+    // Return cached indexes synchronously
+    return this.indexes;
   }
 
   _watch() {

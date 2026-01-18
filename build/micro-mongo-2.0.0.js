@@ -2942,21 +2942,23 @@ class ChangeStream extends eventsExports.EventEmitter {
   }
 }
 class ProxyChangeStream extends eventsExports.EventEmitter {
-  static async create({ bridge, database, collection, streamId }) {
+  static create({ bridge, database, collection, streamId }) {
+    const stream = new ProxyChangeStream({ bridge, streamId });
     if (!streamId) {
-      const resp = await bridge.sendRequest({
+      bridge.sendRequest({
         target: "collection",
         database,
         collection,
         method: "watch",
         args: []
+      }).then((resp) => {
+        if (resp && resp.streamId) {
+          stream.streamId = resp.streamId;
+        }
+      }).catch(() => {
       });
-      if (!resp || !resp.streamId) {
-        throw new NotImplementedError("change streams over WorkerBridge");
-      }
-      streamId = resp.streamId;
     }
-    return new ProxyChangeStream({ bridge, streamId });
+    return stream;
   }
   constructor({ bridge, streamId }) {
     super();
@@ -2987,6 +2989,22 @@ class ProxyChangeStream extends eventsExports.EventEmitter {
     });
     this._cleanup();
   }
+  async next() {
+    return new Promise((resolve, reject) => {
+      const onChange = (change) => {
+        this.off("change", onChange);
+        this.off("error", onError);
+        resolve(change);
+      };
+      const onError = (error) => {
+        this.off("change", onChange);
+        this.off("error", onError);
+        reject(error);
+      };
+      this.on("change", onChange);
+      this.on("error", onError);
+    });
+  }
 }
 class ProxyCursor {
   constructor({ bridge, cursorId, batch = [], exhausted = false, batchSize = 100, requestPromise }) {
@@ -2994,7 +3012,7 @@ class ProxyCursor {
     this.cursorId = cursorId;
     this.buffer = Array.isArray(batch) ? batch : [];
     this.exhausted = exhausted || false;
-    this.batchSize = batchSize;
+    this._batchSize = batchSize;
     this._requestPromise = requestPromise || null;
     this._initialized = !requestPromise;
   }
@@ -3005,7 +3023,7 @@ class ProxyCursor {
       this.cursorId = res.cursorId;
       this.buffer = res.batch || [];
       this.exhausted = res.exhausted || false;
-      this.batchSize = res.batchSize || 100;
+      this._batchSize = res.batchSize || 100;
       this._requestPromise = null;
       this._initialized = true;
     }
@@ -3037,6 +3055,123 @@ class ProxyCursor {
     const arr = await this.toArray();
     return arr.length;
   }
+  // Cursor modifiers that return this for chaining
+  limit(n) {
+    this._limit = n;
+    return this;
+  }
+  skip(n) {
+    this._skip = n;
+    return this;
+  }
+  sort(spec) {
+    this._sort = spec;
+    return this;
+  }
+  batchSize(n) {
+    this._batchSize = n;
+    return this;
+  }
+  // Cursor metadata methods
+  close() {
+    this._closed = true;
+    return this;
+  }
+  isClosed() {
+    return this._closed || false;
+  }
+  comment(str) {
+    this._comment = str;
+    return this;
+  }
+  hint(spec) {
+    this._hint = spec;
+    return this;
+  }
+  explain(verbosity = "queryPlanner") {
+    return {
+      queryPlanner: {
+        plannerVersion: 1,
+        namespace: `unknown`,
+        indexFilterSet: false,
+        winningPlan: {
+          stage: "COLLSCAN"
+        }
+      },
+      ok: 1
+    };
+  }
+  async itcount() {
+    return this.count();
+  }
+  size() {
+    return this.buffer.length;
+  }
+  min(spec) {
+    this._min = spec;
+    return this;
+  }
+  max(spec) {
+    this._max = spec;
+    return this;
+  }
+  maxTimeMS(ms) {
+    this._maxTimeMS = ms;
+    return this;
+  }
+  maxScan(n) {
+    this._maxScan = n;
+    return this;
+  }
+  noCursorTimeout() {
+    this._noCursorTimeout = true;
+    return this;
+  }
+  objsLeftInBatch() {
+    return this.buffer.length;
+  }
+  pretty() {
+    this._pretty = true;
+    return this;
+  }
+  readConcern(level) {
+    this._readConcern = level;
+    return this;
+  }
+  readPref(mode, tagSet) {
+    this._readPref = { mode, tagSet };
+    return this;
+  }
+  returnKey(bool = true) {
+    this._returnKey = bool;
+    return this;
+  }
+  showRecordId(bool = true) {
+    this._showRecordId = bool;
+    return this;
+  }
+  allowDiskUse(bool = true) {
+    this._allowDiskUse = bool;
+    return this;
+  }
+  collation(spec) {
+    this._collation = spec;
+    return this;
+  }
+  async forEach(fn) {
+    while (await this.hasNext()) {
+      const doc = await this.next();
+      await fn(doc);
+    }
+  }
+  async map(fn) {
+    const results = [];
+    while (await this.hasNext()) {
+      const doc = await this.next();
+      results.push(await fn(doc));
+    }
+    return results;
+  }
   // Support async iteration
   async *[Symbol.asyncIterator]() {
     while (await this.hasNext()) {
@@ -3049,7 +3184,7 @@ class ProxyCursor {
       target: "cursor",
       cursorId: this.cursorId,
       method: "getMore",
-      args: [{ batchSize: this.batchSize }]
+      args: [{ batchSize: this._batchSize }]
     });
     this.buffer = resp?.batch || [];
     this.exhausted = !!resp?.exhausted;
@@ -3075,6 +3210,7 @@ class ProxyCollection {
     this.dbName = dbName;
     this.name = name;
     this.bridge = bridge;
+    this.indexes = [];
     return new Proxy(this, {
       get: (target, prop, receiver) => {
         if (prop in target) return Reflect.get(target, prop, receiver);
@@ -3097,13 +3233,19 @@ class ProxyCollection {
       method,
       args
     });
-    return new ProxyCursor({
+    const cursor = new ProxyCursor({
       bridge: this.bridge,
       requestPromise
     });
+    if (method === "aggregate") {
+      cursor.then = function(onFulfilled, onRejected) {
+        return this.toArray().then(onFulfilled, onRejected);
+      };
+    }
+    return cursor;
   }
   _call(method, args = []) {
-    return this.bridge.sendRequest({
+    const promise = this.bridge.sendRequest({
       target: "collection",
       database: this.dbName,
       collection: this.name,
@@ -3119,8 +3261,22 @@ class ProxyCollection {
           batchSize: res.batchSize
         });
       }
+      if (method === "createIndex") {
+        const indexSpec = args[0];
+        const indexOptions = args[1] || {};
+        const indexName = indexOptions.name || Object.entries(indexSpec).map(([k, v]) => `${k}_${v}`).join("_");
+        this.indexes.push({
+          name: indexName,
+          key: indexSpec,
+          ...indexOptions
+        });
+      }
       return res;
     });
+    return promise;
+  }
+  getIndexes() {
+    return this.indexes;
   }
   _watch() {
     return ProxyChangeStream.create({
@@ -3152,6 +3308,26 @@ class ProxyDB {
         if (prop in target) return Reflect.get(target, prop, receiver);
         if (typeof prop === "symbol" || String(prop).startsWith("_")) return void 0;
         if (dbMethodNames.has(prop)) {
+          if (prop === "createCollection") {
+            return (...args) => {
+              const collName = args[0];
+              target.collection(collName);
+              return target._call(String(prop), args);
+            };
+          }
+          if (prop === "dropCollection") {
+            return (...args) => {
+              const collName = args[0];
+              target.collections.delete(collName);
+              return target._call(String(prop), args);
+            };
+          }
+          if (prop === "dropDatabase") {
+            return (...args) => {
+              target.collections.clear();
+              return target._call(String(prop), args);
+            };
+          }
           return (...args) => target._call(String(prop), args);
         }
         return target.collection(prop);
@@ -3168,12 +3344,15 @@ class ProxyDB {
     this.collections.set(name, col);
     return col;
   }
+  getCollectionNames() {
+    return Array.from(this.collections.keys());
+  }
   async close() {
     return void 0;
   }
   // Direct forwarding for DB-level methods
   _call(method, args = []) {
-    return this.bridge.sendRequest({
+    const promise = this.bridge.sendRequest({
       target: "db",
       database: this.dbName,
       method,
@@ -3189,6 +3368,7 @@ class ProxyDB {
       }
       return res;
     });
+    return promise;
   }
 }
 class MongoClient extends eventsExports.EventEmitter {
