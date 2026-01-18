@@ -1,4 +1,5 @@
 import { DB } from './DB.js';
+import { ChangeStream } from './ChangeStream.js';
 
 /**
  * Server runs inside a worker and routes requests to DB/Collection instances.
@@ -23,6 +24,11 @@ export class Server {
     }
     if (target === 'changestream') {
       return await this._changeStreamOp(streamId, method, args);
+    }
+
+    // Handle client-level operations (e.g., client.watch())
+    if (target === 'client') {
+      return await this._call(this, method, args);
     }
 
     if (!target || !database || !method) {
@@ -217,5 +223,15 @@ export class Server {
     }
 
     throw new Error(`Unknown change stream method: ${method}`);
+  }
+
+  /**
+   * Watch for changes across all databases and collections
+   * @param {Array} pipeline - Aggregation pipeline to filter changes
+   * @param {Object} options - Watch options
+   * @returns {ChangeStream} A change stream instance
+   */
+  watch(pipeline = [], options = {}) {
+    return new ChangeStream(this, pipeline, options);
   }
 }

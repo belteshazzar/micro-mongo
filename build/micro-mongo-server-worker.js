@@ -6770,6 +6770,9 @@ class ChangeStream extends eventsExports.EventEmitter {
     for (const collection of collections) {
       this._watchCollection(collection);
     }
+    if (this.target.constructor.name === "Server") {
+      this._interceptServerDBCreation();
+    }
     if (this.target.constructor.name === "DB") {
       this._interceptDBCollectionCreation();
     }
@@ -6783,6 +6786,18 @@ class ChangeStream extends eventsExports.EventEmitter {
    */
   _getCollectionsToWatch() {
     const collections = [];
+    if (this.target.constructor.name === "Server") {
+      for (const [dbName, db] of this.target.databases) {
+        const collectionNames = db.getCollectionNames();
+        for (const name of collectionNames) {
+          const collection = db[name];
+          if (collection && collection.isCollection) {
+            collections.push(collection);
+          }
+        }
+      }
+      return collections;
+    }
     if (this.target.constructor.name === "MongoClient") {
       this._monitorClient();
       return collections;
@@ -6938,6 +6953,55 @@ class ChangeStream extends eventsExports.EventEmitter {
     this._originalClientMethods = { db: originalDb };
   }
   /**
+   * Intercept DB creation on a Server
+   * @private
+   */
+  _interceptServerDBCreation() {
+    const server2 = this.target;
+    const originalGetDB = server2._getDB.bind(server2);
+    const self2 = this;
+    this._watchedDBs = /* @__PURE__ */ new Map();
+    server2._getDB = function(dbName) {
+      const db = originalGetDB(dbName);
+      if (!self2._watchedDBs.has(dbName)) {
+        self2._watchedDBs.set(dbName, db);
+        const collectionNames = db.getCollectionNames();
+        for (const colName of collectionNames) {
+          const col = db[colName];
+          if (col && col.isCollection && !self2._listeners.has(col)) {
+            self2._watchCollection(col);
+          }
+        }
+        self2._interceptDBCollectionCreationForServer(db);
+      }
+      return db;
+    };
+    this._originalServerMethods = { _getDB: originalGetDB };
+  }
+  /**
+   * Intercept collection creation for a database in server watch mode
+   * @private
+   */
+  _interceptDBCollectionCreationForServer(db) {
+    const originalCollection = db.collection.bind(db);
+    const originalCreateCollection = db.createCollection.bind(db);
+    const self2 = this;
+    db.collection = function(name) {
+      const col = originalCollection(name);
+      if (col && col.isCollection && !self2._listeners.has(col)) {
+        self2._watchCollection(col);
+      }
+      return col;
+    };
+    db.createCollection = function(name) {
+      originalCreateCollection(name);
+      const col = db[name];
+      if (col && col.isCollection && !self2._listeners.has(col)) {
+        self2._watchCollection(col);
+      }
+    };
+  }
+  /**
    * Intercept collection creation for a database in client watch mode
    * @private
    */
@@ -7004,6 +7068,9 @@ class ChangeStream extends eventsExports.EventEmitter {
       collection.off("delete", handlers.delete);
     }
     this._listeners.clear();
+    if (this._originalServerMethods && this.target.constructor.name === "Server") {
+      this.target._getDB = this._originalServerMethods._getDB;
+    }
     if (this._originalDBMethods && this.target.constructor.name === "DB") {
       this.target.collection = this._originalDBMethods.collection;
       this.target.createCollection = this._originalDBMethods.createCollection;
@@ -8351,6 +8418,7 @@ class Collection extends eventsExports.EventEmitter {
     return count;
   }
   async copyTo(destCollectionName) {
+    this.db.createCollection(destCollectionName);
     const destCol = this.db.getCollection(destCollectionName);
     let numCopied = 0;
     const c = this.find({});
@@ -9234,6 +9302,9 @@ class Server {
     if (target === "changestream") {
       return await this._changeStreamOp(streamId, method, args);
     }
+    if (target === "client") {
+      return await this._call(this, method, args);
+    }
     if (!target || !database || !method) {
       throw new Error("Invalid request payload");
     }
@@ -9390,6 +9461,15 @@ class Server {
       return { closed: true };
     }
     throw new Error(`Unknown change stream method: ${method}`);
+  }
+  /**
+   * Watch for changes across all databases and collections
+   * @param {Array} pipeline - Aggregation pipeline to filter changes
+   * @param {Object} options - Watch options
+   * @returns {ChangeStream} A change stream instance
+   */
+  watch(pipeline = [], options = {}) {
+    return new ChangeStream(this, pipeline, options);
   }
 }
 function serializePayload(obj) {

@@ -33,6 +33,11 @@ export class ChangeStream extends EventEmitter {
 			this._watchCollection(collection);
 		}
 		
+		// For Server watching, intercept _getDB calls
+		if (this.target.constructor.name === 'Server') {
+			this._interceptServerDBCreation();
+		}
+		
 		// For DB watching, we also need to intercept new collection creation
 		if (this.target.constructor.name === 'DB') {
 			this._interceptDBCollectionCreation();
@@ -50,6 +55,21 @@ export class ChangeStream extends EventEmitter {
 	 */
 	_getCollectionsToWatch() {
 		const collections = [];
+		
+		// Server - watch all collections in all databases
+		if (this.target.constructor.name === 'Server') {
+			// Watch all existing databases
+			for (const [dbName, db] of this.target.databases) {
+				const collectionNames = db.getCollectionNames();
+				for (const name of collectionNames) {
+					const collection = db[name];
+					if (collection && collection.isCollection) {
+						collections.push(collection);
+					}
+				}
+			}
+			return collections;
+		}
 		
 		// MongoClient - watch all collections in all databases
 		if (this.target.constructor.name === 'MongoClient') {
@@ -259,6 +279,72 @@ export class ChangeStream extends EventEmitter {
 	}
 
 	/**
+	 * Intercept DB creation on a Server
+	 * @private
+	 */
+	_interceptServerDBCreation() {
+		const server = this.target;
+		const originalGetDB = server._getDB.bind(server);
+		const self = this;
+		
+		// Track databases we're watching
+		this._watchedDBs = new Map();
+		
+		// Override _getDB() method to watch new databases
+		server._getDB = function(dbName) {
+			const db = originalGetDB(dbName);
+			
+			// Only set up watch once per database
+			if (!self._watchedDBs.has(dbName)) {
+				self._watchedDBs.set(dbName, db);
+				
+				// Watch existing collections in this database
+				const collectionNames = db.getCollectionNames();
+				for (const colName of collectionNames) {
+					const col = db[colName];
+					if (col && col.isCollection && !self._listeners.has(col)) {
+						self._watchCollection(col);
+					}
+				}
+				
+				// Intercept new collection creation on this database
+				self._interceptDBCollectionCreationForServer(db);
+			}
+			
+			return db;
+		};
+		
+		// Store original for cleanup
+		this._originalServerMethods = { _getDB: originalGetDB };
+	}
+
+	/**
+	 * Intercept collection creation for a database in server watch mode
+	 * @private
+	 */
+	_interceptDBCollectionCreationForServer(db) {
+		const originalCollection = db.collection.bind(db);
+		const originalCreateCollection = db.createCollection.bind(db);
+		const self = this;
+		
+		db.collection = function(name) {
+			const col = originalCollection(name);
+			if (col && col.isCollection && !self._listeners.has(col)) {
+				self._watchCollection(col);
+			}
+			return col;
+		};
+		
+		db.createCollection = function(name) {
+			originalCreateCollection(name);
+			const col = db[name];
+			if (col && col.isCollection && !self._listeners.has(col)) {
+				self._watchCollection(col);
+			}
+		};
+	}
+
+	/**
 	 * Intercept collection creation for a database in client watch mode
 	 * @private
 	 */
@@ -342,6 +428,11 @@ export class ChangeStream extends EventEmitter {
 		}
 		
 		this._listeners.clear();
+		
+		// Restore original Server methods if we intercepted them
+		if (this._originalServerMethods && this.target.constructor.name === 'Server') {
+			this.target._getDB = this._originalServerMethods._getDB;
+		}
 		
 		// Restore original DB methods if we intercepted them
 		if (this._originalDBMethods && this.target.constructor.name === 'DB') {
