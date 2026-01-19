@@ -651,6 +651,21 @@ describe("DB", function() {
 			expect(docs.length).to.equal(2);
 		});
 
+		it('should find with $where operator using function in $and', async function() {
+			await db[collectionName].insert({ price: 30, quantity: 20, status: "ok" });
+			await db[collectionName].insert({ price: 10, quantity: 5, status: "ok" });
+			await db[collectionName].insert({ price: 50, quantity: 2, status: "skip" });
+			
+			var docs = await testFind({
+				$and: [
+					{ status: "ok" },
+					{ $where: function() { return this.price * this.quantity > 400; }}
+				]
+			});
+			expect(docs.length).to.equal(1);
+			expect(docs[0].status).to.equal("ok");
+		});
+
 		it('should find with $where operator using string', async function() {
 			await db[collectionName].insert({ value: 100 });
 			await db[collectionName].insert({ value: 50 });

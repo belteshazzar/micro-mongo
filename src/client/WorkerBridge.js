@@ -6,6 +6,9 @@ import { ObjectId } from 'bjson';
  */
 function serializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'function') {
+    return { __function: obj.toString() };
+  }
   if (obj instanceof ObjectId) {
     return { __objectId: obj.toString() };
   }
@@ -30,6 +33,14 @@ function serializePayload(obj) {
  */
 function deserializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'object' && obj.__function) {
+    try {
+      const revived = new Function(`return ${obj.__function}`)();
+      return typeof revived === 'function' ? revived : undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
   if (typeof obj === 'object' && obj.__objectId) {
     return new ObjectId(obj.__objectId);
   }
