@@ -100,7 +100,7 @@ import { MongoClient, WorkerBridge } from 'micro-mongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
-    const client = new MongoClient('mongodb://localhost:27017', { 
+    const client = new MongoClient('mongodb://localhost:27017/myapp', { 
         workerBridge: bridge 
     });
     await client.connect();
@@ -605,7 +605,7 @@ import { MongoClient, WorkerBridge } from 'micro-mongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
-    const client = new MongoClient('mongodb://localhost:27017', {
+    const client = new MongoClient('mongodb://localhost:27017/myapp', {
         workerBridge: bridge
     });
     await client.connect();
