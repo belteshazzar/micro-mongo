@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Database Watch Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #output {
+            background-color: #f4f4f4;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 20px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .info {
+            color: blue;
+        }
+    </style>
+</head>
+<body>
+    <h1>Database Watch Test</h1>
+    
+    <div class="container">
+        <p>This test demonstrates that <code>db.watch()</code> works correctly in the browser.</p>
+        <p>It will:</p>
+        <ol>
+            <li>Create a change stream by calling <code>db.watch()</code></li>
+            <li>Listen for change events using <code>changeStream.on('change', ...)</code></li>
+            <li>Insert documents into two different collections</li>
+            <li>Verify that both changes are detected</li>
+        </ol>
+        <button onclick="runTest()">Run Test</button>
+    </div>
+    
+    <div id="output"></div>
+
+    <script type="module">
+        import { MongoClient, WorkerBridge } from './build/micro-mongo-client.js';
+
+        let output = document.getElementById('output');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+            output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        window.runTest = async function() {
+            output.innerHTML = '';
+            log('Starting test...', 'info');
+            
+            try {
+                // Create WorkerBridge
+                log('Creating WorkerBridge...', 'info');
+                const bridge = await WorkerBridge.create();
+                log('✓ WorkerBridge created', 'success');
+                
+                // Create MongoClient
+                log('Creating MongoClient...', 'info');
+                const client = new MongoClient('mongodb://localhost/test-db-watch', { workerBridge: bridge });
+                await client.connect();
+                log('✓ MongoClient connected', 'success');
+                
+                // Get database
+                const db = client.db('test-db-watch');
+                log('✓ Database obtained', 'success');
+                
+                // Create change stream
+                log('Creating change stream with db.watch()...', 'info');
+                const changeStream = db.watch();
+                log('✓ Change stream created', 'success');
+                
+                // Check if it's an EventEmitter
+                if (typeof changeStream.on !== 'function') {
+                    throw new Error('changeStream.on is not a function! This is the bug.');
+                }
+                log('✓ changeStream.on is a function', 'success');
+                
+                // Track changes
+                const changes = [];
+                changeStream.on('change', (change) => {
+                    changes.push(change);
+                    log(`📝 Change detected: ${change.operationType} in ${change.ns.coll}`, 'info');
+                });
+                
+                // Get collections
+                log('Getting collections...', 'info');
+                const col1 = db.collection('collection1');
+                const col2 = db.collection('collection2');
+                log('✓ Collections obtained', 'success');
+                
+                // Insert documents
+                log('Inserting document into collection1...', 'info');
+                await col1.insertOne({ name: 'Alice', test: 'db-watch' });
+                log('✓ Document inserted into collection1', 'success');
+                
+                log('Inserting document into collection2...', 'info');
+                await col2.insertOne({ name: 'Bob', test: 'db-watch' });
+                log('✓ Document inserted into collection2', 'success');
+                
+                // Wait for events to propagate
+                log('Waiting for change events...', 'info');
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Verify
+                log(`Received ${changes.length} change events`, 'info');
+                if (changes.length !== 2) {
+                    throw new Error(`Expected 2 changes, got ${changes.length}`);
+                }
+                log('✓ Correct number of changes received', 'success');
+                
+                if (changes[0].ns.coll !== 'collection1') {
+                    throw new Error(`Expected first change in collection1, got ${changes[0].ns.coll}`);
+                }
+                log('✓ First change is in collection1', 'success');
+                
+                if (changes[1].ns.coll !== 'collection2') {
+                    throw new Error(`Expected second change in collection2, got ${changes[1].ns.coll}`);
+                }
+                log('✓ Second change is in collection2', 'success');
+                
+                // Cleanup
+                changeStream.close();
+                await client.close();
+                await bridge.terminate();
+                
+                log('\n========================================', 'success');
+                log('✅ TEST PASSED! db.watch() works correctly!', 'success');
+                log('========================================', 'success');
+                
+            } catch (error) {
+                log(`\n❌ TEST FAILED: ${error.message}`, 'error');
+                console.error(error);
+            }
+        };
+    </script>
+</body>
+</html>
