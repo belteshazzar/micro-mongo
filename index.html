@@ -244,6 +244,14 @@
           ]
         }).toArray();
         logObject('Price between $50 and $200', result);
+
+        const whereMatches = await db.products.find({
+          $where: function() { return this.price > 900; }
+        }).toArray();
+        logObject('Products matching $where', whereMatches);
+        if (whereMatches.length !== 1) {
+          throw new Error('Expected $where query to return 1 product');
+        }
         
         log('✓ Query tests passed', 'success');
         

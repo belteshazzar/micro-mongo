@@ -4842,10 +4842,167 @@ class Index {
     };
   }
 }
+const VERSION_METADATA_SUFFIX = ".version.json";
+const VERSION_SUFFIX = ".v";
+const DEFAULT_COMPACTION_MIN_BYTES = 16 * 1024;
+function buildVersionedPath(basePath, version) {
+  const numericVersion = Number(version);
+  if (!Number.isFinite(numericVersion)) {
+    throw new Error(`Invalid version value: ${version}`);
+  }
+  if (numericVersion < 0) {
+    throw new Error(`Version must be non-negative: ${numericVersion}`);
+  }
+  if (numericVersion === 0) {
+    return basePath;
+  }
+  return `${basePath}${VERSION_SUFFIX}${numericVersion}`;
+}
+function normalizeMetadata(data) {
+  const metadata = { currentVersion: 0, refCounts: {} };
+  if (!data || typeof data !== "object") return metadata;
+  const version = Number(data.currentVersion);
+  metadata.currentVersion = Number.isFinite(version) ? version : 0;
+  if (data.refCounts && typeof data.refCounts === "object") {
+    for (const [key, value] of Object.entries(data.refCounts)) {
+      const count = Number(value);
+      if (Number.isFinite(count) && count > 0) {
+        metadata.refCounts[String(key)] = count;
+      } else if (!Number.isFinite(count) || count < 0) {
+        console.warn(`Ignoring invalid ref count for version ${key}: ${value}`);
+      }
+    }
+  }
+  return metadata;
+}
+function splitPath(filePath) {
+  const parts = filePath.split("/").filter(Boolean);
+  const filename = parts.pop();
+  if (!filename) {
+    throw new Error(`Invalid storage path: ${filePath}`);
+  }
+  return { parts, filename };
+}
+async function getDirectoryHandle(pathParts, create) {
+  let dir = await globalThis.navigator.storage.getDirectory();
+  for (const part of pathParts) {
+    dir = await dir.getDirectoryHandle(part, { create });
+  }
+  return dir;
+}
+async function ensureDirectoryForFile(filePath) {
+  const { parts } = splitPath(filePath);
+  if (parts.length === 0) return;
+  await getDirectoryHandle(parts, true);
+}
+async function getFileHandle(filePath, { create } = {}) {
+  const { parts, filename } = splitPath(filePath);
+  const dir = await getDirectoryHandle(parts, !!create);
+  return dir.getFileHandle(filename, { create });
+}
+async function readMetadata(basePath) {
+  const metadataPath = `${basePath}${VERSION_METADATA_SUFFIX}`;
+  try {
+    const fileHandle = await getFileHandle(metadataPath, { create: false });
+    const file = await fileHandle.getFile();
+    const text2 = await file.text();
+    if (!text2 || text2.trim() === "") {
+      return normalizeMetadata();
+    }
+    return normalizeMetadata(JSON.parse(text2));
+  } catch (error) {
+    if (error?.name === "NotFoundError" || error?.code === "ENOENT") {
+      return normalizeMetadata();
+    }
+    throw error;
+  }
+}
+async function writeMetadata(basePath, metadata) {
+  const metadataPath = `${basePath}${VERSION_METADATA_SUFFIX}`;
+  await ensureDirectoryForFile(metadataPath);
+  const fileHandle = await getFileHandle(metadataPath, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(metadata));
+  await writable.close();
+}
+async function deleteVersionedFiles(basePath, version, suffixes) {
+  const versionedBase = buildVersionedPath(basePath, version);
+  for (const suffix of suffixes) {
+    const filePath = suffix ? `${versionedBase}${suffix}` : versionedBase;
+    await removeFile(filePath);
+  }
+}
+async function cleanupVersionIfUnreferenced(basePath, version, metadata, suffixes) {
+  if (version === metadata.currentVersion) return;
+  const key = String(version);
+  if (metadata.refCounts[key]) return;
+  await deleteVersionedFiles(basePath, version, suffixes);
+}
+async function acquireVersionedPath(basePath) {
+  const metadata = await readMetadata(basePath);
+  const currentVersion = metadata.currentVersion;
+  const key = String(currentVersion);
+  metadata.refCounts[key] = (metadata.refCounts[key] || 0) + 1;
+  await writeMetadata(basePath, metadata);
+  return {
+    version: currentVersion,
+    path: buildVersionedPath(basePath, currentVersion)
+  };
+}
+async function releaseVersionedPath(basePath, version, { suffixes = [""] } = {}) {
+  const metadata = await readMetadata(basePath);
+  const key = String(version);
+  if (metadata.refCounts[key]) {
+    metadata.refCounts[key] -= 1;
+    if (metadata.refCounts[key] <= 0) {
+      delete metadata.refCounts[key];
+    }
+  }
+  await cleanupVersionIfUnreferenced(basePath, version, metadata, suffixes);
+  await writeMetadata(basePath, metadata);
+}
+async function promoteVersion(basePath, newVersion, oldVersion, { suffixes = [""] } = {}) {
+  const metadata = await readMetadata(basePath);
+  const nextVersion = Number(newVersion);
+  metadata.currentVersion = Number.isFinite(nextVersion) ? nextVersion : metadata.currentVersion;
+  const key = String(metadata.currentVersion);
+  if (!metadata.refCounts[key]) {
+    metadata.refCounts[key] = 0;
+  }
+  await cleanupVersionIfUnreferenced(basePath, oldVersion, metadata, suffixes);
+  await writeMetadata(basePath, metadata);
+}
+async function getCurrentVersion(basePath) {
+  const metadata = await readMetadata(basePath);
+  return metadata.currentVersion;
+}
+async function removeFile(filePath) {
+  try {
+    const { parts, filename } = splitPath(filePath);
+    const dir = await getDirectoryHandle(parts, false);
+    await dir.removeEntry(filename);
+  } catch (error) {
+    if (error?.name === "NotFoundError" || error?.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+}
+async function createSyncAccessHandle(filePath, { reset = false } = {}) {
+  if (reset) {
+    await removeFile(filePath);
+  }
+  await ensureDirectoryForFile(filePath);
+  const fileHandle = await getFileHandle(filePath, { create: true });
+  return fileHandle.createSyncAccessHandle();
+}
 class RegularCollectionIndex extends Index {
   constructor(name, keys, storageFilePath, options = {}) {
     super(name, keys, storageFilePath, options);
     this.storageFilePath = storageFilePath;
+    this.storageVersionedPath = null;
+    this.storageVersion = 0;
+    this._releaseStorage = null;
     this.data = null;
     this.syncHandle = null;
     this.isOpen = false;
@@ -4859,10 +5016,14 @@ class RegularCollectionIndex extends Index {
       return;
     }
     try {
-      const pathParts = this.storageFilePath.split("/").filter(Boolean);
+      const { version, path: versionedPath } = await acquireVersionedPath(this.storageFilePath);
+      this.storageVersion = version;
+      this.storageVersionedPath = versionedPath;
+      this._releaseStorage = () => releaseVersionedPath(this.storageFilePath, version);
+      const pathParts = this.storageVersionedPath.split("/").filter(Boolean);
       const filename = pathParts.pop();
       if (!filename) {
-        throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+        throw new Error(`Invalid storage path: ${this.storageVersionedPath}`);
       }
       let dirHandle = await globalThis.navigator.storage.getDirectory();
       for (const part of pathParts) {
@@ -4882,10 +5043,10 @@ class RegularCollectionIndex extends Index {
           }
           this.syncHandle = null;
         }
-        const pathParts = this.storageFilePath.split("/").filter(Boolean);
+        const pathParts = this.storageVersionedPath.split("/").filter(Boolean);
         const filename = pathParts.pop();
         if (!filename) {
-          throw new Error(`Invalid storage path: ${this.storageFilePath}`);
+          throw new Error(`Invalid storage path: ${this.storageVersionedPath}`);
         }
         let dirHandle = await globalThis.navigator.storage.getDirectory();
         for (const part of pathParts) {
@@ -4909,16 +5070,38 @@ class RegularCollectionIndex extends Index {
    * Close the index file
    */
   async close() {
-    if (this.isOpen) {
-      try {
-        await this.data.close();
-      } catch (error) {
-        if (!error.message || !error.message.includes("File is not open")) {
-          throw error;
-        }
+    if (!this.isOpen) {
+      if (this._releaseStorage) {
+        await this._releaseStorage();
+        this._releaseStorage = null;
       }
-      this.isOpen = false;
+      return;
     }
+    try {
+      await this._maybeCompact();
+      await this.data.close();
+    } catch (error) {
+      if (!error.message || !error.message.includes("File is not open")) {
+        throw error;
+      }
+    }
+    this.isOpen = false;
+    if (this._releaseStorage) {
+      await this._releaseStorage();
+      this._releaseStorage = null;
+    }
+  }
+  async _maybeCompact() {
+    if (!this.data || !this.data.file) return;
+    const currentVersion = await getCurrentVersion(this.storageFilePath);
+    if (currentVersion !== this.storageVersion) return;
+    const fileSize = this.data.file.getFileSize();
+    if (!fileSize || fileSize < DEFAULT_COMPACTION_MIN_BYTES) return;
+    const nextVersion = currentVersion + 1;
+    const compactPath = buildVersionedPath(this.storageFilePath, nextVersion);
+    const destSyncHandle = await createSyncAccessHandle(compactPath, { reset: true });
+    await this.data.compact(destSyncHandle);
+    await promoteVersion(this.storageFilePath, nextVersion, currentVersion);
   }
   /**
    * Extract index key value from a document
@@ -5129,7 +5312,9 @@ class RegularCollectionIndex extends Index {
     if (this.isOpen) {
       await this.close();
     }
-    const pathParts = this.storageFilePath.split("/").filter(Boolean);
+    const currentVersion = await getCurrentVersion(this.storageFilePath);
+    const targetPath = buildVersionedPath(this.storageFilePath, currentVersion);
+    const pathParts = targetPath.split("/").filter(Boolean);
     const filename = pathParts.pop();
     let dirHandle = await globalThis.navigator.storage.getDirectory();
     for (const part of pathParts) {
@@ -5142,10 +5327,14 @@ class RegularCollectionIndex extends Index {
     await this.open();
   }
 }
+const TEXT_INDEX_SUFFIXES = ["-terms.bjson", "-documents.bjson", "-lengths.bjson"];
 class TextCollectionIndex extends Index {
   constructor(name, keys, storage, options = {}) {
     super(name, keys, storage);
     this.storageBasePath = storage;
+    this.storageVersion = 0;
+    this.versionedBasePath = null;
+    this._releaseStorage = null;
     this.textIndex = null;
     this.syncHandles = [];
     this.isOpen = false;
@@ -5168,9 +5357,13 @@ class TextCollectionIndex extends Index {
       return;
     }
     try {
-      const indexTree = await this._createBPlusTree(this.storageBasePath + "-terms.bjson");
-      const docTermsTree = await this._createBPlusTree(this.storageBasePath + "-documents.bjson");
-      const lengthsTree = await this._createBPlusTree(this.storageBasePath + "-lengths.bjson");
+      const { version, path: versionedBasePath } = await acquireVersionedPath(this.storageBasePath);
+      this.storageVersion = version;
+      this.versionedBasePath = versionedBasePath;
+      this._releaseStorage = () => releaseVersionedPath(this.storageBasePath, version, { suffixes: TEXT_INDEX_SUFFIXES });
+      const indexTree = await this._createBPlusTree(this._getActiveBasePath() + "-terms.bjson");
+      const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + "-documents.bjson");
+      const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + "-lengths.bjson");
       this.textIndex = new TextIndex({
         order: 16,
         trees: {
@@ -5185,10 +5378,10 @@ class TextCollectionIndex extends Index {
       if (error.code === "ENOENT" || error.message && (error.message.includes("Failed to read metadata") || error.message.includes("missing required fields") || error.message.includes("Unknown type byte") || error.message.includes("Invalid") || error.message.includes("file too small"))) {
         await this._closeSyncHandles();
         await this._deleteIndexFiles();
-        await this._ensureDirectoryForFile(this.storageBasePath + "-terms.bjson");
-        const indexTree = await this._createBPlusTree(this.storageBasePath + "-terms.bjson");
-        const docTermsTree = await this._createBPlusTree(this.storageBasePath + "-documents.bjson");
-        const lengthsTree = await this._createBPlusTree(this.storageBasePath + "-lengths.bjson");
+        await this._ensureDirectoryForFile(this._getActiveBasePath() + "-terms.bjson");
+        const indexTree = await this._createBPlusTree(this._getActiveBasePath() + "-terms.bjson");
+        const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + "-documents.bjson");
+        const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + "-lengths.bjson");
         this.textIndex = new TextIndex({
           order: 16,
           trees: {
@@ -5228,10 +5421,12 @@ class TextCollectionIndex extends Index {
     }
     this.syncHandles = [];
   }
-  async _deleteIndexFiles() {
-    const suffixes = ["-terms.bjson", "-documents.bjson", "-lengths.bjson"];
-    for (const suffix of suffixes) {
-      await this._deleteFile(this.storageBasePath + suffix);
+  _getActiveBasePath() {
+    return this.versionedBasePath || this.storageBasePath;
+  }
+  async _deleteIndexFiles(basePath = this._getActiveBasePath()) {
+    for (const suffix of TEXT_INDEX_SUFFIXES) {
+      await this._deleteFile(basePath + suffix);
     }
   }
   async _deleteFile(filePath) {
@@ -5271,15 +5466,47 @@ class TextCollectionIndex extends Index {
    */
   async close() {
     if (this.isOpen) {
-      try {
-        await this.textIndex.close();
-      } catch (error) {
-        if (!error.message || !error.message.includes("File is not open")) {
-          throw error;
+      await this._maybeCompact();
+      if (this.textIndex?.isOpen) {
+        try {
+          await this.textIndex.close();
+        } catch (error) {
+          if (!error.message || !error.message.includes("File is not open")) {
+            throw error;
+          }
         }
       }
       this.isOpen = false;
     }
+    if (this._releaseStorage) {
+      await this._releaseStorage();
+      this._releaseStorage = null;
+    }
+  }
+  async _maybeCompact() {
+    if (!this.textIndex?.index?.file || !this.textIndex?.documentTerms?.file || !this.textIndex?.documentLengths?.file) {
+      return false;
+    }
+    const currentVersion = await getCurrentVersion(this.storageBasePath);
+    if (currentVersion !== this.storageVersion) return false;
+    const totalSize = this.textIndex.index.file.getFileSize() + this.textIndex.documentTerms.file.getFileSize() + this.textIndex.documentLengths.file.getFileSize();
+    if (!totalSize || totalSize < DEFAULT_COMPACTION_MIN_BYTES) return false;
+    const nextVersion = currentVersion + 1;
+    const compactBase = buildVersionedPath(this.storageBasePath, nextVersion);
+    const indexHandle = await createSyncAccessHandle(`${compactBase}-terms.bjson`, { reset: true });
+    const docTermsHandle = await createSyncAccessHandle(`${compactBase}-documents.bjson`, { reset: true });
+    const lengthsHandle = await createSyncAccessHandle(`${compactBase}-lengths.bjson`, { reset: true });
+    const indexTree = new BPlusTree(indexHandle, 16);
+    const docTermsTree = new BPlusTree(docTermsHandle, 16);
+    const lengthsTree = new BPlusTree(lengthsHandle, 16);
+    await this.textIndex.compact({
+      index: indexTree,
+      documentTerms: docTermsTree,
+      documentLengths: lengthsTree
+    });
+    await promoteVersion(this.storageBasePath, nextVersion, currentVersion, { suffixes: TEXT_INDEX_SUFFIXES });
+    await this._closeSyncHandles();
+    return true;
   }
   /**
    * Extract text content from a document for the indexed fields
@@ -5345,7 +5572,9 @@ class TextCollectionIndex extends Index {
     if (this.isOpen) {
       await this.close();
     }
-    await this._deleteIndexFiles();
+    const currentVersion = await getCurrentVersion(this.storageBasePath);
+    const basePath = buildVersionedPath(this.storageBasePath, currentVersion);
+    await this._deleteIndexFiles(basePath);
     await this.open();
   }
   /**
@@ -7178,6 +7407,9 @@ class Collection extends eventsExports.EventEmitter {
     this.name = name;
     this.path = `${this.db.baseFolder}/${this.db.dbName}/${this.name}`;
     this.documentsPath = `${this.path}/documents.bjson`;
+    this.documentsVersionedPath = null;
+    this.documentsVersion = 0;
+    this._releaseDocuments = null;
     this.order = options.bPlusTreeOrder || 50;
     this.documents = null;
     this.indexes = /* @__PURE__ */ new Map();
@@ -7190,14 +7422,18 @@ class Collection extends eventsExports.EventEmitter {
     if (!globalThis.navigator || !globalThis.navigator.storage || typeof globalThis.navigator.storage.getDirectory !== "function") {
       throw new Error("OPFS not available: navigator.storage.getDirectory is missing");
     }
-    let dirHandle = await this._ensureDirectoryForFile(this.documentsPath);
+    const { version, path: versionedPath } = await acquireVersionedPath(this.documentsPath);
+    this.documentsVersion = version;
+    this.documentsVersionedPath = versionedPath;
+    this._releaseDocuments = () => releaseVersionedPath(this.documentsPath, version);
+    let dirHandle = await this._ensureDirectoryForFile(this.documentsVersionedPath);
     if (!dirHandle) {
       dirHandle = await globalThis.navigator.storage.getDirectory();
     }
-    const pathParts = this.documentsPath.split("/").filter(Boolean);
+    const pathParts = this.documentsVersionedPath.split("/").filter(Boolean);
     const filename = pathParts[pathParts.length - 1];
     if (!filename) {
-      throw new Error(`Invalid documents path: ${this.documentsPath}`);
+      throw new Error(`Invalid documents path: ${this.documentsVersionedPath}`);
     }
     const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
     const syncHandle = await fileHandle.createSyncAccessHandle();
@@ -7224,6 +7460,7 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   async _loadIndexes() {
+    console.log(`[LOAD_INDEXES] Loading indexes for collection at path: ${this.path}`);
     let dirHandle;
     try {
       const parts = this.path.split("/").filter(Boolean);
@@ -7234,26 +7471,37 @@ class Collection extends eventsExports.EventEmitter {
       dirHandle = handle;
     } catch (err) {
       if (err?.name === "NotFoundError" || err?.code === "ENOENT") {
+        console.log(`[LOAD_INDEXES] Collection directory doesn't exist, no indexes to load`);
         return;
       }
       throw err;
     }
+    console.log(`[LOAD_INDEXES] Found collection directory, scanning for index files...`);
     for await (const [entryName, entryHandle] of dirHandle.entries()) {
+      console.log(`[LOAD_INDEXES] Found entry: ${entryName} (kind: ${entryHandle.kind})`);
       if (entryHandle.kind !== "file") continue;
+      const versionSuffixPattern = /\.v\d+(?=-|$)/;
+      const normalizedName = entryName.replace(versionSuffixPattern, "");
       let type;
-      if (entryName.endsWith(".textindex-documents.bjson")) {
+      if (normalizedName.endsWith(".textindex-documents.bjson")) {
         type = "text";
-      } else if (entryName.endsWith(".rtree.bjson")) {
+      } else if (normalizedName.endsWith(".rtree.bjson")) {
         type = "geospatial";
-      } else if (entryName.endsWith(".bplustree.bjson")) {
+      } else if (normalizedName.endsWith(".bplustree.bjson")) {
         type = "regular";
       } else {
+        console.log(`[LOAD_INDEXES] Skipping non-index file: ${entryName}`);
         continue;
       }
-      const indexName = entryName.replace(/\.textindex-documents\.bjson$/, "").replace(/\.rtree\.bjson$/, "").replace(/\.bplustree\.bjson$/, "");
-      if (this.indexes.has(indexName)) continue;
+      const indexName = normalizedName.replace(/\.textindex-documents\.bjson$/, "").replace(/\.rtree\.bjson$/, "").replace(/\.bplustree\.bjson$/, "");
+      console.log(`[LOAD_INDEXES] Processing index: ${indexName} (type: ${type})`);
+      if (this.indexes.has(indexName)) {
+        console.log(`[LOAD_INDEXES] Index ${indexName} already loaded, skipping`);
+        continue;
+      }
       const keys = this._parseIndexName(indexName, type);
       if (!keys) {
+        console.log(`[LOAD_INDEXES] Could not parse index name: ${indexName}, skipping`);
         continue;
       }
       let index;
@@ -7270,10 +7518,12 @@ class Collection extends eventsExports.EventEmitter {
       try {
         await index.open();
         this.indexes.set(indexName, index);
+        console.log(`[LOAD_INDEXES] Successfully loaded index: ${indexName}`);
       } catch (err) {
-        console.warn(`Failed to open index ${indexName}:`, err);
+        console.warn(`[LOAD_INDEXES] Failed to open index ${indexName}:`, err);
       }
     }
+    console.log(`[LOAD_INDEXES] Finished loading indexes. Total loaded: ${this.indexes.size}`);
   }
   _parseIndexName(indexName, type) {
     const tokens = indexName.split("_");
@@ -7302,10 +7552,27 @@ class Collection extends eventsExports.EventEmitter {
    */
   async close() {
     if (!this._initialized) return;
-    await this.documents.close();
     for (const [indexName, index] of this.indexes) {
       await index.close();
     }
+    await this._maybeCompactDocuments();
+    await this.documents.close();
+    if (this._releaseDocuments) {
+      await this._releaseDocuments();
+      this._releaseDocuments = null;
+    }
+  }
+  async _maybeCompactDocuments() {
+    if (!this.documents || !this.documents.file) return;
+    const currentVersion = await getCurrentVersion(this.documentsPath);
+    if (currentVersion !== this.documentsVersion) return;
+    const fileSize = this.documents.file.getFileSize();
+    if (!fileSize || fileSize < DEFAULT_COMPACTION_MIN_BYTES) return;
+    const nextVersion = currentVersion + 1;
+    const compactPath = buildVersionedPath(this.documentsPath, nextVersion);
+    const destSyncHandle = await createSyncAccessHandle(compactPath, { reset: true });
+    await this.documents.compact(destSyncHandle);
+    await promoteVersion(this.documentsPath, nextVersion, currentVersion);
   }
   /**
    * Generate index name from keys
@@ -8502,13 +8769,49 @@ class Collection extends eventsExports.EventEmitter {
   }
   async drop() {
     if (!this._initialized) await this._initialize();
-    for (const [_, index] of this.indexes) {
+    console.log(`[DROP] Starting drop of collection ${this.name} at path ${this.path}`);
+    console.log(`[DROP] Indexes to close:`, Array.from(this.indexes.keys()));
+    for (const [indexName, index] of this.indexes) {
       if (index && typeof index.close === "function") {
+        console.log(`[DROP] Closing index: ${indexName}`);
         await index.close();
       }
     }
     if (this.documents && typeof this.documents.close === "function") {
+      console.log(`[DROP] Closing documents B+ tree`);
       await this.documents.close();
+    }
+    if (this._releaseDocuments) {
+      await this._releaseDocuments();
+      this._releaseDocuments = null;
+    }
+    try {
+      const pathParts2 = this.path.split("/").filter(Boolean);
+      let collectionDir = await globalThis.navigator.storage.getDirectory();
+      for (const part of pathParts2) {
+        collectionDir = await collectionDir.getDirectoryHandle(part, { create: false });
+      }
+      console.log(`[DROP] Found collection directory, listing files...`);
+      const entriesToDelete = [];
+      for await (const [entryName, entryHandle] of collectionDir.entries()) {
+        console.log(`[DROP] Found file: ${entryName}`);
+        entriesToDelete.push(entryName);
+      }
+      console.log(`[DROP] Deleting ${entriesToDelete.length} files...`);
+      for (const entryName of entriesToDelete) {
+        try {
+          await collectionDir.removeEntry(entryName, { recursive: false });
+          console.log(`[DROP] Deleted: ${entryName}`);
+        } catch (e) {
+          console.warn(`[DROP] Failed to delete ${entryName}:`, e);
+        }
+      }
+    } catch (error) {
+      if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
+        console.warn("[DROP] Error during file cleanup:", error);
+      } else {
+        console.log(`[DROP] Collection directory doesn't exist yet`);
+      }
     }
     const pathParts = this.path.split("/").filter(Boolean);
     const filename = pathParts.pop();
@@ -8518,10 +8821,14 @@ class Collection extends eventsExports.EventEmitter {
         dir = await dir.getDirectoryHandle(part, { create: false });
       }
       try {
+        console.log(`[DROP] Attempting recursive removal of directory: ${filename}`);
         await dir.removeEntry(filename, { recursive: true });
+        console.log(`[DROP] Successfully removed directory with recursive flag`);
       } catch (e) {
         if (e.name === "TypeError" || e.message?.includes("recursive")) {
+          console.log(`[DROP] Recursive not supported, trying non-recursive removal`);
           await dir.removeEntry(filename);
+          console.log(`[DROP] Successfully removed empty directory`);
         } else {
           throw e;
         }
@@ -8529,12 +8836,15 @@ class Collection extends eventsExports.EventEmitter {
     } catch (error) {
       if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
         throw error;
+      } else {
+        console.log(`[DROP] Parent directory doesn't exist`);
       }
     }
     this.documents = null;
     this.indexes.clear();
     this._initialized = false;
     this.db.collections.delete(this.name);
+    console.log(`[DROP] Collection ${this.name} dropped successfully`);
     this.emit("drop", { collection: this.name });
     return { ok: 1 };
   }
@@ -9474,6 +9784,9 @@ class Server {
 }
 function serializePayload(obj) {
   if (obj === null || obj === void 0) return obj;
+  if (typeof obj === "function") {
+    return { __function: obj.toString() };
+  }
   if (obj instanceof ObjectId) {
     return { __objectId: obj.toString() };
   }
@@ -9494,6 +9807,9 @@ function serializePayload(obj) {
 }
 function deserializePayload(obj) {
   if (obj === null || obj === void 0) return obj;
+  if (typeof obj === "object" && obj.__function) {
+    return typeof obj.__function === "string" ? `(${obj.__function}).call(this)` : void 0;
+  }
   if (typeof obj === "object" && obj.__objectId) {
     return new ObjectId(obj.__objectId);
   }

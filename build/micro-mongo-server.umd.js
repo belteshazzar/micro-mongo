@@ -1149,6 +1149,9 @@
         if (method === "dropIndexes") {
           this.indexes = [];
         }
+        if (method === "drop") {
+          this.indexes = [];
+        }
         return res;
       });
       return promise;
@@ -3734,6 +3737,9 @@
   }
   function serializePayload(obj) {
     if (obj === null || obj === void 0) return obj;
+    if (typeof obj === "function") {
+      return { __function: obj.toString() };
+    }
     if (obj instanceof ObjectId) {
       return { __objectId: obj.toString() };
     }
@@ -3754,6 +3760,9 @@
   }
   function deserializePayload(obj) {
     if (obj === null || obj === void 0) return obj;
+    if (typeof obj === "object" && obj.__function) {
+      return typeof obj.__function === "string" ? `(${obj.__function}).call(this)` : void 0;
+    }
     if (typeof obj === "object" && obj.__objectId) {
       return new ObjectId(obj.__objectId);
     }
