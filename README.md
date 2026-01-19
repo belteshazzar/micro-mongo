@@ -506,12 +506,12 @@ The following table summarises the API implementation status.
 
 | Name                               | Implemented |
 |------------------------------------|-------------|
-| db.collection.aggregate            | yes         | 
-| db.collection.bulkWrite            | no          | 
+| db.collection.aggregate            | yes         |
+| db.collection.bulkWrite            | no          |
 | db.collection.count                | yes         |
 | db.collection.copyTo               | yes         |
-| db.collection.createIndex          | yes         | 
-| db.collection.dataSize             | no          | 
+| db.collection.createIndex          | yes         |
+| db.collection.dataSize             | no          |
 | db.collection.deleteOne            | yes         |
 | db.collection.deleteMany           | yes         |
 | db.collection.distinct             | yes         |
