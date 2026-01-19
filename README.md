@@ -216,7 +216,7 @@ import { MongoClient, WorkerBridge } from 'micro-mongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
-    const client = new MongoClient('mongodb://localhost:27017', {
+    const client = new MongoClient('mongodb://localhost:27017/myapp', {
         workerBridge: bridge
     });
     await client.connect();
@@ -557,14 +557,14 @@ import { MongoClient, WorkerBridge } from 'micro-mongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
-    const client = new MongoClient('mongodb://localhost:27017', {
+    const client = new MongoClient('mongodb://localhost:27017/myapp', {
         workerBridge: bridge
     });
     await client.connect();
     const db = client.db('myapp');
     const collection = db.collection('users');
 
-    // Watch for changes to a collection
+    // Watch for changes to a collection (synchronous, returns immediately)
     const changeStream = collection.watch();
     
     changeStream.on('change', (change) => {
@@ -577,12 +577,12 @@ async function main() {
     await collection.updateOne({ name: 'Alice' }, { $set: { age: 31 } });
     await collection.deleteOne({ name: 'Alice' });
     
-    // Filter changes using aggregation pipelines
+    // Filter changes using aggregation pipelines (also synchronous)
     const filtered = collection.watch([
         { $match: { 'fullDocument.age': { $gte: 30 } } }
     ]);
     
-    // Watch at database level (all collections)
+    // Watch at database level (async, requires await)
     const dbStream = await db.watch();
     
     // Close when done
