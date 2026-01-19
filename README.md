@@ -322,6 +322,8 @@ npm run build
             await client.connect();
             const db = client.db('browserdb');
             
+            const output = document.getElementById('output');
+            
             // Insert button handler
             document.getElementById('insert').addEventListener('click', async () => {
                 await db.items.insertOne({ 
