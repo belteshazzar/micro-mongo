@@ -156,7 +156,7 @@ export class ChangeStream extends EventEmitter {
 	_createChangeEvent(operationType, collection, doc, updateDescription) {
 		const event = {
 			_id: {
-				_data: Buffer.from(String(++this._changeCounter)).toString('base64')
+				_data: btoa(String(++this._changeCounter))
 			},
 			operationType,
 			clusterTime: new Date(),
