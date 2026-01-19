@@ -1206,6 +1206,9 @@ class ProxyDB {
               return target._call(String(prop), args);
             };
           }
+          if (prop === "watch") {
+            return (...args) => target._watch(...args);
+          }
           return (...args) => target._call(String(prop), args);
         }
         return target.collection(prop, receiver);
@@ -1249,6 +1252,15 @@ class ProxyDB {
       return res;
     });
     return promise;
+  }
+  _watch(pipeline = [], options = {}) {
+    return ProxyChangeStream.create({
+      bridge: this.bridge,
+      database: this.dbName,
+      collection: null,
+      pipeline,
+      options
+    });
   }
 }
 class MongoClient extends eventsExports.EventEmitter {
