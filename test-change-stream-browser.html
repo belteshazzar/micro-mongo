@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Stream for-await-of Test</title>
+</head>
+<body>
+    <h1>Change Stream for-await-of Test</h1>
+    <button id="testBtn">Run Test</button>
+    <div id="output"></div>
+    
+    <script type="module">
+        import { MongoClient, WorkerBridge } from './build/micro-mongo-client.js';
+        
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p>Starting test...</p>';
+            
+            try {
+                const bridge = await WorkerBridge.create();
+                const client = new MongoClient('mongodb://localhost/testdb', { workerBridge: bridge });
+                await client.connect();
+                const db = client.db();
+                const collection = db.users;
+                
+                output.innerHTML += '<p>Creating change stream...</p>';
+                const changeStream = collection.watch();
+                const changes = [];
+                
+                // Start consuming changes in background
+                (async () => {
+                    output.innerHTML += '<p>Starting for-await loop...</p>';
+                    for await (const change of changeStream) {
+                        output.innerHTML += `<p>Received change: ${change.fullDocument?.name}</p>`;
+                        changes.push(change);
+                        if (changes.length === 2) {
+                            changeStream.close();
+                            break;
+                        }
+                    }
+                    output.innerHTML += '<p>For-await loop ended</p>';
+                })();
+                
+                // Give the async iterator time to start
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                output.innerHTML += '<p>Inserting Alice...</p>';
+                await collection.insertOne({ name: 'Alice' });
+                
+                output.innerHTML += '<p>Inserting Bob...</p>';
+                await collection.insertOne({ name: 'Bob' });
+                
+                // Wait for changes to be processed
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                output.innerHTML += `<p>Final changes count: ${changes.length}</p>`;
+                if (changes.length === 2) {
+                    output.innerHTML += '<p style="color: green; font-weight: bold;">✓ TEST PASSED</p>';
+                } else {
+                    output.innerHTML += '<p style="color: red; font-weight: bold;">✗ TEST FAILED</p>';
+                }
+                
+                await client.close();
+                await bridge.terminate();
+            } catch (error) {
+                output.innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>

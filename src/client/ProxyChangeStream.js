@@ -144,4 +144,17 @@ export class ProxyChangeStream extends EventEmitter {
       this._pendingNext.splice(index, 1);
     }
   }
+
+  /**
+   * Async iterator support for for-await-of loops
+   */
+  async *[Symbol.asyncIterator]() {
+    while (!this.closed) {
+      const change = await this.next();
+      if (change === null) {
+        break;
+      }
+      yield change;
+    }
+  }
 }
