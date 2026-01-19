@@ -3761,12 +3761,7 @@
   function deserializePayload(obj) {
     if (obj === null || obj === void 0) return obj;
     if (typeof obj === "object" && obj.__function) {
-      try {
-        const revived = new Function(`return ${obj.__function}`)();
-        return typeof revived === "function" ? revived : void 0;
-      } catch (e) {
-        return void 0;
-      }
+      return typeof obj.__function === "string" ? `(${obj.__function}).call(this)` : void 0;
     }
     if (typeof obj === "object" && obj.__objectId) {
       return new ObjectId(obj.__objectId);

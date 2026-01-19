@@ -34,12 +34,7 @@ function serializePayload(obj) {
 function deserializePayload(obj) {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'object' && obj.__function) {
-    try {
-      const revived = new Function(`return ${obj.__function}`)();
-      return typeof revived === 'function' ? revived : undefined;
-    } catch (e) {
-      return undefined;
-    }
+    return typeof obj.__function === 'string' ? `(${obj.__function}).call(this)` : undefined;
   }
   if (typeof obj === 'object' && obj.__objectId) {
     return new ObjectId(obj.__objectId);
@@ -164,4 +159,3 @@ initializeWorker().catch(err => {
     self.postMessage({ type: 'error', error: err.message });
   }
 });
-
