@@ -7460,7 +7460,6 @@ class Collection extends eventsExports.EventEmitter {
     }
   }
   async _loadIndexes() {
-    console.log(`[LOAD_INDEXES] Loading indexes for collection at path: ${this.path}`);
     let dirHandle;
     try {
       const parts = this.path.split("/").filter(Boolean);
@@ -7471,14 +7470,11 @@ class Collection extends eventsExports.EventEmitter {
       dirHandle = handle;
     } catch (err) {
       if (err?.name === "NotFoundError" || err?.code === "ENOENT") {
-        console.log(`[LOAD_INDEXES] Collection directory doesn't exist, no indexes to load`);
         return;
       }
       throw err;
     }
-    console.log(`[LOAD_INDEXES] Found collection directory, scanning for index files...`);
     for await (const [entryName, entryHandle] of dirHandle.entries()) {
-      console.log(`[LOAD_INDEXES] Found entry: ${entryName} (kind: ${entryHandle.kind})`);
       if (entryHandle.kind !== "file") continue;
       const versionSuffixPattern = /\.v\d+(?=-|$)/;
       const normalizedName = entryName.replace(versionSuffixPattern, "");
@@ -7490,18 +7486,14 @@ class Collection extends eventsExports.EventEmitter {
       } else if (normalizedName.endsWith(".bplustree.bjson")) {
         type = "regular";
       } else {
-        console.log(`[LOAD_INDEXES] Skipping non-index file: ${entryName}`);
         continue;
       }
       const indexName = normalizedName.replace(/\.textindex-documents\.bjson$/, "").replace(/\.rtree\.bjson$/, "").replace(/\.bplustree\.bjson$/, "");
-      console.log(`[LOAD_INDEXES] Processing index: ${indexName} (type: ${type})`);
       if (this.indexes.has(indexName)) {
-        console.log(`[LOAD_INDEXES] Index ${indexName} already loaded, skipping`);
         continue;
       }
       const keys = this._parseIndexName(indexName, type);
       if (!keys) {
-        console.log(`[LOAD_INDEXES] Could not parse index name: ${indexName}, skipping`);
         continue;
       }
       let index;
@@ -7518,12 +7510,9 @@ class Collection extends eventsExports.EventEmitter {
       try {
         await index.open();
         this.indexes.set(indexName, index);
-        console.log(`[LOAD_INDEXES] Successfully loaded index: ${indexName}`);
       } catch (err) {
-        console.warn(`[LOAD_INDEXES] Failed to open index ${indexName}:`, err);
       }
     }
-    console.log(`[LOAD_INDEXES] Finished loading indexes. Total loaded: ${this.indexes.size}`);
   }
   _parseIndexName(indexName, type) {
     const tokens = indexName.split("_");
@@ -8769,16 +8758,12 @@ class Collection extends eventsExports.EventEmitter {
   }
   async drop() {
     if (!this._initialized) await this._initialize();
-    console.log(`[DROP] Starting drop of collection ${this.name} at path ${this.path}`);
-    console.log(`[DROP] Indexes to close:`, Array.from(this.indexes.keys()));
     for (const [indexName, index] of this.indexes) {
       if (index && typeof index.close === "function") {
-        console.log(`[DROP] Closing index: ${indexName}`);
         await index.close();
       }
     }
     if (this.documents && typeof this.documents.close === "function") {
-      console.log(`[DROP] Closing documents B+ tree`);
       await this.documents.close();
     }
     if (this._releaseDocuments) {
@@ -8791,27 +8776,17 @@ class Collection extends eventsExports.EventEmitter {
       for (const part of pathParts2) {
         collectionDir = await collectionDir.getDirectoryHandle(part, { create: false });
       }
-      console.log(`[DROP] Found collection directory, listing files...`);
       const entriesToDelete = [];
       for await (const [entryName, entryHandle] of collectionDir.entries()) {
-        console.log(`[DROP] Found file: ${entryName}`);
         entriesToDelete.push(entryName);
       }
-      console.log(`[DROP] Deleting ${entriesToDelete.length} files...`);
       for (const entryName of entriesToDelete) {
         try {
           await collectionDir.removeEntry(entryName, { recursive: false });
-          console.log(`[DROP] Deleted: ${entryName}`);
         } catch (e) {
-          console.warn(`[DROP] Failed to delete ${entryName}:`, e);
         }
       }
     } catch (error) {
-      if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
-        console.warn("[DROP] Error during file cleanup:", error);
-      } else {
-        console.log(`[DROP] Collection directory doesn't exist yet`);
-      }
     }
     const pathParts = this.path.split("/").filter(Boolean);
     const filename = pathParts.pop();
@@ -8821,14 +8796,10 @@ class Collection extends eventsExports.EventEmitter {
         dir = await dir.getDirectoryHandle(part, { create: false });
       }
       try {
-        console.log(`[DROP] Attempting recursive removal of directory: ${filename}`);
         await dir.removeEntry(filename, { recursive: true });
-        console.log(`[DROP] Successfully removed directory with recursive flag`);
       } catch (e) {
         if (e.name === "TypeError" || e.message?.includes("recursive")) {
-          console.log(`[DROP] Recursive not supported, trying non-recursive removal`);
           await dir.removeEntry(filename);
-          console.log(`[DROP] Successfully removed empty directory`);
         } else {
           throw e;
         }
@@ -8836,15 +8807,12 @@ class Collection extends eventsExports.EventEmitter {
     } catch (error) {
       if (error.name !== "NotFoundError" && error.code !== "ENOENT") {
         throw error;
-      } else {
-        console.log(`[DROP] Parent directory doesn't exist`);
       }
     }
     this.documents = null;
     this.indexes.clear();
     this._initialized = false;
     this.db.collections.delete(this.name);
-    console.log(`[DROP] Collection ${this.name} dropped successfully`);
     this.emit("drop", { collection: this.name });
     return { ok: 1 };
   }
