@@ -117,6 +117,10 @@ export class ComparisonHarness {
 		this.microMongoDB = null;
 		this.bridge = null;
 		this.differences = [];
+		this.timings = {
+			mongodb: [],
+			micromongo: []
+		};
 	}
 
 	/**
@@ -161,7 +165,7 @@ export class ComparisonHarness {
 	}
 
 	/**
-	 * Close both connections
+	 * Close both connections and display timing statistics
 	 */
 	async close() {
 		const errors = [];
@@ -190,9 +194,78 @@ export class ComparisonHarness {
 			}
 		}
 		
+		// Display timing statistics
+		this.displayTimingStats();
+		
 		if (errors.length > 0) {
 			throw new Error(errors.join(', '));
 		}
+	}
+
+	/**
+	 * Display timing comparison statistics
+	 */
+	displayTimingStats() {
+		if (this.timings.mongodb.length === 0 && this.timings.micromongo.length === 0) {
+			return;
+		}
+
+		const mongodbTotal = this.timings.mongodb.reduce((sum, t) => sum + t.time, 0);
+		const micromongoTotal = this.timings.micromongo.reduce((sum, t) => sum + t.time, 0);
+
+		console.log('\n' + '='.repeat(70));
+		console.log('TIMING COMPARISON REPORT'.padStart(52));
+		console.log('='.repeat(70));
+
+		// Group timings by operation
+		const operationStats = {};
+		
+		for (const timing of this.timings.mongodb) {
+			const key = `${timing.operation}`;
+			if (!operationStats[key]) {
+				operationStats[key] = { mongodb: [], micromongo: [] };
+			}
+			operationStats[key].mongodb.push(timing.time);
+		}
+
+		for (const timing of this.timings.micromongo) {
+			const key = `${timing.operation}`;
+			if (!operationStats[key]) {
+				operationStats[key] = { mongodb: [], micromongo: [] };
+			}
+			operationStats[key].micromongo.push(timing.time);
+		}
+
+		// Display per-operation statistics
+		console.log('\nPer-Operation Performance:');
+		console.log('-'.repeat(70));
+		console.log('Operation              MongoDB         Micro-Mongo     Ratio     ');
+		console.log('-'.repeat(70));
+
+		for (const [operation, stats] of Object.entries(operationStats)) {
+			const mongoAvg = stats.mongodb.length > 0 
+				? stats.mongodb.reduce((a, b) => a + b, 0) / stats.mongodb.length 
+				: 0;
+			const micromongoAvg = stats.micromongo.length > 0 
+				? stats.micromongo.reduce((a, b) => a + b, 0) / stats.micromongo.length 
+				: 0;
+			const ratio = mongoAvg > 0 ? (micromongoAvg / mongoAvg).toFixed(2) : 'N/A';
+
+			const opName = operation.substring(0, 19).padEnd(20);
+			const mongoTime = mongoAvg.toFixed(3).padEnd(15) + 'ms';
+			const microTime = micromongoAvg.toFixed(3).padEnd(12) + 'ms';
+			const ratioStr = ratio + 'x';
+
+			console.log(`${opName} ${mongoTime} ${microTime} ${ratioStr}`);
+		}
+
+		console.log('-'.repeat(70));
+		console.log('\nOverall Statistics:');
+		console.log(`  MongoDB Total Time:     ${mongodbTotal.toFixed(2)}ms`);
+		console.log(`  Micro-Mongo Total Time: ${micromongoTotal.toFixed(2)}ms`);
+		console.log(`  Operations Compared:    ${this.timings.mongodb.length}`);
+		console.log(`  Speed Ratio:            ${(micromongoTotal / mongodbTotal).toFixed(2)}x`);
+		console.log('='.repeat(70) + '\n');
 	}
 
 	/**
@@ -223,9 +296,11 @@ export class ComparisonHarness {
 
 		let mongoResult, microMongoResult;
 		let mongoError, microMongoError;
+		let mongoTime, microMongoTime;
 
 		// Execute on MongoDB
 		try {
+			const startTime = performance.now();
 			const result = await mongoCollection[operation](...args);
 			// Handle cursor results
 			if (result && typeof result.toArray === 'function') {
@@ -233,12 +308,15 @@ export class ComparisonHarness {
 			} else {
 				mongoResult = result;
 			}
+			mongoTime = performance.now() - startTime;
+			this.timings.mongodb.push({ operation, collectionName, time: mongoTime });
 		} catch (error) {
 			mongoError = error;
 		}
 
 		// Execute on micro-mongo
 		try {
+			const startTime = performance.now();
 			const result = await microMongoCollection[operation](...args);
 			// Handle cursor results
 			if (result && typeof result.toArray === 'function') {
@@ -246,6 +324,8 @@ export class ComparisonHarness {
 			} else {
 				microMongoResult = result;
 			}
+			microMongoTime = performance.now() - startTime;
+			this.timings.micromongo.push({ operation, collectionName, time: microMongoTime });
 		} catch (error) {
 			microMongoError = error;
 		}

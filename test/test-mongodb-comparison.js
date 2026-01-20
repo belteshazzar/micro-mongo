@@ -385,4 +385,106 @@ describe('MongoDB Comparison Tests', function() {
 			]);
 		});
 	});
+
+	describe('Performance: Large Dataset Operations', function() {
+		this.timeout(30000); // Increase timeout for large operations
+		
+		const collectionName = 'performance_test';
+		const docCount = 1000;
+		
+		beforeEach(async function() {
+			// Clear collection
+			await harness.cleanup(collectionName);
+			
+			// Insert large dataset
+			const docs = Array.from({ length: docCount }, (_, i) => ({
+				index: i,
+				name: `User ${i}`,
+				email: `user${i}@example.com`,
+				age: Math.floor(Math.random() * 80) + 18,
+				score: Math.random() * 100,
+				active: Math.random() > 0.5,
+				tags: [`tag${i % 5}`, `tag${i % 7}`, `tag${i % 11}`],
+				metadata: {
+					created: new Date(2024, 0, 1 + (i % 365)),
+					updated: new Date(),
+					count: i,
+					flag: i % 2 === 0
+				}
+			}));
+			
+			console.log(`\n[Performance Test] Inserting ${docCount} documents...`);
+			await harness.compareOperation(collectionName, 'insertMany', [docs], { 
+				skipComparison: true 
+			});
+		});
+		
+		afterEach(async function() {
+			await harness.cleanup(collectionName);
+		});
+
+		it('should handle bulk find operations on large dataset', async function() {
+			await harness.compareOperation(collectionName, 'find', [{}]);
+		});
+
+		it('should handle filtered queries on large dataset', async function() {
+			await harness.compareOperation(collectionName, 'find', [
+				{ active: true, age: { $gte: 30 } }
+			]);
+		});
+
+		it('should handle complex nested queries on large dataset', async function() {
+			await harness.compareOperation(collectionName, 'find', [
+				{ 'metadata.flag': true, score: { $gte: 50 } }
+			]);
+		});
+
+		it('should handle range queries on large dataset', async function() {
+			await harness.compareOperation(collectionName, 'find', [
+				{ index: { $gte: 200, $lte: 800 } }
+			]);
+		});
+
+		it('should handle bulk update operations', async function() {
+			await harness.compareOperation(collectionName, 'updateMany', [
+				{ active: true },
+				{ $set: { score: 95 }, $inc: { 'metadata.count': 1 } }
+			], { skipComparison: true });
+		});
+
+		it('should handle bulk delete operations', async function() {
+			await harness.compareOperation(collectionName, 'deleteMany', [
+				{ index: { $lt: 100 } }
+			], { skipComparison: true });
+		});
+
+		it('should handle sequential mixed operations', async function() {
+			// Series of alternating operations on the dataset
+			console.log(`\n[Performance Test] Running sequential mixed operations...`);
+			
+			// Find all
+			await harness.compareOperation(collectionName, 'find', [{}]);
+			
+			// Insert one
+			await harness.compareOperation(collectionName, 'insertOne', [
+				{ index: 9999, name: 'New User', age: 25 }
+			], { skipComparison: true });
+			
+			// Find with filter
+			await harness.compareOperation(collectionName, 'find', [
+				{ age: { $gt: 50 } }
+			]);
+			
+			// Update
+			await harness.compareOperation(collectionName, 'updateOne', [
+				{ index: 9999 },
+				{ $set: { age: 26 } }
+			], { skipComparison: true });
+			
+			// Find after update
+			await harness.compareOperation(collectionName, 'find', [
+				{ index: 9999 }
+			]);
+		});
+	});
 });
