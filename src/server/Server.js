@@ -80,6 +80,11 @@ export class Server {
     if (awaited && awaited.constructor?.name === 'ChangeStream') {
       return this._registerChangeStream(awaited);
     }
+    
+    // Also check if it's an EventEmitter with specific ChangeStream properties
+    if (awaited && typeof awaited.on === 'function' && awaited.hasOwnProperty('pipeline') && awaited.hasOwnProperty('_changeCounter')) {
+      return this._registerChangeStream(awaited);
+    }
 
     return awaited;
   }

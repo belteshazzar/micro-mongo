@@ -5,21 +5,21 @@ export default defineConfig(({ mode }) => {
   const isProd = mode === 'production';
   return {
     build: {
-      emptyOutDir: false, // preserve main build output
       lib: {
-        entry: resolve(__dirname, 'src/server/ServerWorker.js'),
+        entry: resolve(__dirname, 'main.js'),
+        name: 'MicroMongo',
         formats: ['es'],
-        // Keep a stable filename; we still minify in prod but don’t change the name
-        fileName: () => 'micro-mongo-server-worker.js'
+        fileName: () => isProd ? 'micro-mongo-browser.min.js' : 'micro-mongo-browser.js'
       },
       outDir: 'build',
+      emptyOutDir: false,
       sourcemap: true,
       minify: isProd ? 'terser' : false,
       rollupOptions: {
-        // Exclude Node-only modules so the browser worker stays lean; Node resolves builtins at runtime.
+        // Exclude Node-only deps from browser bundle
         external: ['worker_threads', 'node-opfs', 'fs', 'path', 'url', 'mongodb'],
         output: {
-          inlineDynamicImports: true
+          globals: {}
         }
       }
     }

@@ -4,7 +4,7 @@ import { ObjectId } from 'bjson';
 /**
  * Serialize ObjectId and Date instances for worker communication
  */
-function serializePayload(obj) {
+function serializePayload(obj, seen = new WeakSet()) {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'function') {
     return { __function: obj.toString() };
@@ -31,13 +31,22 @@ function serializePayload(obj) {
   if (obj instanceof Date) {
     return { __date: obj.toISOString() };
   }
+  
+  // Check for circular references
+  if (typeof obj === 'object') {
+    if (seen.has(obj)) {
+      return undefined; // Skip circular references
+    }
+    seen.add(obj);
+  }
+  
   if (Array.isArray(obj)) {
-    return obj.map(serializePayload);
+    return obj.map(item => serializePayload(item, seen));
   }
   if (typeof obj === 'object') {
     const result = {};
     for (const [key, value] of Object.entries(obj)) {
-      result[key] = serializePayload(value);
+      result[key] = serializePayload(value, seen);
     }
     return result;
   }

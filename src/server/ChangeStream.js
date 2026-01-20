@@ -21,6 +21,37 @@ export class ChangeStream extends EventEmitter {
 	}
 
 	/**
+	 * Check if target is a DB instance (handles Proxies and minification)
+	 */
+	_isDB(target) {
+		// Check for DB-specific properties that won't trigger collection creation
+		// Use hasOwnProperty or check the collections Map directly
+		return target && 
+			typeof target.dbName === 'string' && 
+			typeof target.getCollectionNames === 'function' &&
+			target.collections instanceof Map;
+	}
+
+	/**
+	 * Check if target is a Server instance
+	 */
+	_isServer(target) {
+		return target && 
+			target.databases instanceof Map &&
+			typeof target._getDB === 'function';
+	}
+
+	/**
+	 * Check if target is a MongoClient instance
+	 */
+	_isMongoClient(target) {
+		return target && 
+			typeof target.connect === 'function' &&
+			typeof target.db === 'function' &&
+			target.constructor.name === 'MongoClient'; // MongoClient is not minified same way
+	}
+
+	/**
 	 * Start watching for changes
 	 * @private
 	 */
@@ -34,17 +65,17 @@ export class ChangeStream extends EventEmitter {
 		}
 		
 		// For Server watching, intercept _getDB calls
-		if (this.target.constructor.name === 'Server') {
+		if (this._isServer(this.target)) {
 			this._interceptServerDBCreation();
 		}
 		
 		// For DB watching, we also need to intercept new collection creation
-		if (this.target.constructor.name === 'DB') {
+		if (this._isDB(this.target)) {
 			this._interceptDBCollectionCreation();
 		}
 		
 		// For MongoClient watching, intercept db() calls
-		if (this.target.constructor.name === 'MongoClient') {
+		if (this._isMongoClient(this.target)) {
 			this._interceptClientDBCreation();
 		}
 	}
@@ -57,7 +88,7 @@ export class ChangeStream extends EventEmitter {
 		const collections = [];
 		
 		// Server - watch all collections in all databases
-		if (this.target.constructor.name === 'Server') {
+		if (this._isServer(this.target)) {
 			// Watch all existing databases
 			for (const [dbName, db] of this.target.databases) {
 				const collectionNames = db.getCollectionNames();
@@ -72,14 +103,14 @@ export class ChangeStream extends EventEmitter {
 		}
 		
 		// MongoClient - watch all collections in all databases
-		if (this.target.constructor.name === 'MongoClient') {
+		if (this._isMongoClient(this.target)) {
 			// Store reference to monitor for new databases/collections
 			this._monitorClient();
 			return collections;
 		}
 		
 		// DB - watch all collections in the database
-		if (this.target.constructor.name === 'DB') {
+		if (this._isDB(this.target)) {
 			const collectionNames = this.target.getCollectionNames();
 			for (const name of collectionNames) {
 				const collection = this.target[name];
@@ -383,14 +414,24 @@ export class ChangeStream extends EventEmitter {
 	 * @private
 	 */
 	_interceptDBCollectionCreation() {
+		// Since DB is a Proxy, we need to override getCollection() on the target, not collection() on the proxy
+		// The Proxy's get trap will always return methods from the target via Reflect.get
 		const db = this.target;
-		const originalCollection = db.collection.bind(db);
-		const originalCreateCollection = db.createCollection.bind(db);
+		
+		// Get the actual DB instance (not the proxy) by accessing _proxy property or finding it
+		// The DB constructor stores 'this' before returning the proxy, so we can access it
+		let actualDB = db;
+		// If db has _proxy, it means db IS the proxy and we need to get through to the real target
+		// But we can't easily do that. Instead, we need to override on the object itself.
+		// The trick is to override getCollection, since that's what collection() calls
+		
+		const originalGetCollection = db.getCollection.bind(db);
+		const originalCreateCollection = db.createCollection ? db.createCollection.bind(db) : null;
 		const self = this;
 		
-		// Override collection() method to watch new collections
-		db.collection = function(name) {
-			const col = originalCollection(name);
+		// Override getCollection() method to watch new collections
+		db.getCollection = function(name) {
+			const col = originalGetCollection(name);
 			// Watch this collection if we haven't already
 			if (col && col.isCollection && !self._listeners.has(col)) {
 				self._watchCollection(col);
@@ -398,17 +439,22 @@ export class ChangeStream extends EventEmitter {
 			return col;
 		};
 		
-		// Override createCollection() method
-		db.createCollection = function(name) {
-			originalCreateCollection(name);
-			const col = db[name];
-			if (col && col.isCollection && !self._listeners.has(col)) {
-				self._watchCollection(col);
-			}
-		};
+		// Override createCollection() method if it exists
+		if (originalCreateCollection) {
+			db.createCollection = function(name) {
+				originalCreateCollection(name);
+				const col = db[name];
+				if (col && col.isCollection && !self._listeners.has(col)) {
+					self._watchCollection(col);
+				}
+			};
+		}
 		
 		// Store originals for cleanup
-		this._originalDBMethods = { collection: originalCollection, createCollection: originalCreateCollection };
+		this._originalDBMethods = { 
+			getCollection: originalGetCollection, 
+			createCollection: originalCreateCollection 
+		};
 	}
 
 	/**

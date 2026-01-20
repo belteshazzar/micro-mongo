@@ -11,12 +11,24 @@
     "cover": "c8 --reporter=html --reporter=text --reporter=lcov npm test",
     "build": "npm run build:clean && npm run build:dev && npm run build:min",
     "build:clean": "rm -rf build",
-    "build:dev": "vite build && vite build --config vite.worker.config.js",
-    "build:min": "vite build --config vite.config.min.js --mode production",
+    "build:dev": "vite build --config vite.browser.config.js && vite build --config vite.node.config.js && vite build --config vite.worker.config.js",
+    "build:min": "vite build --config vite.browser.config.js --mode production && vite build --config vite.node.config.js --mode production && vite build --config vite.worker.config.js --mode production",
     "dev": "vite",
     "preview": "vite preview"
   },
   "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./build/micro-mongo-browser.js",
+      "import": "./build/micro-mongo-node.js",
+      "default": "./build/micro-mongo-browser.js"
+    },
+    "./browser": "./build/micro-mongo-browser.js",
+    "./browser.min": "./build/micro-mongo-browser.min.js",
+    "./node": "./build/micro-mongo-node.js",
+    "./node.min": "./build/micro-mongo-node.min.js",
+    "./worker": "./build/micro-mongo-server-worker.js"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/belteshazzar/micro-mongo.git"
