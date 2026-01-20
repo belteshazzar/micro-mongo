@@ -273,6 +273,38 @@ Supports arithmetic (`$add`, `$multiply`), comparison (`$eq`, `$gt`), logical (`
 
   `npm test`
 
+### MongoDB Comparison Testing
+
+Micro-Mongo includes a test harness for comparing behavior against real MongoDB to ensure API compatibility. This helps verify that micro-mongo behaves identically to MongoDB.
+
+**Quick Start:**
+
+1. Start MongoDB (using Docker):
+   ```bash
+   docker run -d -p 27017:27017 --name mongodb mongo:latest
+   ```
+
+2. Install MongoDB driver:
+   ```bash
+   npm install mongodb
+   ```
+
+3. Run comparison tests:
+   ```bash
+   npm run test:comparison
+   ```
+
+**What's tested:**
+- ✅ CRUD operations (insert, find, update, delete)
+- ✅ Query operators ($gt, $lt, $in, $and, $or, etc.)
+- ✅ Update operators ($set, $inc, $push, $unset, etc.)
+- ✅ Aggregation pipelines ($match, $group, $sort, $project, etc.)
+- ✅ Complex queries (nested fields, arrays, $elemMatch, etc.)
+
+For detailed documentation, see:
+- [MongoDB Comparison Quick Start](docs/MONGODB_COMPARISON_QUICKSTART.md)
+- [Complete Documentation](docs/MONGODB_COMPARISON.md)
+
 ## In the Browser
 
 Micro-Mongo works seamlessly in modern browsers with automatic OPFS persistence.
