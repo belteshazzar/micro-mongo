@@ -1,6 +1,6 @@
 # Micro-Mongo
 
-A JavaScript implementation of the MongoDB query API with persistent storage using the Origin Private File System (OPFS). Micro-Mongo runs database operations in a Web Worker (browser) or Worker Thread (Node.js) for optimal performance.
+A JavaScript implementation of the MongoDB query API with persistent storage using the Origin Private File System (OPFS). Micro-Mongo runs database operations in a Web Worker (browser) or Worker Thread (Node.js).
 
 **Key Features:**
 - 🚀 **Web Worker Architecture:** Database operations run in a separate thread, keeping your UI responsive
@@ -17,7 +17,7 @@ A JavaScript implementation of the MongoDB query API with persistent storage usi
 
   `npm install micro-mongo`
 
-### Usage with Web Worker (Recommended)
+### Usage
 
 Micro-Mongo uses a web worker architecture to keep database operations off the main thread. The `WorkerBridge` manages communication between your application and the database worker:
 
@@ -74,22 +74,7 @@ main().catch(console.error);
 - ✅ Efficient isolation of database logic
 - ✅ Better performance for large datasets
 - ✅ Works seamlessly in both browser and Node.js
-
-### Legacy Synchronous Usage (Deprecated)
-
-For backwards compatibility, synchronous usage is still supported but not recommended:
-
-```javascript
-// Note: This pattern is deprecated. Use WorkerBridge + MongoClient instead.
-var mongo = require('micro-mongo');
-var db = new mongo.DB()
-db.createCollection("sample")
-db.sample.insert({ age: 4,	legs: 0	});
-var cur = db.sample.find({ age: 4 })
-cur.next()
-```
-
-**Note:** The synchronous pattern is maintained for backwards compatibility but will not benefit from web worker architecture or OPFS persistence. New applications should use the WorkerBridge pattern shown above.
+- ✅ Uses synchronous file access which is only available in Web Workers.
 
 ### Using Indexes
 
@@ -691,4 +676,5 @@ See [docs/ARRAY-FILTERS.md](docs/ARRAY-FILTERS.md) for complete documentation an
 | cursor.tailable         | no              |
 | cursor.toArray          | yes             |
 | cursor.next()           | yes             |
+
 
