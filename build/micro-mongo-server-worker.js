@@ -9755,6 +9755,15 @@ function serializePayload(obj) {
   if (typeof obj === "function") {
     return { __function: obj.toString() };
   }
+  if (obj && typeof obj === "object" && typeof obj.toString === "function") {
+    try {
+      const str = obj.toString();
+      if (str && str.length === 24 && /^[0-9a-f]{24}$/i.test(str) && obj.constructor && obj.constructor.name === "ObjectId") {
+        return { __objectId: str };
+      }
+    } catch (e) {
+    }
+  }
   if (obj instanceof ObjectId) {
     return { __objectId: obj.toString() };
   }

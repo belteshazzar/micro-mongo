@@ -55,6 +55,7 @@
   "dependencies": {
     "bjson": "github:belteshazzar/bjson",
     "events": "^3.3.0",
+    "mongodb": "^7.0.0",
     "node-opfs": "github:belteshazzar/node-opfs",
     "stemmer": "^2.0.1"
   }

@@ -9,9 +9,25 @@ function serializePayload(obj) {
   if (typeof obj === 'function') {
     return { __function: obj.toString() };
   }
+  
+  // Check for ObjectId instances - try toString() first as it's the most reliable way
+  if (obj && typeof obj === 'object' && typeof obj.toString === 'function') {
+    try {
+      const str = obj.toString();
+      // bjson ObjectIds produce 24-character hex strings
+      if (str && str.length === 24 && /^[0-9a-f]{24}$/i.test(str) && obj.constructor && obj.constructor.name === 'ObjectId') {
+        return { __objectId: str };
+      }
+    } catch (e) {
+      // toString() failed, continue to next check
+    }
+  }
+  
+  // Traditional instanceof check (may fail across worker boundaries in some cases)
   if (obj instanceof ObjectId) {
     return { __objectId: obj.toString() };
   }
+  
   if (obj instanceof Date) {
     return { __date: obj.toISOString() };
   }

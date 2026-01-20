@@ -1,6 +1,6 @@
 # Browser Testing with Playwright
 
-This directory contains browser tests for micro-mongo using Playwright instead of Puppeteer.
+This directory contains browser tests for micro-mongo using Playwright.
 
 ## Setup
 
@@ -21,7 +21,7 @@ npm run build
 
 4. Start a local HTTP server (in a separate terminal):
 ```bash
-python3 -m http.server 8080
+npm run dev
 ```
 
 Or use any other static file server on port 8080.
@@ -54,35 +54,6 @@ The browser tests verify that micro-mongo works correctly in a real browser envi
 4. **Query Operators** - $gt, $in, $and, etc.
 5. **Aggregation Pipeline** - $group, $sort, etc.
 6. **Indexes** - Index creation and usage
-
-## Migration from Puppeteer
-
-The tests have been migrated from Puppeteer to Playwright for better:
-- Cross-browser support
-- Modern async/await API
-- Better error reporting
-- Faster test execution
-- Official support and updates
-
-### Key Differences
-
-**Puppeteer:**
-```javascript
-const browser = await puppeteer.launch();
-const page = await browser.newPage();
-await page.goto(url);
-const element = await page.waitForSelector('selector');
-const text = await element.evaluate(el => el.textContent);
-```
-
-**Playwright:**
-```javascript
-const browser = await chromium.launch();
-const page = await browser.newPage();
-await page.goto(url);
-const element = await page.locator('selector');
-const text = await element.textContent();
-```
 
 ## Environment Variables
 

@@ -134,7 +134,6 @@ export class ComparisonHarness {
 			this.mongoClient = new RealMongoClient(mongoUrl);
 			await this.mongoClient.connect();
 			this.mongoDB = this.mongoClient.db(dbName);
-			console.log('✓ Connected to real MongoDB');
 		} catch (error) {
 			throw new Error(
 				`Failed to connect to MongoDB at ${mongoUrl}. ` +
@@ -152,7 +151,6 @@ export class ComparisonHarness {
 			});
 			await this.microMongoClient.connect();
 			this.microMongoDB = this.microMongoClient.db(dbName);
-			console.log('✓ Connected to micro-mongo');
 		} catch (error) {
 			// Clean up MongoDB connection if micro-mongo fails
 			if (this.mongoClient) {

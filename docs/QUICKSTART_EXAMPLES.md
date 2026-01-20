@@ -25,20 +25,6 @@ async function main() {
 main().catch(console.error);
 ```
 
-## Why This Change?
-
-The new architecture separates client (main thread) from server (worker thread):
-
-- **WorkerBridge**: Manages communication between threads
-- **MongoClient**: Proxy that uses the bridge to talk to the server
-- **Server**: Runs in a worker thread and executes queries
-
-This allows:
-- ✅ Proper thread isolation
-- ✅ Non-blocking operations
-- ✅ Multiple clients sharing one worker
-- ✅ Clear separation of concerns
-
 ## Running the Examples
 
 All examples are ready to run:
@@ -172,6 +158,4 @@ All these files have been updated:
 
 ## See Also
 
-- [DOCS_EXAMPLES_UPDATE.md](DOCS_EXAMPLES_UPDATE.md) - Detailed migration guide
 - [../README.md](../README.md) - Main documentation
-- [../docs/ARCHITECTURE_VISUAL.md](ARCHITECTURE_VISUAL.md) - Architecture diagrams
