@@ -321,7 +321,7 @@ export class ComparisonHarness {
 	/**
 	 * Assert that both databases are in sync
 	 */
-	assertNoGifferences() {
+	assertNoDifferences() {
 		if (this.differences.length > 0) {
 			const summary = this.differences.map(d => 
 				`${d.collection}.${d.operation}: ${d.error}`
@@ -343,7 +343,7 @@ export function createComparisonSuite(suiteName, testFn) {
 		try {
 			await harness.connect();
 			await testFn(harness);
-			harness.assertNoGifferences();
+			harness.assertNoDifferences();
 		} catch (error) {
 			console.error(`\nComparison test failed: ${suiteName}`);
 			console.error(error.message);
