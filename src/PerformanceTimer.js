@@ -36,7 +36,11 @@ export class PerformanceTimer {
   end(timer, additionalDetails = {}) {
     if (!this.enabled || !timer) return;
 
-    this.nestedLevel--;
+    // Decrement nested level regardless of whether we record timing
+    // This ensures nesting doesn't get permanently corrupted even if end() is called without valid timer
+    if (this.nestedLevel > 0) {
+      this.nestedLevel--;
+    }
     
     const endTime = performance.now();
     const duration = endTime - timer.startTime;

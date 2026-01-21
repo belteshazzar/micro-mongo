@@ -1601,7 +1601,7 @@ export class Collection extends EventEmitter {
         
         globalTimer.end(stageTimer, { outputDocs: results.length });
       } else {
-        globalTimer.end(stageTimer);
+        globalTimer.end(stageTimer, { error: true, stageType });
         throw new QueryError('Unsupported aggregation stage: ' + stageType, {
           collection: this.name,
           code: ErrorCodes.FAILED_TO_PARSE
@@ -1949,7 +1949,7 @@ export class Collection extends EventEmitter {
 
     globalTimer.end(timer, { docsReturned: result.length, hasIndexes: this.indexes.size > 0 });
     
-    // Return the documents array directly, not a Cursor
+    // Return projected/copied documents
     return result;
   }
 

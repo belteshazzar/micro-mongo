@@ -60,8 +60,8 @@ export class NodeProfiler {
       try {
         observer.observe({ entryTypes: ['measure', 'mark'] });
       } catch (e) {
-        // Some entry types might not be supported
-        console.warn('Performance observer setup warning:', e.message);
+        // Some entry types might not be supported in this Node.js version
+        console.warn(`Performance observer setup: ${e.message}. User timing may not be fully tracked.`);
       }
     }
   }
