@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { ObjectId } from 'bjson';
+import { globalTimer } from '../PerformanceTimer.js';
 
 /**
  * Serialize ObjectId and Date instances for worker communication
@@ -118,8 +119,11 @@ export class WorkerBridge extends EventEmitter {
    * @param {number} [opts.timeout] - Optional timeout in ms.
    */
   sendRequest(payload, opts = {}) {
+    const serializeTimer = globalTimer.start('ipc', 'serialize');
     const id = this._nextId++;
     const serializedPayload = serializePayload(payload);
+    globalTimer.end(serializeTimer);
+    
     const message = { type: 'request', id, payload: serializedPayload };
 
     return new Promise((resolve, reject) => {
@@ -130,6 +134,20 @@ export class WorkerBridge extends EventEmitter {
           reject(new Error(`Worker request timed out after ${opts.timeout}ms`));
         }, opts.timeout);
       }
+
+      const ipcTimer = globalTimer.start('ipc', 'roundtrip', { requestId: id });
+      const originalResolve = resolve;
+      const originalReject = reject;
+      
+      resolve = (result) => {
+        globalTimer.end(ipcTimer);
+        originalResolve(result);
+      };
+      
+      reject = (error) => {
+        globalTimer.end(ipcTimer);
+        originalReject(error);
+      };
 
       this._pending.set(id, { resolve, reject, timeoutHandle });
       this._post(message);
@@ -160,7 +178,9 @@ export class WorkerBridge extends EventEmitter {
       this._pending.delete(data.id);
       clearTimeout(pending.timeoutHandle);
       if (data.success) {
+        const deserializeTimer = globalTimer.start('ipc', 'deserialize');
         const deserializedResult = deserializePayload(data.result);
+        globalTimer.end(deserializeTimer);
         pending.resolve(deserializedResult);
       } else {
         const error = new Error(data.error?.message || 'Worker error');
