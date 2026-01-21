@@ -6,7 +6,7 @@
  */
 
 import { strict as assert } from 'assert';
-import { MongoClient as MicroMongoClient, WorkerBridge } from '../main.js';
+import { MongoClient as MicroMongoClient, WorkerBridge, globalTimer } from '../main.js';
 
 /**
  * Deep comparison utility that handles MongoDB-specific types
@@ -110,7 +110,7 @@ function normalizeResult(result, type) {
  * ComparisonHarness class for running parallel tests
  */
 export class ComparisonHarness {
-	constructor() {
+	constructor(options = {}) {
 		this.mongoClient = null;
 		this.microMongoClient = null;
 		this.mongoDB = null;
@@ -121,6 +121,11 @@ export class ComparisonHarness {
 			mongodb: [],
 			micromongo: []
 		};
+		// Enable detailed performance timing for micro-mongo
+		this.enableDetailedTiming = options.enableDetailedTiming !== false; // Default to true
+		if (this.enableDetailedTiming) {
+			globalTimer.setEnabled(true);
+		}
 	}
 
 	/**
@@ -266,6 +271,11 @@ export class ComparisonHarness {
 		console.log(`  Operations Compared:    ${this.timings.mongodb.length}`);
 		console.log(`  Speed Ratio:            ${(micromongoTotal / mongodbTotal).toFixed(2)}x`);
 		console.log('='.repeat(70) + '\n');
+		
+		// Display detailed timing breakdown from globalTimer if enabled
+		if (this.enableDetailedTiming && globalTimer.getTimings().length > 0) {
+			console.log(globalTimer.formatTimings());
+		}
 	}
 
 	/**

@@ -8,6 +8,9 @@ export { ObjectId } from 'bjson';
 export { ChangeStream } from './src/server/ChangeStream.js';
 export { WorkerBridge } from './src/client/WorkerBridge.js';
 
+// Export performance timing utilities
+export { PerformanceTimer, globalTimer } from './src/PerformanceTimer.js';
+
 // Export error classes and codes
 export { 
 	ErrorCodes,

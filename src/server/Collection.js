@@ -29,6 +29,7 @@ import {
 } from '../errors.js';
 import { ObjectId } from 'bjson';
 import { BPlusTree } from 'bjson/bplustree';
+import { globalTimer } from '../PerformanceTimer.js';
 
 /**
  * Collection class
@@ -446,6 +447,8 @@ export class Collection extends EventEmitter {
 
   // Collection methods
   async aggregate(pipeline) {
+    const timer = globalTimer.start('collection', 'aggregate', { collection: this.name, stageCount: pipeline?.length || 0 });
+    
     if (!pipeline || !isArray(pipeline)) {
       throw new QueryError('Pipeline must be an array', {
         collection: this.name,
@@ -454,6 +457,7 @@ export class Collection extends EventEmitter {
     }
 
     // Start with all documents
+    const loadTimer = globalTimer.start('collection', 'aggregate.loadDocuments');
     let results = [];
     const cursor = this.find({});
     await cursor._ensureInitialized();
@@ -461,6 +465,7 @@ export class Collection extends EventEmitter {
     while (await cursor.hasNext()) {
       results.push(await cursor.next());
     }
+    globalTimer.end(loadTimer, { docCount: results.length });
 
     // Process each stage in the pipeline
     for (let i = 0; i < pipeline.length; i++) {
@@ -474,6 +479,8 @@ export class Collection extends EventEmitter {
       }
       const stageType = stageKeys[0];
       const stageSpec = stage[stageType];
+      
+      const stageTimer = globalTimer.start('collection', `aggregate.${stageType}`, { inputDocs: results.length });
 
       if (stageType === "$match") {
         // Filter documents based on query
@@ -484,6 +491,7 @@ export class Collection extends EventEmitter {
           }
         }
         results = matched;
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$project") {
         // Reshape documents with expression support
         const projected = [];
@@ -491,6 +499,7 @@ export class Collection extends EventEmitter {
           projected.push(applyProjectionWithExpressions(stageSpec, results[j]));
         }
         results = projected;
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$addFields" || stageType === "$set") {
         // Add/set fields with computed expressions
         const modified = [];
@@ -503,6 +512,7 @@ export class Collection extends EventEmitter {
           modified.push(doc);
         }
         results = modified;
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$unset") {
         // Remove fields from documents
         const modified = [];
@@ -540,6 +550,7 @@ export class Collection extends EventEmitter {
           modified.push(doc);
         }
         results = modified;
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$sort") {
         // Sort documents
         const sortKeys = Object.keys(stageSpec);
@@ -553,12 +564,15 @@ export class Collection extends EventEmitter {
           }
           return 0;
         });
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$limit") {
         // Limit number of documents
         results = results.slice(0, stageSpec);
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$skip") {
         // Skip documents
         results = results.slice(stageSpec);
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$group") {
         // Group documents
         const groups = {};
@@ -720,9 +734,11 @@ export class Collection extends EventEmitter {
           grouped.push(result);
         }
         results = grouped;
+        globalTimer.end(stageTimer, { outputDocs: results.length, groupCount: Object.keys(groups).length });
       } else if (stageType === "$count") {
         // Count documents and return single document with count
         results = [{ [stageSpec]: results.length }];
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$unwind") {
         // Unwind array field
         const unwound = [];
@@ -754,6 +770,7 @@ export class Collection extends EventEmitter {
           // MongoDB's default behavior: skip documents where field is missing, null, empty array, or not an array
         }
         results = unwound;
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else if (stageType === "$sortByCount") {
         // Group by expression value and count occurrences, sorted descending by count
         const groups = {};
@@ -1581,7 +1598,10 @@ export class Collection extends EventEmitter {
         } else {
           results = withDistances;
         }
+        
+        globalTimer.end(stageTimer, { outputDocs: results.length });
       } else {
+        globalTimer.end(stageTimer);
         throw new QueryError('Unsupported aggregation stage: ' + stageType, {
           collection: this.name,
           code: ErrorCodes.FAILED_TO_PARSE
@@ -1589,6 +1609,7 @@ export class Collection extends EventEmitter {
       }
     }
 
+    globalTimer.end(timer, { resultCount: results.length });
     return results;
   }
 
@@ -1860,6 +1881,8 @@ export class Collection extends EventEmitter {
   }
 
   async _findInternal(query, projection) {
+    const timer = globalTimer.start('collection', 'find', { collection: this.name });
+    
     if (!this._initialized) await this._initialize();
 
     const normalizedQuery = query == undefined ? {} : query;
@@ -1870,10 +1893,13 @@ export class Collection extends EventEmitter {
 
     // Try to use indexes if available
     if (this.indexes.size > 0) {
+      const planTimer = globalTimer.start('collection', 'find.queryPlanning');
       const queryPlan = await this.planQueryAsync(normalizedQuery);
+      globalTimer.end(planTimer, { useIndex: queryPlan.useIndex, docIdsCount: queryPlan.docIds?.length || 0 });
       
       if (queryPlan.useIndex && queryPlan.docIds && queryPlan.docIds.length > 0) {
         // Use index results
+        const indexLookupTimer = globalTimer.start('collection', 'find.indexLookup');
         for (const docId of queryPlan.docIds) {
           if (!seen[docId]) {
             const doc = await this.documents.search(docId);
@@ -1885,31 +1911,46 @@ export class Collection extends EventEmitter {
             }
           }
         }
+        globalTimer.end(indexLookupTimer, { docsFound: documents.length });
       } else {
         // Fall back to full scan if index couldn't be used or returned no results
+        const fullScanTimer = globalTimer.start('collection', 'find.fullScan');
         for await (const entry of this.documents) {
           if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
             seen[entry.value._id] = true;
             documents.push(entry.value);
           }
         }
+        globalTimer.end(fullScanTimer, { docsFound: documents.length });
       }
     } else {
       // No indexes available, do full scan
+      const fullScanTimer = globalTimer.start('collection', 'find.fullScan');
       for await (const entry of this.documents) {
         if (entry && entry.value && !seen[entry.value._id] && matches(entry.value, normalizedQuery)) {
           seen[entry.value._id] = true;
           documents.push(entry.value);
         }
       }
+      globalTimer.end(fullScanTimer, { docsFound: documents.length });
     }
 
+    // Apply $near sorting if applicable
     if (nearSpec) {
+      const sortTimer = globalTimer.start('collection', 'find.nearSort');
       this._sortByNearDistance(documents, nearSpec);
+      globalTimer.end(sortTimer);
     }
 
+    // Apply projection if provided
+    const projectionTimer = globalTimer.start('collection', 'find.projection');
+    const result = documents.map(doc => projection ? applyProjection(copy(doc), projection) : copy(doc));
+    globalTimer.end(projectionTimer, { docsProcessed: result.length });
+
+    globalTimer.end(timer, { docsReturned: result.length, hasIndexes: this.indexes.size > 0 });
+    
     // Return the documents array directly, not a Cursor
-    return documents;
+    return result;
   }
 
   _extractNearSpec(query) {
@@ -2107,16 +2148,29 @@ export class Collection extends EventEmitter {
   }
 
   async insertOne(doc) {
+    const timer = globalTimer.start('collection', 'insertOne', { collection: this.name });
+    
     if (!this._initialized) await this._initialize();
 
     if (doc._id == undefined) doc._id = new ObjectId();
+    
+    const storeTimer = globalTimer.start('collection', 'insertOne.store');
     await this.documents.add(doc._id.toString(), doc);
+    globalTimer.end(storeTimer);
+    
+    const indexTimer = globalTimer.start('collection', 'insertOne.updateIndexes');
     await this.updateIndexesOnInsert(doc);
+    globalTimer.end(indexTimer, { indexCount: this.indexes.size });
+    
     this.emit('insert', doc);
+    
+    globalTimer.end(timer);
     return { insertedId: doc._id };
   }
 
   async insertMany(docs) {
+    const timer = globalTimer.start('collection', 'insertMany', { collection: this.name, docCount: docs.length });
+    
     if (!this._initialized) await this._initialize();
 
     const insertedIds = [];
@@ -2124,6 +2178,8 @@ export class Collection extends EventEmitter {
       const result = await this.insertOne(docs[i]);
       insertedIds.push(result.insertedId);
     }
+    
+    globalTimer.end(timer, { insertedCount: insertedIds.length });
     return { insertedIds: insertedIds };
   }
 
@@ -2224,8 +2280,13 @@ export class Collection extends EventEmitter {
   }
 
   async updateOne(query, updates, options) {
+    const timer = globalTimer.start('collection', 'updateOne', { collection: this.name });
+    
+    const findTimer = globalTimer.start('collection', 'updateOne.find');
     const c = this.find(query);
     await c._ensureInitialized();
+    globalTimer.end(findTimer);
+    
     if (await c.hasNext()) {
       const doc = await c.next();
       const originalDoc = JSON.parse(JSON.stringify(doc));
@@ -2235,10 +2296,22 @@ export class Collection extends EventEmitter {
       const positionalMatchInfo = matchInfo.arrayFilters;
       const userArrayFilters = options && options.arrayFilters;
 
+      const indexDelTimer = globalTimer.start('collection', 'updateOne.updateIndexesOnDelete');
       await this.updateIndexesOnDelete(doc);
+      globalTimer.end(indexDelTimer);
+      
+      const applyTimer = globalTimer.start('collection', 'updateOne.applyUpdates');
       applyUpdates(updates, doc, false, positionalMatchInfo, userArrayFilters);
+      globalTimer.end(applyTimer);
+      
+      const storeTimer = globalTimer.start('collection', 'updateOne.store');
       this.documents.add(doc._id.toString(), doc);
+      globalTimer.end(storeTimer);
+      
+      const indexInsTimer = globalTimer.start('collection', 'updateOne.updateIndexesOnInsert');
       await this.updateIndexesOnInsert(doc);
+      globalTimer.end(indexInsTimer, { indexCount: this.indexes.size });
+      
       const updateDescription = this._getUpdateDescription(originalDoc, doc);
       this.emit('update', doc, updateDescription);
     } else {
@@ -2249,11 +2322,19 @@ export class Collection extends EventEmitter {
         this.emit('insert', newDoc);
       }
     }
+    
+    globalTimer.end(timer);
   }
 
   async updateMany(query, updates, options) {
+    const timer = globalTimer.start('collection', 'updateMany', { collection: this.name });
+    
+    const findTimer = globalTimer.start('collection', 'updateMany.find');
     const c = this.find(query);
     await c._ensureInitialized();
+    globalTimer.end(findTimer);
+    
+    let updateCount = 0;
     if (await c.hasNext()) {
       while (await c.hasNext()) {
         const doc = await c.next();
@@ -2270,6 +2351,8 @@ export class Collection extends EventEmitter {
         await this.updateIndexesOnInsert(doc);
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit('update', doc, updateDescription);
+        updateCount++;
+        updateCount++;
       }
     } else {
       if (options && options.upsert) {
@@ -2279,6 +2362,8 @@ export class Collection extends EventEmitter {
         this.emit('insert', newDoc);
       }
     }
+    
+    globalTimer.end(timer, { updatedCount: updateCount });
   }
 
   validate() { throw new NotImplementedError('validate', { collection: this.name }); }
