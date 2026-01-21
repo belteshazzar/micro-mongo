@@ -2352,7 +2352,6 @@ export class Collection extends EventEmitter {
         const updateDescription = this._getUpdateDescription(originalDoc, doc);
         this.emit('update', doc, updateDescription);
         updateCount++;
-        updateCount++;
       }
     } else {
       if (options && options.upsert) {
