@@ -32,7 +32,7 @@ if (typeof globalThis.navigator === 'undefined') {
   globalThis.navigator.storage = opfsNavigator.storage;
 }
 
-import { MongoClient, globalTimer } from '../main.js';
+import { MongoClient, globalTimer, WorkerBridge } from '../main.js';
 import { NodeProfiler } from '../src/NodeProfiler.js';
 
 // Configuration
@@ -80,7 +80,8 @@ async function main() {
   try {
     // Connect to micro-mongo
     profiler.mark('connect-start');
-    const client = new MongoClient(`mongodb://localhost/${DB_NAME}`);
+    const bridge = await WorkerBridge.create();
+    const client = new MongoClient(`mongodb://localhost/${DB_NAME}`, { workerBridge: bridge });
     await client.connect();
     const db = client.db(DB_NAME);
     const collection = db.collection(COLLECTION_NAME);
@@ -133,6 +134,7 @@ async function main() {
     
     // Close connection
     await client.close();
+    await bridge.terminate();
     
     // Display results
     console.log('\n' + '='.repeat(70));
