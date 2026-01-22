@@ -1944,7 +1944,7 @@ export class Collection extends EventEmitter {
 
     // Apply projection if provided
     const projectionTimer = globalTimer.start('collection', 'find.projection');
-    const result = documents.map(doc => projection ? applyProjection(copy(doc), projection) : copy(doc));
+    const result = documents.map(doc => projection ? applyProjection(projection, copy(doc)) : copy(doc));
     globalTimer.end(projectionTimer, { docsProcessed: result.length });
 
     globalTimer.end(timer, { docsReturned: result.length, hasIndexes: this.indexes.size > 0 });
