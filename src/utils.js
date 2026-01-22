@@ -35,6 +35,11 @@ export function copy(o) {
 		return new ObjectId(o.id);
 	}
 	
+	// Handle Date objects
+	if (o instanceof Date) {
+		return new Date(o.getTime());
+	}
+	
 	var out, v, key;
 	out = Array.isArray(o) ? [] : {};
 	for (key in o) {
