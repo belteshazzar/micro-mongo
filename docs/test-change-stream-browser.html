@@ -9,7 +9,7 @@
     <div id="output"></div>
     
     <script type="module">
-        import { MongoClient, WorkerBridge } from './build/micro-mongo-client.js';
+        import { MongoClient, WorkerBridge } from '../build/micro-mongo-browser.min.js';
         
         document.getElementById('testBtn').addEventListener('click', async () => {
             const output = document.getElementById('output');
