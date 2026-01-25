@@ -6,8 +6,8 @@
  */
 
 import { strict as assert } from 'assert';
-import { MongoClient as MicroMongoClient, WorkerBridge, globalTimer } from '../main.js';
-
+import { MongoClient as MicroMongoClient, WorkerBridge } from '../main.js';
+import { globalTimer } from '../src/PerformanceTimer.js'
 /**
  * Deep comparison utility that handles MongoDB-specific types
  */

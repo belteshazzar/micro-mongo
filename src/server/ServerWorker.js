@@ -1,5 +1,5 @@
 import { Server } from './Server.js';
-import { ObjectId } from 'bjson';
+import { ObjectId } from '@belteshazzar/binjson';
 
 /**
  * Serialize ObjectId and Date instances for worker communication

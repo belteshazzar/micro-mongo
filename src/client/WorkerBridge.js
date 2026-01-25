@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { ObjectId } from 'bjson';
+import { ObjectId } from '@belteshazzar/binjson';
 import { globalTimer } from '../PerformanceTimer.js';
 
 /**
@@ -103,7 +103,7 @@ export class WorkerBridge extends EventEmitter {
     // Default to built worker artifact; use proper absolute path for Node worker
     let workerPath = options.workerPath;
     if (!workerPath) {
-      const buildUrl = new URL('../../build/babymongo-server-worker.js', import.meta.url);
+      const buildUrl = /* @vite-ignore */ new URL('../../dist/babymongo-server-worker.js', import.meta.url);
       workerPath = fileURLToPath(buildUrl);
     }
     const worker = new NodeWorker(workerPath, {
@@ -229,7 +229,7 @@ class BrowserWorkerBridge extends WorkerBridge {
     
     // Default to built worker artifact; allow override for custom hosting
     // Use absolute path from server root for consistent resolution in dev and prod
-    const workerUrl = options.workerUrl || '/build/babymongo-server-worker.js';
+    const workerUrl = options.workerUrl || '/dist/babymongo-server-worker.js';
     const worker = new WebWorkerCtor(workerUrl, { type: 'module' });
     super(worker);
   }

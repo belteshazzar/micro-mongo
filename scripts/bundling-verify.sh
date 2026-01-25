@@ -8,10 +8,10 @@ echo "  BabyMongo Bundling Verification"
 echo "========================================="
 echo ""
 
-BUILD_DIR="./build"
+BUILD_DIR="./dist"
 
 if [ ! -d "$BUILD_DIR" ]; then
-    echo "❌ Build directory not found. Run 'npm run build' first."
+    echo "❌ Build directory not found. Run 'npm run dist' first."
     exit 1
 fi
 

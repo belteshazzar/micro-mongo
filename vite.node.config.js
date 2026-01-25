@@ -7,11 +7,11 @@ export default defineConfig(({ mode }) => {
     build: {
       lib: {
         entry: resolve(__dirname, 'main.js'),
-        name: 'MicroMongoNode',
+        name: 'BabyMongoNode',
         formats: ['es'],
         fileName: () => isProd ? 'babymongo-node.min.js' : 'babymongo-node.js'
       },
-      outDir: 'build',
+      outDir: 'dist',
       emptyOutDir: false,
       sourcemap: true,
       minify: isProd ? 'terser' : false,

@@ -1,5 +1,5 @@
 import { Collection } from './Collection.js';
-import { ObjectId } from 'bjson';
+import { ObjectId } from '@belteshazzar/binjson';
 import { ChangeStream } from './ChangeStream.js';
 import { NotImplementedError } from '../errors.js';
 

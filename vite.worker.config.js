@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
         // Keep a stable filename; we still minify in prod but don’t change the name
         fileName: () => 'babymongo-server-worker.js'
       },
-      outDir: 'build',
+      outDir: 'dist',
       sourcemap: true,
       minify: isProd ? 'terser' : false,
       rollupOptions: {

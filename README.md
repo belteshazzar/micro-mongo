@@ -3,10 +3,10 @@
 A JavaScript implementation of the MongoDB query API with persistent storage using the Origin Private File System (OPFS). BabyMongo runs database operations in a Web Worker (browser) or Worker Thread (Node.js).
 
 **Key Features:**
-- 🚀 **Web Worker Architecture:** Database operations run in a separate thread, keeping your UI responsive
-- 💾 **OPFS Persistent Storage:** Automatic persistence using the Origin Private File System (browser) with a Node.js polyfill for development
 - 🔄 **MongoDB-Compatible API:** Familiar MongoDB syntax for queries, updates, aggregations, and change streams
+- 💾 **OPFS Persistent Storage:** Automatic persistence using the Origin Private File System (browser) with a Node.js polyfill for development
 - 📦 **Zero Configuration:** Works out of the box in both browser and Node.js environments
+- 🚀 **Web Worker Architecture:** Database operations run in a separate thread, keeping your UI responsive
 - 🔍 **Advanced Features:** Indexes, text search, geospatial queries, aggregation pipelines, and real-time change streams
 
 [![Tests](https://github.com/belteshazzar/babymongo/actions/workflows/test.yml/badge.svg)](https://github.com/belteshazzar/babymongo/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/belteshazzar/babymongo/branch/master/graph/badge.svg)](https://codecov.io/gh/belteshazzar/babymongo)
@@ -421,10 +421,10 @@ The **Origin Private File System** provides fast, persistent storage:
 └── babymongo/                 # Base folder
     └── {database}/              # Database name
         └── {collection}/        # Collection name
-            ├── documents.bjson  # B+ tree of documents
-            ├── documents.bjson.version.json  # Version metadata
-            ├── documents.bjson.v1            # Old version (during compaction)
-            └── {index-name}.bjson            # Index B+ trees
+            ├── documents.bj  # B+ tree of documents
+            ├── documents.bj.version.json  # Version metadata
+            ├── documents.bj.v1            # Old version (during compaction)
+            └── {index-name}.bj            # Index B+ trees
 ```
 
 **Key Features:**
@@ -444,8 +444,8 @@ await db.products.insertOne({ name: 'Widget', price: 10.99 });
 await db.products.createIndex({ name: 1 });
 
 // Storage structure:
-// .opfs/babymongo/store/products/documents.bjson
-// .opfs/babymongo/store/products/name_1.bjson
+// .opfs/babymongo/store/products/documents.bj
+// .opfs/babymongo/store/products/name_1.bj
 ```
 
 ### Multiple Clients Sharing a Worker

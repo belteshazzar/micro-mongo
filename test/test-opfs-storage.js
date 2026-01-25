@@ -98,18 +98,18 @@ describe("OPFS Storage Location", function() {
 		const root = await customNavigator.storage.getDirectory();
 		
 		// Create a file
-		const fileHandle = await root.getFileHandle('bjson-test.bjson', { create: true });
+		const fileHandle = await root.getFileHandle('binjson-test.bj', { create: true });
 		const writable = await fileHandle.createWritable();
-		await writable.write('bjson data');
+		await writable.write('binjson data');
 		await writable.close();
 		
 		// Verify file is in project .opfs directory
-		const filePath = path.join(opfsDir, 'bjson-test.bjson');
+		const filePath = path.join(opfsDir, 'binjson-test.bj');
 		const exists = await fs.access(filePath).then(() => true).catch(() => false);
 		expect(exists).to.be.true;
 		
 		const content = await fs.readFile(filePath, 'utf-8');
-		expect(content).to.equal('bjson data');
+		expect(content).to.equal('binjson data');
 		
 		console.log(`\n  ✓ File created in project .opfs: ${filePath}`);
 	});
@@ -170,12 +170,12 @@ describe("OPFS BPlusTree compaction", function() {
 		expect(compactedDoc).to.not.equal(null);
 
 		const collectionDir = path.join(opfsDir, 'babymongo', dbName, collectionName);
-		const metadataPath = path.join(collectionDir, 'documents.bjson.version.json');
+		const metadataPath = path.join(collectionDir, 'documents.bj.version.json');
 		const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf-8'));
 		expect(metadata.currentVersion).to.be.greaterThan(0);
 
-		const oldPath = path.join(collectionDir, 'documents.bjson');
-		const newPath = path.join(collectionDir, `documents.bjson.v${metadata.currentVersion}`);
+		const oldPath = path.join(collectionDir, 'documents.bj');
+		const newPath = path.join(collectionDir, `documents.bj.v${metadata.currentVersion}`);
 		const oldExists = await fs.access(oldPath).then(() => true).catch(() => false);
 		const newExists = await fs.access(newPath).then(() => true).catch(() => false);
 		expect(oldExists).to.be.true;

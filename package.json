@@ -1,16 +1,16 @@
 {
   "name": "babymongo",
-  "version": "2.0.0",
-  "description": "mongo api interface to localStorage and plain js objects",
-  "main": "main.js",
+  "version": "0.2.0",
+  "description": "MongoDB API compliant database that runs in the browser and Node.js using OPFS for storage.",
+  "main": "dist/babymongo-node.min.js",
   "scripts": {
     "test": "mocha --reporter spec test/test.js test/test-advanced-indexes.js test/test-index-verification.js test/test-objectid.js test/test-aggregation-expressions.js test/test-aggregation-stages.js test/test-dot-notation.js test/test-change-streams.js test/test-queryoperators.js test/test-errors.js test/test-cursor-methods.js test/test-arrayfilters.js test/test-positional-operator.js test/test-geospatial-collection-index.js test/test-find-simple.js test/test-metadata-size.js test/test-opfs-storage.js",
     "test:browser": "mocha --reporter spec test/test-browser.js",
     "test:comparison": "mocha --reporter spec test/test-mongodb-comparison.js",
     "test:all": "npm test && npm run test:browser",
     "cover": "c8 --reporter=html --reporter=text --reporter=lcov npm test",
-    "build": "npm run build:clean && npm run build:dev && npm run build:min",
-    "build:clean": "rm -rf build",
+    "build": "npm run build:clean && npm run build:min",
+    "build:clean": "rm -rf dist",
     "build:dev": "vite build --config vite.browser.config.js && vite build --config vite.node.config.js && vite build --config vite.worker.config.js",
     "build:min": "vite build --config vite.browser.config.js --mode production && vite build --config vite.node.config.js --mode production && vite build --config vite.worker.config.js --mode production",
     "dev": "vite",
@@ -19,15 +19,13 @@
   "type": "module",
   "exports": {
     ".": {
-      "browser": "./build/babymongo-browser.js",
-      "import": "./build/babymongo-node.js",
-      "default": "./build/babymongo-browser.js"
+      "browser": "./dist/babymongo-browser.min.js",
+      "import": "./dist/babymongo-node.min.js",
+      "default": "./dist/babymongo-node.min.js"
     },
-    "./browser": "./build/babymongo-browser.js",
-    "./browser.min": "./build/babymongo-browser.min.js",
-    "./node": "./build/babymongo-node.js",
-    "./node.min": "./build/babymongo-node.min.js",
-    "./worker": "./build/babymongo-server-worker.js"
+    "./browser": "./dist/babymongo-browser.min.js",
+    "./node": "./dist/babymongo-node.min.js",
+    "./worker": "./dist/babymongo-server-worker.js"
   },
   "repository": {
     "type": "git",
@@ -37,11 +35,9 @@
     "mongo",
     "db",
     "mongodb",
-    "localstorage",
     "database",
     "query",
-    "local",
-    "storage"
+    "local"
   ],
   "author": "Daniel Walton <daniel@belteshazzar.com> (http://www.belteshazzar.com)",
   "license": "MIT",
@@ -65,10 +61,10 @@
     "vite": "^7.2.2"
   },
   "dependencies": {
-    "bjson": "github:belteshazzar/bjson",
+    "@belteshazzar/binjson": "^1.0.1",
     "events": "^3.3.0",
     "mongodb": "^7.0.0",
-    "node-opfs": "github:belteshazzar/node-opfs",
+    "node-opfs": "^1.0.0",
     "stemmer": "^2.0.1"
   }
 }

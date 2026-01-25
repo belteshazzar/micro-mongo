@@ -1,6 +1,6 @@
 import { Index } from './Index.js';
-import { TextIndex } from 'bjson/textindex';
-import { BPlusTree } from 'bjson/bplustree';
+import { TextIndex } from '@belteshazzar/binjson/textindex';
+import { BPlusTree } from '@belteshazzar/binjson/bplustree';
 import { getProp } from '../../utils.js';
 import {
 	acquireVersionedPath,
@@ -12,7 +12,7 @@ import {
 	releaseVersionedPath
 } from '../opfsVersioning.js';
 
-const TEXT_INDEX_SUFFIXES = ['-terms.bjson', '-documents.bjson', '-lengths.bjson'];
+const TEXT_INDEX_SUFFIXES = ['-terms.bj', '-documents.bj', '-lengths.bj'];
 
 /**
  * Text index implementation
@@ -55,9 +55,9 @@ export class TextCollectionIndex extends Index {
 			this._releaseStorage = () => releaseVersionedPath(this.storageBasePath, version, { suffixes: TEXT_INDEX_SUFFIXES });
 
 			// Create three BPlusTree instances for the TextIndex
-			const indexTree = await this._createBPlusTree(this._getActiveBasePath() + '-terms.bjson');
-			const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + '-documents.bjson');
-			const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + '-lengths.bjson');
+			const indexTree = await this._createBPlusTree(this._getActiveBasePath() + '-terms.bj');
+			const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + '-documents.bj');
+			const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + '-lengths.bj');
 			
 			this.textIndex = new TextIndex({
 				order: 16,
@@ -83,12 +83,12 @@ export class TextCollectionIndex extends Index {
 				
 				// Delete corrupted files and ensure directory exists
 				await this._deleteIndexFiles();
-				await this._ensureDirectoryForFile(this._getActiveBasePath() + '-terms.bjson');
+				await this._ensureDirectoryForFile(this._getActiveBasePath() + '-terms.bj');
 				
 				// Create fresh TextIndex for new/corrupted files
-				const indexTree = await this._createBPlusTree(this._getActiveBasePath() + '-terms.bjson');
-				const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + '-documents.bjson');
-				const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + '-lengths.bjson');
+				const indexTree = await this._createBPlusTree(this._getActiveBasePath() + '-terms.bj');
+				const docTermsTree = await this._createBPlusTree(this._getActiveBasePath() + '-documents.bj');
+				const lengthsTree = await this._createBPlusTree(this._getActiveBasePath() + '-lengths.bj');
 				
 				this.textIndex = new TextIndex({
 					order: 16,
@@ -149,7 +149,7 @@ export class TextCollectionIndex extends Index {
 	}
 
 	async _deleteIndexFiles(basePath = this._getActiveBasePath()) {
-		// TextIndex creates multiple files: -terms.bjson, -documents.bjson, -lengths.bjson
+		// TextIndex creates multiple files: -terms.bj, -documents.bj, -lengths.bj
 		for (const suffix of TEXT_INDEX_SUFFIXES) {
 			await this._deleteFile(basePath + suffix);
 		}
@@ -234,9 +234,9 @@ export class TextCollectionIndex extends Index {
 
 		const nextVersion = currentVersion + 1;
 		const compactBase = buildVersionedPath(this.storageBasePath, nextVersion);
-		const indexHandle = await createSyncAccessHandle(`${compactBase}-terms.bjson`, { reset: true });
-		const docTermsHandle = await createSyncAccessHandle(`${compactBase}-documents.bjson`, { reset: true });
-		const lengthsHandle = await createSyncAccessHandle(`${compactBase}-lengths.bjson`, { reset: true });
+		const indexHandle = await createSyncAccessHandle(`${compactBase}-terms.bj`, { reset: true });
+		const docTermsHandle = await createSyncAccessHandle(`${compactBase}-documents.bj`, { reset: true });
+		const lengthsHandle = await createSyncAccessHandle(`${compactBase}-lengths.bj`, { reset: true });
 		const indexTree = new BPlusTree(indexHandle, 16);
 		const docTermsTree = new BPlusTree(docTermsHandle, 16);
 		const lengthsTree = new BPlusTree(lengthsHandle, 16);

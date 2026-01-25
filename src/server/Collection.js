@@ -27,8 +27,8 @@ import {
   IndexNotFoundError,
   ErrorCodes
 } from '../errors.js';
-import { ObjectId } from 'bjson';
-import { BPlusTree } from 'bjson/bplustree';
+import { ObjectId } from '@belteshazzar/binjson';
+import { BPlusTree } from '@belteshazzar/binjson/bplustree';
 import { globalTimer } from '../PerformanceTimer.js';
 
 /**
@@ -40,7 +40,7 @@ export class Collection extends EventEmitter {
     this.db = db;
     this.name = name;
     this.path = `${this.db.baseFolder}/${this.db.dbName}/${this.name}`
-    this.documentsPath = `${this.path}/documents.bjson`;
+    this.documentsPath = `${this.path}/documents.bj`;
     this.documentsVersionedPath = null;
     this.documentsVersion = 0;
     this._releaseDocuments = null;
@@ -119,8 +119,8 @@ export class Collection extends EventEmitter {
     // Scan the collection folder for persisted index files and recreate them.
     // Supported filenames:
     //   <name>.textindex          -> TextCollectionIndex
-    //   <name>.rtree.bjson        -> GeospatialIndex
-    //   <name>.bplustree.bjson    -> RegularCollectionIndex
+    //   <name>.rtree.bj        -> GeospatialIndex
+    //   <name>.bplustree.bj    -> RegularCollectionIndex
 
     // Navigate to the collection directory inside OPFS
     let dirHandle;
@@ -146,20 +146,20 @@ export class Collection extends EventEmitter {
       const normalizedName = entryName.replace(versionSuffixPattern, '');
 
       let type;
-      if (normalizedName.endsWith('.textindex-documents.bjson')) {
+      if (normalizedName.endsWith('.textindex-documents.bj')) {
         type = 'text';
-      } else if (normalizedName.endsWith('.rtree.bjson')) {
+      } else if (normalizedName.endsWith('.rtree.bj')) {
         type = 'geospatial';
-      } else if (normalizedName.endsWith('.bplustree.bjson')) {
+      } else if (normalizedName.endsWith('.bplustree.bj')) {
         type = 'regular';
       } else {
         continue; // Not an index file we understand
       }
 
       const indexName = normalizedName
-        .replace(/\.textindex-documents\.bjson$/, '')
-        .replace(/\.rtree\.bjson$/, '')
-        .replace(/\.bplustree\.bjson$/, '');
+        .replace(/\.textindex-documents\.bj$/, '')
+        .replace(/\.rtree\.bj$/, '')
+        .replace(/\.bplustree\.bj$/, '');
 
       // Skip if already loaded (avoid duplicates)
       if (this.indexes.has(indexName)) {
@@ -298,14 +298,14 @@ export class Collection extends EventEmitter {
       return `${this.path}/${sanitizedIndexName}.textindex`;
     }
     if (type === 'geospatial') {
-      return `${this.path}/${sanitizedIndexName}.rtree.bjson`;
+      return `${this.path}/${sanitizedIndexName}.rtree.bj`;
     }
     // Regular index uses B+ tree
-    return `${this.path}/${sanitizedIndexName}.bplustree.bjson`;
+    return `${this.path}/${sanitizedIndexName}.bplustree.bj`;
   }
 
   /**
-   * Build/rebuild an index
+   * dist/rebuild an index
    */
   async _buildIndex(indexName, keys, options = {}) {
     if (!this._initialized) await this._initialize();
@@ -1944,7 +1944,7 @@ export class Collection extends EventEmitter {
 
     // Apply projection if provided
     const projectionTimer = globalTimer.start('collection', 'find.projection');
-    const result = documents.map(doc => projection ? applyProjection(copy(doc), projection) : copy(doc));
+    const result = documents.map(doc => projection ? applyProjection(projection, copy(doc)) : copy(doc));
     globalTimer.end(projectionTimer, { docsProcessed: result.length });
 
     globalTimer.end(timer, { docsReturned: result.length, hasIndexes: this.indexes.size > 0 });
@@ -2394,7 +2394,7 @@ export class Collection extends EventEmitter {
     return {
       updatedFields,
       removedFields,
-      truncatedArrays: [] // Not implemented in babymongo
+      truncatedArrays: [] // Not implemented in micro-mongo
     };
   }
 

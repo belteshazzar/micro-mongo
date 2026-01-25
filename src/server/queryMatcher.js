@@ -1,6 +1,6 @@
 import { getProp, getFieldValues, isArray, arrayMatches, objectMatches, toArray, isIn, bboxToGeojson } from '../utils.js';
-import { stemmer, tokenize } from 'bjson/textindex';
-import { ObjectId } from 'bjson';
+import { stemmer, tokenize } from '@belteshazzar/binjson/textindex';
+import { ObjectId } from '@belteshazzar/binjson';
 import { evaluateExpression } from './aggregationExpressions.js';
 
 /**

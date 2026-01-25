@@ -1,7 +1,7 @@
 import { Index } from './Index.js';
-import { RTree, haversineDistance } from 'bjson/rtree';
+import { RTree, haversineDistance } from '@belteshazzar/binjson/rtree';
 import { getProp } from '../../utils.js';
-import { ObjectId } from 'bjson';
+import { ObjectId } from '@belteshazzar/binjson';
 
 /**
  * Geospatial index implementation

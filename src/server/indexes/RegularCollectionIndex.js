@@ -1,6 +1,6 @@
 import { Index } from './Index.js';
 import { getProp } from '../../utils.js';
-import { BPlusTree } from 'bjson/bplustree';
+import { BPlusTree } from '@belteshazzar/binjson/bplustree';
 import {
 	acquireVersionedPath,
 	buildVersionedPath,

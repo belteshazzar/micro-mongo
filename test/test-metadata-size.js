@@ -18,9 +18,9 @@ globalThis.navigator.storage = {
 	getDirectory: () => customStorage.getDirectory()
 };
 
-import { BPlusTree } from 'bjson/bplustree';
-import { RTree } from 'bjson/rtree';
-import { ObjectId, getFileHandle } from 'bjson';
+import { BPlusTree } from '@belteshazzar/binjson/bplustree';
+import { RTree } from '@belteshazzar/binjson/rtree';
+import { ObjectId, getFileHandle } from '@belteshazzar/binjson';
 
 describe('BPlusTree Metadata Size Verification', function() {
 	before(async function() {
@@ -44,7 +44,7 @@ describe('BPlusTree Metadata Size Verification', function() {
 	it('should verify BPlusTree metadata size', async function() {
 		// Get directory handle and create sync access handle
 		const dirHandle = await navigator.storage.getDirectory();
-		const fileHandle = await getFileHandle(dirHandle, 'test-bplustree.bjson', { create: true });
+		const fileHandle = await getFileHandle(dirHandle, 'test-bplustree.bj', { create: true });
 		const syncHandle = await fileHandle.createSyncAccessHandle();
 		
 		const tree = new BPlusTree(syncHandle, 50);
@@ -58,7 +58,7 @@ describe('BPlusTree Metadata Size Verification', function() {
 		await tree.close();
 		
 		// Check file size
-		const filePath = path.join(opfsDir, 'test-bplustree.bjson');
+		const filePath = path.join(opfsDir, 'test-bplustree.bj');
 		const stats = await fs.stat(filePath);
 		const fileSize = stats.size;
 		
@@ -97,7 +97,7 @@ describe('BPlusTree Metadata Size Verification', function() {
 	it('should verify RTree metadata size', async function() {
 		// Get directory handle and create sync access handle
 		const dirHandle = await navigator.storage.getDirectory();
-		const fileHandle = await getFileHandle(dirHandle, 'test-rtree.bjson', { create: true });
+		const fileHandle = await getFileHandle(dirHandle, 'test-rtree.bj', { create: true });
 		const syncHandle = await fileHandle.createSyncAccessHandle();
 		
 		const tree = new RTree(syncHandle, 9);
@@ -111,7 +111,7 @@ describe('BPlusTree Metadata Size Verification', function() {
 		await tree.close();
 		
 		// Check file size
-		const filePath = path.join(opfsDir, 'test-rtree.bjson');
+		const filePath = path.join(opfsDir, 'test-rtree.bj');
 		const stats = await fs.stat(filePath);
 		const fileSize = stats.size;
 		
@@ -131,11 +131,11 @@ describe('BPlusTree Metadata Size Verification', function() {
 		const dirHandle = await navigator.storage.getDirectory();
 		
 		// Create both trees with sync handles
-		const bpFileHandle = await getFileHandle(dirHandle, 'compare-bplustree.bjson', { create: true });
+		const bpFileHandle = await getFileHandle(dirHandle, 'compare-bplustree.bj', { create: true });
 		const bpSyncHandle = await bpFileHandle.createSyncAccessHandle();
 		const bptree = new BPlusTree(bpSyncHandle, 50);
 		
-		const rtFileHandle = await getFileHandle(dirHandle, 'compare-rtree.bjson', { create: true });
+		const rtFileHandle = await getFileHandle(dirHandle, 'compare-rtree.bj', { create: true });
 		const rtSyncHandle = await rtFileHandle.createSyncAccessHandle();
 		const rtree = new RTree(rtSyncHandle, 9);
 		
@@ -149,8 +149,8 @@ describe('BPlusTree Metadata Size Verification', function() {
 		await rtree.close();
 		
 		// Get file sizes
-		const bpPath = path.join(opfsDir, 'compare-bplustree.bjson');
-		const rtPath = path.join(opfsDir, 'compare-rtree.bjson');
+		const bpPath = path.join(opfsDir, 'compare-bplustree.bj');
+		const rtPath = path.join(opfsDir, 'compare-rtree.bj');
 		
 		const bpSize = (await fs.stat(bpPath)).size;
 		const rtSize = (await fs.stat(rtPath)).size;

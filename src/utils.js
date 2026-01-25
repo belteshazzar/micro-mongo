@@ -2,7 +2,7 @@
  * Utility functions for MicroMongoDB
  */
 
-import { ObjectId } from 'bjson';
+import { ObjectId } from '@belteshazzar/binjson';
 
 /**
  * Compare two values for equality, handling ObjectId instances
@@ -30,9 +30,19 @@ function valuesEqual(a, b) {
  * Deep copy an object or array
  */
 export function copy(o) {
+	// Handle primitives that shouldn't be deep-copied
+	if (typeof o !== 'object' || o === null) {
+		return o;
+	}
+	
 	// Handle ObjectId
 	if (o instanceof ObjectId) {
 		return new ObjectId(o.id);
+	}
+	
+	// Handle Date
+	if (o instanceof Date) {
+		return new Date(o.getTime());
 	}
 	
 	var out, v, key;
@@ -353,8 +363,8 @@ export function applyProjection(projection, doc) {
 	if (projection[keys[0]] || hasInclusion) {
 		// Inclusion projection
 		// Include _id unless explicitly excluded
-		if (projection._id !== 0) {
-			result._id = doc._id;
+		if (projection._id !== 0 && projection._id !== false) {
+			result._id = copy(doc._id);
 		}
 		
 		for (var i = 0; i < keys.length; i++) {
@@ -366,7 +376,7 @@ export function applyProjection(projection, doc) {
 			
 			if (value !== undefined) {
 				// Use setProp to create nested structure
-				setProp(result, fieldPath, value);
+				setProp(result, fieldPath, copy(value));
 			}
 		}
 	} else {
