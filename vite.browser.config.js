@@ -21,6 +21,10 @@ export default defineConfig(({ mode }) => {
         output: {
           globals: {}
         }
+      },
+      esbuild: {
+        minifyIdentifiers: false,
+        keepNames: true,
       }
     }
   };
