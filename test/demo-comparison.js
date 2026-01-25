@@ -42,7 +42,7 @@ async function demo() {
 	const harness = new ComparisonHarness();
 	
 	try {
-		console.log('Step 1: Attempting to connect to MongoDB and micro-mongo...');
+		console.log('Step 1: Attempting to connect to MongoDB and babymongo...');
 		console.log('        MongoDB URL: mongodb://localhost:27017');
 		console.log('        Database: demo-comparison');
 		console.log();

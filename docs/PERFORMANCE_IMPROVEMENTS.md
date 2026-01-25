@@ -1,6 +1,6 @@
-# Performance Improvement Opportunities for Micro-Mongo
+# Performance Improvement Opportunities for BabyMongo
 
-This document outlines three key areas where performance improvements could be made to enhance execution time and reduce memory usage in the Micro-Mongo database implementation.
+This document outlines three key areas where performance improvements could be made to enhance execution time and reduce memory usage in the BabyMongo database implementation.
 
 ## Area 1: Optimize Aggregation Pipeline Execution
 

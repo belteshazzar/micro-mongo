@@ -4,7 +4,7 @@
 set -e
 
 echo "========================================="
-echo "  Micro-Mongo Bundling Verification"
+echo "  BabyMongo Bundling Verification"
 echo "========================================="
 echo ""
 
@@ -16,7 +16,7 @@ if [ ! -d "$BUILD_DIR" ]; then
 fi
 
 echo "🔍 Checking main bundle (client code)..."
-MAIN_BUNDLE="$BUILD_DIR/micro-mongo-client.js"
+MAIN_BUNDLE="$BUILD_DIR/babymongo-client.js"
 if [ ! -f "$MAIN_BUNDLE" ]; then
     echo "❌ Main bundle not found: $MAIN_BUNDLE"
     exit 1
@@ -56,7 +56,7 @@ fi
 
 echo ""
 echo "🔍 Checking worker bundle..."
-WORKER_BUNDLE="$BUILD_DIR/micro-mongo-server-worker.js"
+WORKER_BUNDLE="$BUILD_DIR/babymongo-server-worker.js"
 if [ ! -f "$WORKER_BUNDLE" ]; then
     echo "❌ Worker bundle not found: $WORKER_BUNDLE"
     exit 1

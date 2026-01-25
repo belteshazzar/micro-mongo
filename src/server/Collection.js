@@ -2394,7 +2394,7 @@ export class Collection extends EventEmitter {
     return {
       updatedFields,
       removedFields,
-      truncatedArrays: [] // Not implemented in micro-mongo
+      truncatedArrays: [] // Not implemented in babymongo
     };
   }
 

@@ -1,7 +1,7 @@
 /**
  * MongoDB Comparison Tests
  * 
- * This test suite runs the same operations against both micro-mongo and real MongoDB,
+ * This test suite runs the same operations against both babymongo and real MongoDB,
  * then compares the results to ensure compatibility.
  * 
  * Prerequisites:

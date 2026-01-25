@@ -3,7 +3,7 @@
  * Example script demonstrating performance profiling capabilities
  * 
  * This script shows how to use both PerformanceTimer and NodeProfiler
- * to analyze micro-mongo performance.
+ * to analyze babymongo performance.
  * 
  * Usage:
  *   node examples/profile-example.js
@@ -78,7 +78,7 @@ async function main() {
   const profiler = new NodeProfiler({ enabled: true, trackMemory: true });
   
   try {
-    // Connect to micro-mongo
+    // Connect to babymongo
     profiler.mark('connect-start');
     const bridge = await WorkerBridge.create();
     const client = new MongoClient(`mongodb://localhost/${DB_NAME}`, { workerBridge: bridge });
@@ -88,7 +88,7 @@ async function main() {
     profiler.mark('connect-end');
     profiler.measure('connection', 'connect-start', 'connect-end');
     
-    console.log('✓ Connected to micro-mongo\n');
+    console.log('✓ Connected to babymongo\n');
     
     // Clear any existing data
     await collection.deleteMany({});

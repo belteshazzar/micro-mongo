@@ -1,6 +1,6 @@
-# Micro-Mongo
+# BabyMongo
 
-A JavaScript implementation of the MongoDB query API with persistent storage using the Origin Private File System (OPFS). Micro-Mongo runs database operations in a Web Worker (browser) or Worker Thread (Node.js).
+A JavaScript implementation of the MongoDB query API with persistent storage using the Origin Private File System (OPFS). BabyMongo runs database operations in a Web Worker (browser) or Worker Thread (Node.js).
 
 **Key Features:**
 - 🚀 **Web Worker Architecture:** Database operations run in a separate thread, keeping your UI responsive
@@ -9,20 +9,20 @@ A JavaScript implementation of the MongoDB query API with persistent storage usi
 - 📦 **Zero Configuration:** Works out of the box in both browser and Node.js environments
 - 🔍 **Advanced Features:** Indexes, text search, geospatial queries, aggregation pipelines, and real-time change streams
 
-[![Tests](https://github.com/belteshazzar/micro-mongo/actions/workflows/test.yml/badge.svg)](https://github.com/belteshazzar/micro-mongo/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/belteshazzar/micro-mongo/branch/master/graph/badge.svg)](https://codecov.io/gh/belteshazzar/micro-mongo)
+[![Tests](https://github.com/belteshazzar/babymongo/actions/workflows/test.yml/badge.svg)](https://github.com/belteshazzar/babymongo/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/belteshazzar/babymongo/branch/master/graph/badge.svg)](https://codecov.io/gh/belteshazzar/babymongo)
 
 ## In Node.js
 
 ### Installation
 
-  `npm install micro-mongo`
+  `npm install babymongo`
 
 ### Usage
 
-Micro-Mongo uses a web worker architecture to keep database operations off the main thread. The `WorkerBridge` manages communication between your application and the database worker:
+BabyMongo uses a web worker architecture to keep database operations off the main thread. The `WorkerBridge` manages communication between your application and the database worker:
 
 ```javascript
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     // Step 1: Create the worker bridge
@@ -81,7 +81,7 @@ main().catch(console.error);
 Indexes can significantly improve query performance for large collections:
 
 ```javascript
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
@@ -123,14 +123,14 @@ The query planner automatically uses indexes for simple equality queries. For co
 
 ### Persistent Storage with OPFS
 
-Micro-Mongo uses the **Origin Private File System (OPFS)** for automatic data persistence. OPFS is a modern web standard that provides fast, private storage for web applications.
+BabyMongo uses the **Origin Private File System (OPFS)** for automatic data persistence. OPFS is a modern web standard that provides fast, private storage for web applications.
 
 **In the Browser:**
 
 Data is automatically persisted to the OPFS when you use the WorkerBridge pattern. No additional configuration needed!
 
 ```javascript
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
@@ -154,11 +154,11 @@ main().catch(console.error);
 
 **In Node.js:**
 
-Micro-Mongo includes the [node-opfs](https://github.com/belteshazzar/node-opfs) polyfill, which implements the OPFS API using the file system. Data is stored in a `.opfs` directory in your project root.
+BabyMongo includes the [node-opfs](https://github.com/belteshazzar/node-opfs) polyfill, which implements the OPFS API using the file system. Data is stored in a `.opfs` directory in your project root.
 
 ```javascript
 // Same code works in Node.js!
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
@@ -168,7 +168,7 @@ async function main() {
     await client.connect();
     const db = client.db('myapp');
     
-    // Data is persisted to .opfs/micro-mongo/myapp/
+    // Data is persisted to .opfs/babymongo/myapp/
     await db.products.insertMany([
         { name: 'Widget', price: 10.99 },
         { name: 'Gadget', price: 24.99 }
@@ -182,7 +182,7 @@ main().catch(console.error);
 
 **Storage Location:**
 - **Browser:** Data stored in OPFS (private to your origin, not accessible via DevTools)
-- **Node.js:** Data stored in `.opfs/micro-mongo/{database-name}/{collection-name}/` directory
+- **Node.js:** Data stored in `.opfs/babymongo/{database-name}/{collection-name}/` directory
 - **Format:** Binary JSON (BJSON) with B+ tree indexing for efficient queries
 
 **Benefits of OPFS:**
@@ -194,10 +194,10 @@ main().catch(console.error);
 
 ### Aggregation Pipelines
 
-Micro-Mongo supports MongoDB's powerful aggregation framework for data transformation and analysis:
+BabyMongo supports MongoDB's powerful aggregation framework for data transformation and analysis:
 
 ```javascript
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
@@ -260,7 +260,7 @@ Supports arithmetic (`$add`, `$multiply`), comparison (`$eq`, `$gt`), logical (`
 
 ### MongoDB Comparison Testing
 
-Micro-Mongo includes a test harness for comparing behavior against real MongoDB to ensure API compatibility. This helps verify that micro-mongo behaves identically to MongoDB.
+BabyMongo includes a test harness for comparing behavior against real MongoDB to ensure API compatibility. This helps verify that babymongo behaves identically to MongoDB.
 
 **Quick Start:**
 
@@ -292,17 +292,17 @@ For detailed documentation, see:
 
 ## In the Browser
 
-Micro-Mongo works seamlessly in modern browsers with automatic OPFS persistence.
+BabyMongo works seamlessly in modern browsers with automatic OPFS persistence.
 
 ### Installation
 
-You can use Micro-Mongo from a CDN or build it yourself:
+You can use BabyMongo from a CDN or build it yourself:
 
 **Option 1: Use pre-built files**
 
 Download the built files:
-- Client: https://raw.githubusercontent.com/belteshazzar/micro-mongo/master/build/micro-mongo-client.js
-- Worker: https://raw.githubusercontent.com/belteshazzar/micro-mongo/master/build/micro-mongo-server-worker.js
+- Client: https://raw.githubusercontent.com/belteshazzar/babymongo/master/build/babymongo-client.js
+- Worker: https://raw.githubusercontent.com/belteshazzar/babymongo/master/build/babymongo-server-worker.js
 
 **Option 2: Build from source**
 
@@ -317,16 +317,16 @@ npm run build
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Micro-Mongo Browser Example</title>
+    <title>BabyMongo Browser Example</title>
 </head>
 <body>
-    <h1>Micro-Mongo in Browser</h1>
+    <h1>BabyMongo in Browser</h1>
     <button id="insert">Insert Data</button>
     <button id="query">Query Data</button>
     <pre id="output"></pre>
 
     <script type="module">
-        import { MongoClient, WorkerBridge } from './build/micro-mongo-client.js';
+        import { MongoClient, WorkerBridge } from './build/babymongo-client.js';
 
         async function main() {
             // Create worker bridge
@@ -374,7 +374,7 @@ npm run build
 
 ### Web Worker Design
 
-Micro-Mongo uses a **dual-thread architecture** for optimal performance:
+BabyMongo uses a **dual-thread architecture** for optimal performance:
 
 ```
 ┌─────────────────────────────────┐
@@ -418,7 +418,7 @@ The **Origin Private File System** provides fast, persistent storage:
 **File Structure:**
 ```
 .opfs/                           # Root (Node.js) or OPFS root (Browser)
-└── micro-mongo/                 # Base folder
+└── babymongo/                 # Base folder
     └── {database}/              # Database name
         └── {collection}/        # Collection name
             ├── documents.bjson  # B+ tree of documents
@@ -444,8 +444,8 @@ await db.products.insertOne({ name: 'Widget', price: 10.99 });
 await db.products.createIndex({ name: 1 });
 
 // Storage structure:
-// .opfs/micro-mongo/store/products/documents.bjson
-// .opfs/micro-mongo/store/products/name_1.bjson
+// .opfs/babymongo/store/products/documents.bjson
+// .opfs/babymongo/store/products/name_1.bjson
 ```
 
 ### Multiple Clients Sharing a Worker
@@ -569,10 +569,10 @@ The following table summarises the API implementation status.
 
 ## Change Streams
 
-**NEW:** Micro-Mongo supports change streams for reactive programming! Watch for real-time data changes at the collection, database, or client level.
+**NEW:** BabyMongo supports change streams for reactive programming! Watch for real-time data changes at the collection, database, or client level.
 
 ```javascript
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();
@@ -617,10 +617,10 @@ See [CHANGE-STREAMS.md](CHANGE-STREAMS.md) for complete documentation, examples,
 
 ## Filtered Positional Operator with arrayFilters
 
-**NEW:** Micro-Mongo supports the filtered positional operator `$[<identifier>]` with `arrayFilters`, allowing you to update specific array elements that match filter conditions!
+**NEW:** BabyMongo supports the filtered positional operator `$[<identifier>]` with `arrayFilters`, allowing you to update specific array elements that match filter conditions!
 
 ```javascript
-import { MongoClient, WorkerBridge } from 'micro-mongo';
+import { MongoClient, WorkerBridge } from 'babymongo';
 
 async function main() {
     const bridge = await WorkerBridge.create();

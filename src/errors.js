@@ -372,7 +372,7 @@ export class CursorNotFoundError extends CursorError {
  */
 export class NotImplementedError extends MongoError {
 	constructor(feature, options = {}) {
-		super(`${feature} is not implemented in micro-mongo`, {
+		super(`${feature} is not implemented in babymongo`, {
 			...options,
 			code: ErrorCodes.NOT_IMPLEMENTED
 		});
@@ -430,7 +430,7 @@ export class BulkWriteError extends MongoError {
 }
 
 /**
- * Network error (for API compatibility, not functional in micro-mongo)
+ * Network error (for API compatibility, not functional in babymongo)
  */
 export class MongoNetworkError extends MongoError {
 	constructor(message, options = {}) {

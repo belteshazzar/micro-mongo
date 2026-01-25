@@ -1,6 +1,6 @@
 # Browser Testing with Playwright
 
-This directory contains browser tests for micro-mongo using Playwright.
+This directory contains browser tests for babymongo using Playwright.
 
 ## Setup
 
@@ -46,7 +46,7 @@ npm run test:all
 
 ## What's Tested
 
-The browser tests verify that micro-mongo works correctly in a real browser environment:
+The browser tests verify that babymongo works correctly in a real browser environment:
 
 1. **Basic Setup** - Collection creation and initialization
 2. **CRUD Operations** - Insert, find, update, delete
@@ -73,7 +73,7 @@ BASE_URL=http://localhost:3000 npm run test:browser
 
 ### Module import errors
 - Run `npm run build` to generate the bundled files
-- The test pages use the built version from `build/micro-mongo-1.1.3.js`
+- The test pages use the built version from `build/babymongo-1.1.3.js`
 - Make sure the simple HTTP server can serve static files
 
 ### Port conflicts

@@ -86,7 +86,7 @@ export class MongoClient extends EventEmitter {
 
   // async _discoverDatabases() {
   //   const dbNames = new Set();
-  //   const baseFolder = this.options.rootPath || '/micro-mongo';
+  //   const baseFolder = this.options.rootPath || '/babymongo';
 
   //   const hasOPFS = !!(globalThis.navigator && globalThis.navigator.storage && typeof globalThis.navigator.storage.getDirectory === 'function');
   //   if (!hasOPFS) {

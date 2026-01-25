@@ -1,5 +1,5 @@
 /**
- * Example usage of micro-mongo with MongoClient (similar to MongoDB driver)
+ * Example usage of babymongo with MongoClient (similar to MongoDB driver)
  */
 
 import * as path from 'path';

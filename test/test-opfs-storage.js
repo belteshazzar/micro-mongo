@@ -169,7 +169,7 @@ describe("OPFS BPlusTree compaction", function() {
 		const compactedDoc = await collectionC.findOne({ name: 'doc-0' });
 		expect(compactedDoc).to.not.equal(null);
 
-		const collectionDir = path.join(opfsDir, 'micro-mongo', dbName, collectionName);
+		const collectionDir = path.join(opfsDir, 'babymongo', dbName, collectionName);
 		const metadataPath = path.join(collectionDir, 'documents.bjson.version.json');
 		const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf-8'));
 		expect(metadata.currentVersion).to.be.greaterThan(0);

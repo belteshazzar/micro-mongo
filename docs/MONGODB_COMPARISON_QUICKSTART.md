@@ -4,7 +4,7 @@ This is a quick reference for the MongoDB comparison test harness. For full docu
 
 ## What is it?
 
-A test harness that runs the same operations on both micro-mongo and real MongoDB, then compares the results to ensure compatibility.
+A test harness that runs the same operations on both babymongo and real MongoDB, then compares the results to ensure compatibility.
 
 ## Quick Start
 
@@ -34,7 +34,7 @@ npm run test:comparison
 ```
 MongoDB Comparison Tests
   ✓ Connected to real MongoDB
-  ✓ Connected to micro-mongo
+  ✓ Connected to babymongo
 
   Basic CRUD Operations
     ✓ should insert and find documents identically (234ms)

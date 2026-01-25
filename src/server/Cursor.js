@@ -128,7 +128,7 @@ export class Cursor {
 	}
 	
 	hint(index) {
-		// Store hint for query planner (informational in micro-mongo)
+		// Store hint for query planner (informational in babymongo)
 		this._hint = index;
 		return this;
 	}
@@ -162,17 +162,17 @@ export class Cursor {
 		return this;
 	}
 	maxTimeMS(ms) {
-		// Set maximum execution time (informational in micro-mongo)
+		// Set maximum execution time (informational in babymongo)
 		this._maxTimeMS = ms;
 		return this;
 	}
 	max(indexBounds) {
-		// Set maximum index bound (informational in micro-mongo)
+		// Set maximum index bound (informational in babymongo)
 		this._maxIndexBounds = indexBounds;
 		return this;
 	}
 	min(indexBounds) {
-		// Set minimum index bound (informational in micro-mongo)
+		// Set minimum index bound (informational in babymongo)
 		this._minIndexBounds = indexBounds;
 		return this;
 	}
@@ -218,7 +218,7 @@ export class Cursor {
 		return this;
 	}
 	returnKey(enabled = true) {
-		// Return only the index key (informational in micro-mongo)
+		// Return only the index key (informational in babymongo)
 		this._returnKey = enabled;
 		return this;
 	}
@@ -269,7 +269,7 @@ export class Cursor {
 	}
 	
 	collation(collationDocument) {
-		// Set collation (no-op for micro-mongo)
+		// Set collation (no-op for babymongo)
 		this._collation = collationDocument;
 		return this;
 	}

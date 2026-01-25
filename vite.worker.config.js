@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
         entry: resolve(__dirname, 'src/server/ServerWorker.js'),
         formats: ['es'],
         // Keep a stable filename; we still minify in prod but don’t change the name
-        fileName: () => 'micro-mongo-server-worker.js'
+        fileName: () => 'babymongo-server-worker.js'
       },
       outDir: 'build',
       sourcemap: true,

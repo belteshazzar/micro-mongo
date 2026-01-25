@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
         entry: resolve(__dirname, 'main.js'),
         name: 'MicroMongoNode',
         formats: ['es'],
-        fileName: () => isProd ? 'micro-mongo-node.min.js' : 'micro-mongo-node.js'
+        fileName: () => isProd ? 'babymongo-node.min.js' : 'babymongo-node.js'
       },
       outDir: 'build',
       emptyOutDir: false,

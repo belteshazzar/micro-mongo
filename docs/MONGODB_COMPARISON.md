@@ -1,10 +1,10 @@
 # MongoDB Comparison Test Harness
 
-This test harness allows you to compare micro-mongo's behavior against a real MongoDB instance to ensure API compatibility and correctness.
+This test harness allows you to compare babymongo's behavior against a real MongoDB instance to ensure API compatibility and correctness.
 
 ## Overview
 
-The comparison test harness executes the same operations against both micro-mongo and real MongoDB, then compares the results to verify that micro-mongo behaves identically to MongoDB. This helps ensure that:
+The comparison test harness executes the same operations against both babymongo and real MongoDB, then compares the results to verify that babymongo behaves identically to MongoDB. This helps ensure that:
 
 1. **API Compatibility**: Operations work the same way in both implementations
 2. **Result Accuracy**: Query results match between implementations
@@ -17,7 +17,7 @@ The test harness consists of two main components:
 ### 1. ComparisonHarness (`test/comparison-harness.js`)
 
 A utility class that:
-- Manages connections to both MongoDB and micro-mongo
+- Manages connections to both MongoDB and babymongo
 - Executes operations on both databases in parallel
 - Normalizes and compares results
 - Reports differences found during testing
@@ -102,7 +102,7 @@ The comparison tests require the official MongoDB Node.js driver:
 # Install the mongodb driver package
 npm install mongodb
 
-# Install micro-mongo dependencies (if not already done)
+# Install babymongo dependencies (if not already done)
 npm install
 ```
 
@@ -149,7 +149,7 @@ When tests pass, you'll see output like:
 ```
 MongoDB Comparison Tests
   ✓ Connected to real MongoDB
-  ✓ Connected to micro-mongo
+  ✓ Connected to babymongo
 
   Basic CRUD Operations
     ✓ should insert and find documents identically (234ms)
@@ -168,7 +168,7 @@ MongoDB Comparison Tests
 
 ### Failed Comparison
 
-If results differ between MongoDB and micro-mongo:
+If results differ between MongoDB and babymongo:
 
 ```
 MongoDB Comparison Tests
@@ -187,7 +187,7 @@ MongoDB Comparison Tests
        MongoDB: [
          { "_id": "...", "age": 35, "name": "Charlie" }
        ]
-       Micro-mongo: [
+       BabyMongo: [
          { "_id": "...", "age": 35, "name": "Charlie" },
          { "_id": "...", "age": 32, "name": "Eve" }
        ]
@@ -470,4 +470,4 @@ To contribute new comparison tests:
 
 ## License
 
-Same as micro-mongo (MIT License)
+Same as babymongo (MIT License)

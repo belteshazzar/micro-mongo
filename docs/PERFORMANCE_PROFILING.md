@@ -1,6 +1,6 @@
 # Performance Profiling Guide
 
-This guide explains how to profile and analyze the performance of micro-mongo operations.
+This guide explains how to profile and analyze the performance of babymongo operations.
 
 ## Table of Contents
 
@@ -13,18 +13,18 @@ This guide explains how to profile and analyze the performance of micro-mongo op
 
 ## Overview
 
-Micro-mongo provides three levels of performance analysis:
+BabyMongo provides three levels of performance analysis:
 
 1. **PerformanceTimer**: Lightweight timing of internal operations (Collection methods, IPC, etc.)
 2. **NodeProfiler**: Comprehensive Node.js profiling with memory tracking and async operation monitoring
-3. **Comparison Harness**: Compare micro-mongo performance against real MongoDB
+3. **Comparison Harness**: Compare babymongo performance against real MongoDB
 
 ## Basic Timing with PerformanceTimer
 
 ### Enabling Global Timing
 
 ```javascript
-import { globalTimer } from 'micro-mongo';
+import { globalTimer } from 'babymongo';
 
 // Enable timing collection
 globalTimer.setEnabled(true);
@@ -44,7 +44,7 @@ const summary = globalTimer.getSummary();
 ### Using Custom Timer Instances
 
 ```javascript
-import { PerformanceTimer } from 'micro-mongo';
+import { PerformanceTimer } from 'babymongo';
 
 const timer = new PerformanceTimer(true); // enabled=true
 
@@ -77,7 +77,7 @@ When enabled, PerformanceTimer automatically tracks:
 ### Basic Usage
 
 ```javascript
-import { NodeProfiler, globalProfiler } from 'micro-mongo/src/NodeProfiler.js';
+import { NodeProfiler, globalProfiler } from 'babymongo/src/NodeProfiler.js';
 
 // Enable the global profiler
 globalProfiler.enable();
@@ -97,7 +97,7 @@ console.log(globalProfiler.formatReport());
 ### Manual Profiling
 
 ```javascript
-import { NodeProfiler } from 'micro-mongo/src/NodeProfiler.js';
+import { NodeProfiler } from 'babymongo/src/NodeProfiler.js';
 
 const profiler = new NodeProfiler({
   enabled: true,
@@ -130,7 +130,7 @@ await profiler.saveReport();
 ### Using the Profile Function Wrapper
 
 ```javascript
-import { profileFunction } from 'micro-mongo/src/NodeProfiler.js';
+import { profileFunction } from 'babymongo/src/NodeProfiler.js';
 
 const results = await profileFunction('myDatabaseOps', async () => {
   await collection.insertMany(documents);
@@ -142,7 +142,7 @@ const results = await profileFunction('myDatabaseOps', async () => {
 
 ## Using the Comparison Harness
 
-The comparison harness compares micro-mongo against real MongoDB and includes detailed timing:
+The comparison harness compares babymongo against real MongoDB and includes detailed timing:
 
 ### Running Comparison Tests
 
@@ -178,7 +178,7 @@ await harness.close();
 
 Per-Operation Performance:
 ----------------------------------------------------------------------
-Operation              MongoDB         Micro-Mongo     Ratio     
+Operation              MongoDB         BabyMongo     Ratio     
 ----------------------------------------------------------------------
 find                   2.145ms         45.328ms        21.13x
 insertMany             5.234ms         156.782ms       29.95x
@@ -187,7 +187,7 @@ aggregate              8.912ms         203.445ms       22.83x
 
 Overall Statistics:
   MongoDB Total Time:     16.29ms
-  Micro-Mongo Total Time: 405.56ms
+  BabyMongo Total Time: 405.56ms
   Operations Compared:    3
   Speed Ratio:            24.89x
 ======================================================================
@@ -349,8 +349,8 @@ await collection.updateOne({ userId: '12345' }, { $set: { status: 'active' } });
 ## Example: Complete Profiling Session
 
 ```javascript
-import { globalTimer, globalProfiler } from 'micro-mongo';
-import { MongoClient } from 'micro-mongo';
+import { globalTimer, globalProfiler } from 'babymongo';
+import { MongoClient } from 'babymongo';
 
 // Enable both timing systems
 globalTimer.setEnabled(true);
@@ -409,7 +409,7 @@ await globalProfiler.saveReport('profile-results.txt');
 For production use, disable profiling to avoid overhead:
 
 ```javascript
-import { globalTimer, globalProfiler } from 'micro-mongo';
+import { globalTimer, globalProfiler } from 'babymongo';
 
 // Disable in production
 if (process.env.NODE_ENV === 'production') {

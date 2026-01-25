@@ -1,10 +1,10 @@
 # Performance Analysis Summary
 
-This document summarizes the performance analysis and instrumentation added to micro-mongo.
+This document summarizes the performance analysis and instrumentation added to babymongo.
 
 ## Overview
 
-This work addresses the performance comparison between micro-mongo and MongoDB by:
+This work addresses the performance comparison between babymongo and MongoDB by:
 1. Analyzing the codebase to identify bottlenecks
 2. Adding timing instrumentation at key points
 3. Providing Node.js profiling tools similar to browser devtools
@@ -13,7 +13,7 @@ This work addresses the performance comparison between micro-mongo and MongoDB b
 
 ### Architecture Analysis
 
-The micro-mongo architecture consists of several key components:
+The babymongo architecture consists of several key components:
 
 ```
 Client Layer (ProxyCollection, ProxyCursor)
@@ -106,7 +106,7 @@ Created `src/PerformanceTimer.js` - a lightweight timer for tracking operation d
 ### Usage
 
 ```javascript
-import { globalTimer } from 'micro-mongo';
+import { globalTimer } from 'babymongo';
 
 // Enable timing
 globalTimer.setEnabled(true);
@@ -160,7 +160,7 @@ Created `src/NodeProfiler.js` - comprehensive profiling similar to browser devto
 **Usage:**
 
 ```javascript
-import { NodeProfiler } from 'micro-mongo/src/NodeProfiler.js';
+import { NodeProfiler } from 'babymongo/src/NodeProfiler.js';
 
 const profiler = new NodeProfiler({ 
   enabled: true,
@@ -234,7 +234,7 @@ roundtrip:    236.494ms total (59.124ms avg)
 ### 1. Basic Timing (PerformanceTimer)
 
 ```javascript
-import { globalTimer } from 'micro-mongo';
+import { globalTimer } from 'babymongo';
 
 globalTimer.setEnabled(true);
 // ... run operations ...
@@ -244,7 +244,7 @@ console.log(globalTimer.formatTimings());
 ### 2. Comprehensive Profiling (NodeProfiler)
 
 ```javascript
-import { globalProfiler } from 'micro-mongo/src/NodeProfiler.js';
+import { globalProfiler } from 'babymongo/src/NodeProfiler.js';
 
 globalProfiler.enable();
 // ... run operations ...
@@ -280,7 +280,7 @@ await harness.close(); // Shows timing report
 
 ## Next Steps
 
-For users wanting to optimize their micro-mongo usage:
+For users wanting to optimize their babymongo usage:
 
 1. **Always profile first** - Use the tools to identify actual bottlenecks
 2. **Add indexes** - Most important optimization for queries
@@ -288,7 +288,7 @@ For users wanting to optimize their micro-mongo usage:
 4. **Optimize pipelines** - Put `$match` stages early in aggregations
 5. **Monitor memory** - Use NodeProfiler to track memory usage
 
-For micro-mongo developers wanting to improve performance:
+For babymongo developers wanting to improve performance:
 
 1. **Optimize OPFS I/O** - Consider batching or caching strategies
 2. **Lazy aggregation** - Implement early termination for $limit
@@ -298,7 +298,7 @@ For micro-mongo developers wanting to improve performance:
 
 ## Conclusion
 
-This work provides comprehensive performance analysis and instrumentation for micro-mongo:
+This work provides comprehensive performance analysis and instrumentation for babymongo:
 
 ✅ **Analysis**: Identified where time is spent (OPFS I/O, full scans, IPC, indexes, aggregation)
 

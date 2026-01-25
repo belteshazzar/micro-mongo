@@ -1,6 +1,6 @@
 # Build Guide
 
-micro-mongo uses [Vite](https://vitejs.dev/) as its build tool for creating optimized production bundles.
+babymongo uses [Vite](https://vitejs.dev/) as its build tool for creating optimized production bundles.
 
 ## Build Scripts
 
@@ -23,13 +23,13 @@ npm run build:clean
 The build process creates the following files in the `build/` directory:
 
 ### ES Module Format
-- `micro-mongo-{version}.js` - Unminified ES module (for development)
-- `micro-mongo-{version}.min.js` - Minified ES module (for production)
+- `babymongo-{version}.js` - Unminified ES module (for development)
+- `babymongo-{version}.min.js` - Minified ES module (for production)
 - `*.js.map` - Source maps for debugging
 
 ### UMD Format  
-- `micro-mongo-{version}.umd.js` - Unminified UMD bundle (browser global/AMD/CommonJS)
-- `micro-mongo-{version}.min.umd.js` - Minified UMD bundle
+- `babymongo-{version}.umd.js` - Unminified UMD bundle (browser global/AMD/CommonJS)
+- `babymongo-{version}.min.umd.js` - Minified UMD bundle
 - `*.umd.js.map` - Source maps for debugging
 
 ## Development
@@ -49,7 +49,7 @@ The development server starts at `http://localhost:5173` and includes an interac
 ### In Browser (ES Modules)
 ```html
 <script type="module">
-  import { MongoClient, ObjectId } from './build/micro-mongo-1.1.3.min.js';
+  import { MongoClient, ObjectId } from './build/babymongo-1.1.3.min.js';
   
   const client = await MongoClient.connect();
   const db = client.db('myapp');
@@ -59,7 +59,7 @@ The development server starts at `http://localhost:5173` and includes an interac
 
 ### In Browser (UMD)
 ```html
-<script src="./build/micro-mongo-1.1.3.min.umd.js"></script>
+<script src="./build/babymongo-1.1.3.min.umd.js"></script>
 <script>
   const { MongoClient, ObjectId } = MicroMongo;
   // ... use the database
@@ -68,7 +68,7 @@ The development server starts at `http://localhost:5173` and includes an interac
 
 ### In Node.js
 ```javascript
-import { MongoClient, ObjectId } from './build/micro-mongo-1.1.3.min.js';
+import { MongoClient, ObjectId } from './build/babymongo-1.1.3.min.js';
 // or use the unminified version for better debugging
 ```
 

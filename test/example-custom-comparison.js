@@ -2,7 +2,7 @@
  * Example: Custom MongoDB Comparison Tests
  * 
  * This file demonstrates how to write your own comparison tests
- * to verify specific behavior between micro-mongo and MongoDB.
+ * to verify specific behavior between babymongo and MongoDB.
  * 
  * Copy this template to create your own test suites.
  */

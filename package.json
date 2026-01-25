@@ -1,5 +1,5 @@
 {
-  "name": "micro-mongo",
+  "name": "babymongo",
   "version": "2.0.0",
   "description": "mongo api interface to localStorage and plain js objects",
   "main": "main.js",
@@ -19,19 +19,19 @@
   "type": "module",
   "exports": {
     ".": {
-      "browser": "./build/micro-mongo-browser.js",
-      "import": "./build/micro-mongo-node.js",
-      "default": "./build/micro-mongo-browser.js"
+      "browser": "./build/babymongo-browser.js",
+      "import": "./build/babymongo-node.js",
+      "default": "./build/babymongo-browser.js"
     },
-    "./browser": "./build/micro-mongo-browser.js",
-    "./browser.min": "./build/micro-mongo-browser.min.js",
-    "./node": "./build/micro-mongo-node.js",
-    "./node.min": "./build/micro-mongo-node.min.js",
-    "./worker": "./build/micro-mongo-server-worker.js"
+    "./browser": "./build/babymongo-browser.js",
+    "./browser.min": "./build/babymongo-browser.min.js",
+    "./node": "./build/babymongo-node.js",
+    "./node.min": "./build/babymongo-node.min.js",
+    "./worker": "./build/babymongo-server-worker.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/belteshazzar/micro-mongo.git"
+    "url": "https://github.com/belteshazzar/babymongo.git"
   },
   "keywords": [
     "mongo",
@@ -46,9 +46,9 @@
   "author": "Daniel Walton <daniel@belteshazzar.com> (http://www.belteshazzar.com)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/belteshazzar/micro-mongo/issues"
+    "url": "https://github.com/belteshazzar/babymongo/issues"
   },
-  "homepage": "https://github.com/belteshazzar/micro-mongo#readme",
+  "homepage": "https://github.com/belteshazzar/babymongo#readme",
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "@rollup/plugin-commonjs": "^23.0.2",

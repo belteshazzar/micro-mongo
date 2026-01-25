@@ -1,4 +1,4 @@
-# Micro-Mongo AI Guide
+# BabyMongo AI Guide
 - Scope: MongoDB-like in-memory DB with optional browser persistence and Node/browser compatibility; entry exports live in [main.js](main.js).
 - ESM only (`type: module`); imports use extensioned relative paths; ObjectId comes from `bjson`.
 - Client/DB lifecycle: [src/MongoClient.js](src/MongoClient.js) emits `open`/`close`, parses default DB from URI, and returns [src/DB.js](src/DB.js) instances.

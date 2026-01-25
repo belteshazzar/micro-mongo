@@ -1,8 +1,8 @@
 /**
- * Comparison harness for testing micro-mongo against real MongoDB.
+ * Comparison harness for testing babymongo against real MongoDB.
  * 
  * This module provides utilities to execute the same commands against both
- * micro-mongo and real MongoDB, then compare the results to ensure compatibility.
+ * babymongo and real MongoDB, then compare the results to ensure compatibility.
  */
 
 import { strict as assert } from 'assert';
@@ -69,7 +69,7 @@ function deepCompare(actual, expected, path = 'root') {
 
 /**
  * Normalize results for comparison.
- * Handles differences in result format between micro-mongo and MongoDB.
+ * Handles differences in result format between babymongo and MongoDB.
  */
 function normalizeResult(result, type) {
 	if (result === null || result === undefined) {
@@ -121,7 +121,7 @@ export class ComparisonHarness {
 			mongodb: [],
 			micromongo: []
 		};
-		// Enable detailed performance timing for micro-mongo
+		// Enable detailed performance timing for babymongo
 		this.enableDetailedTiming = options.enableDetailedTiming !== false; // Default to true
 		if (this.enableDetailedTiming) {
 			globalTimer.setEnabled(true);
@@ -129,7 +129,7 @@ export class ComparisonHarness {
 	}
 
 	/**
-	 * Connect to both MongoDB and micro-mongo
+	 * Connect to both MongoDB and babymongo
 	 * @param {string} mongoUrl - MongoDB connection URL (e.g., 'mongodb://localhost:27017')
 	 * @param {string} dbName - Database name to use
 	 */
@@ -152,7 +152,7 @@ export class ComparisonHarness {
 			);
 		}
 
-		// Connect to micro-mongo
+		// Connect to babymongo
 		try {
 			this.bridge = await WorkerBridge.create();
 			this.microMongoClient = new MicroMongoClient(`mongodb://localhost/${dbName}`, {
@@ -161,7 +161,7 @@ export class ComparisonHarness {
 			await this.microMongoClient.connect();
 			this.microMongoDB = this.microMongoClient.db(dbName);
 		} catch (error) {
-			// Clean up MongoDB connection if micro-mongo fails
+			// Clean up MongoDB connection if babymongo fails
 			if (this.mongoClient) {
 				await this.mongoClient.close();
 			}
@@ -179,7 +179,7 @@ export class ComparisonHarness {
 			try {
 				await this.microMongoClient.close();
 			} catch (err) {
-				errors.push(`Micro-mongo close error: ${err.message}`);
+				errors.push(`BabyMongo close error: ${err.message}`);
 			}
 		}
 		
@@ -244,7 +244,7 @@ export class ComparisonHarness {
 		// Display per-operation statistics
 		console.log('\nPer-Operation Performance:');
 		console.log('-'.repeat(70));
-		console.log('Operation              MongoDB         Micro-Mongo     Ratio     ');
+		console.log('Operation              MongoDB         BabyMongo     Ratio     ');
 		console.log('-'.repeat(70));
 
 		for (const [operation, stats] of Object.entries(operationStats)) {
@@ -267,7 +267,7 @@ export class ComparisonHarness {
 		console.log('-'.repeat(70));
 		console.log('\nOverall Statistics:');
 		console.log(`  MongoDB Total Time:     ${mongodbTotal.toFixed(2)}ms`);
-		console.log(`  Micro-Mongo Total Time: ${micromongoTotal.toFixed(2)}ms`);
+		console.log(`  BabyMongo Total Time: ${micromongoTotal.toFixed(2)}ms`);
 		console.log(`  Operations Compared:    ${this.timings.mongodb.length}`);
 		console.log(`  Speed Ratio:            ${(micromongoTotal / mongodbTotal).toFixed(2)}x`);
 		console.log('='.repeat(70) + '\n');
@@ -324,7 +324,7 @@ export class ComparisonHarness {
 			mongoError = error;
 		}
 
-		// Execute on micro-mongo
+		// Execute on babymongo
 		try {
 			const startTime = performance.now();
 			const result = await microMongoCollection[operation](...args);
@@ -349,16 +349,16 @@ export class ComparisonHarness {
 
 		if (mongoError && !microMongoError) {
 			throw new Error(
-				`MongoDB errored but micro-mongo succeeded.\n` +
+				`MongoDB errored but babymongo succeeded.\n` +
 				`MongoDB error: ${mongoError.message}\n` +
-				`Micro-mongo result: ${JSON.stringify(microMongoResult)}`
+				`BabyMongo result: ${JSON.stringify(microMongoResult)}`
 			);
 		}
 
 		if (!mongoError && microMongoError) {
 			throw new Error(
-				`Micro-mongo errored but MongoDB succeeded.\n` +
-				`Micro-mongo error: ${microMongoError.message}\n` +
+				`BabyMongo errored but MongoDB succeeded.\n` +
+				`BabyMongo error: ${microMongoError.message}\n` +
 				`MongoDB result: ${JSON.stringify(mongoResult)}`
 			);
 		}
@@ -440,7 +440,7 @@ export function createComparisonSuite(suiteName, testFn) {
 				harness.getDifferences().forEach(d => {
 					console.error(`\n${d.collection}.${d.operation}:`);
 					console.error(`  MongoDB: ${JSON.stringify(d.mongoResult, null, 2)}`);
-					console.error(`  Micro-mongo: ${JSON.stringify(d.microMongoResult, null, 2)}`);
+					console.error(`  BabyMongo: ${JSON.stringify(d.microMongoResult, null, 2)}`);
 					console.error(`  Error: ${d.error}`);
 				});
 			}
