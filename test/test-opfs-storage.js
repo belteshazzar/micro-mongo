@@ -7,6 +7,17 @@ import { DB } from '../src/server/DB.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Clean up main .opfs folder at the start of all OPFS tests (once before any tests run)
+const projectRoot = path.resolve(__dirname, '..');
+const opfsRoot = path.join(projectRoot, '.opfs');
+before(async function() {
+	try {
+		await fs.rm(opfsRoot, { recursive: true, force: true });
+	} catch (e) {
+		// Ignore if doesn't exist
+	}
+});
+
 describe("OPFS Storage Location", function() {
 	let opfsNavigator;
 	let projectDir;
@@ -15,22 +26,13 @@ describe("OPFS Storage Location", function() {
 	before(async function() {
 		// Get project root directory
 		projectDir = path.resolve(__dirname, '..');
-		testOpfsDir = path.join(projectDir, '.opfs-test');
+		testOpfsDir = path.join(projectDir, '.opfs-navigator-test');
 		
 		// Clean up test directory
 		try {
 			await fs.rm(testOpfsDir, { recursive: true, force: true });
 		} catch (e) {
 			// Ignore if doesn't exist
-		}
-	});
-
-	after(async function() {
-		// Clean up test directory
-		try {
-			await fs.rm(testOpfsDir, { recursive: true, force: true });
-		} catch (e) {
-			// Ignore
 		}
 	});
 
@@ -74,14 +76,7 @@ describe("OPFS Storage Location", function() {
 	});
 
 	it('should use project .opfs when navigator.storage is properly configured', async function() {
-		const opfsDir = path.join(projectDir, '.opfs');
-		
-		// Clean up
-		try {
-			await fs.rm(opfsDir, { recursive: true, force: true });
-		} catch (e) {
-			// Ignore
-		}
+		const opfsDir = path.join(projectDir, '.opfs-navigator-test');
 		
 		// Import and configure node-opfs
 		const { StorageManager } = await import('node-opfs');
@@ -103,7 +98,7 @@ describe("OPFS Storage Location", function() {
 		await writable.write('binjson data');
 		await writable.close();
 		
-		// Verify file is in project .opfs directory
+		// Verify file is in test .opfs directory
 		const filePath = path.join(opfsDir, 'binjson-test.bj');
 		const exists = await fs.access(filePath).then(() => true).catch(() => false);
 		expect(exists).to.be.true;
@@ -111,7 +106,7 @@ describe("OPFS Storage Location", function() {
 		const content = await fs.readFile(filePath, 'utf-8');
 		expect(content).to.equal('binjson data');
 		
-		console.log(`\n  ✓ File created in project .opfs: ${filePath}`);
+		console.log(`\n  ✓ File created in test .opfs directory: ${filePath}`);
 	});
 });
 
@@ -139,9 +134,7 @@ describe("OPFS BPlusTree compaction", function() {
 	});
 
 	after(async function() {
-		if (opfsDir) {
-			await fs.rm(opfsDir, { recursive: true, force: true });
-		}
+		// Don't clean up .opfs-compaction - it will be cleaned on next test run startup
 	});
 
 	it('keeps old versions available while new clients use compacted data', async function() {
