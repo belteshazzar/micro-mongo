@@ -1,0 +1,11 @@
+.github
+.opfs*
+.vscode
+docs
+index.html
+main.js
+scripts
+src
+test-results
+test
+vite*
